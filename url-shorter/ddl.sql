@@ -4,7 +4,8 @@ CREATE TABLE `url` (
   `long_url` varchar(2048) NOT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  INDEX `index_short_url` (`short_url`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8
 
 -- CREATE TABLE `g_account` (
