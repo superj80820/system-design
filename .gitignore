@@ -20,5 +20,5 @@
 # Go workspace file
 go.work
 
-url-shorter/data
-url-shorter/cache
+instrumenting/db-data
+instrumenting/cache-data

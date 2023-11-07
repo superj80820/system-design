@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	httpPKG "net/http"
+
+	"context"
+	"net/http"
 )
 
 type ErrorCode struct {
-	HTTPCode int    `json:"http_code"`
-	Code     int    `json:"code"`
-	Message  string `json:"message"`
+	HTTPCode  int    `json:"http_code"`
+	Code      int    `json:"code"`
+	Message   string `json:"message"`
+	CallStack string `json:"-"`
 }
 
 func (e ErrorCode) Error() string {
@@ -20,51 +24,67 @@ func (e ErrorCode) Error() string {
 	return string(errorStr)
 }
 
-var errorCodes = map[int]map[int]*ErrorCode{
+const (
+	Default   = 0
+	RateLimit = 1
+)
+
+var errorCodes = map[int]map[int]string{
 	httpPKG.StatusTooManyRequests: {
-		1: {
-			HTTPCode: httpPKG.StatusTooManyRequests,
-			Code:     1,
-			Message:  "rate limit error. last requests: %d. expiry: %d",
-		},
+		RateLimit: "rate limit error. expiry: %d",
 	},
 	httpPKG.StatusNotFound: {
-		0: {
-			HTTPCode: httpPKG.StatusNotFound,
-			Code:     0,
-			Message:  "not found",
-		},
+		Default: "not found",
 	},
 	httpPKG.StatusInternalServerError: {
-		0: {
-			HTTPCode: httpPKG.StatusInternalServerError,
-			Code:     0,
-			Message:  "internal error",
-		},
+		Default: "internal error",
 	},
 }
 
 func CreateErrorHTTPCodeWithCode(httpCode, code int, args ...any) *ErrorCode {
+	resHttpCode := httpPKG.StatusInternalServerError
+	resCode := Default
+	resMessage := errorCodes[httpPKG.StatusInternalServerError][Default]
 	if httpErrorCodes, ok := errorCodes[httpCode]; ok {
 		if errorCodes, ok := httpErrorCodes[code]; ok {
-			return &ErrorCode{
-				HTTPCode: errorCodes.HTTPCode,
-				Code:     errorCodes.Code,
-				Message:  fmt.Sprintf(errorCodes.Message, args...),
-			}
+			resHttpCode = httpCode
+			resCode = code
+			resMessage = fmt.Sprintf(errorCodes, args...)
 		}
 	}
-	return errorCodes[httpPKG.StatusInternalServerError][1]
+	return &ErrorCode{
+		HTTPCode: resHttpCode,
+		Code:     resCode,
+		Message:  resMessage,
+	}
 }
 
 func CreateErrorHTTPCode(httpCode int) *ErrorCode {
-	return CreateErrorHTTPCodeWithCode(httpCode, 0)
+	return CreateErrorHTTPCodeWithCode(httpCode, Default)
 }
 
 func DecodeErrorCode(err error) *ErrorCode {
-	var errorCode ErrorCode
-	if err := json.Unmarshal([]byte(err.Error()), &errorCode); err != nil {
-		return CreateErrorHTTPCode(httpPKG.StatusInternalServerError)
+	errorCode := new(ErrorCode)
+	if err := json.Unmarshal([]byte(err.Error()), errorCode); err != nil {
+		errorCode = CreateErrorHTTPCode(httpPKG.StatusInternalServerError)
 	}
-	return &errorCode
+
+	errorCode.CallStack = fmt.Sprintf("%+v", err)
+
+	return errorCode
+}
+
+func EncodeErrorResponse() func(ctx context.Context, err error, w http.ResponseWriter) {
+	return func(ctx context.Context, err error, w http.ResponseWriter) {
+		if err == nil {
+			panic("encodeError with nil error")
+		}
+
+		ctx = CustomAfterCtx(ctx, w)
+
+		errorCode := DecodeErrorCode(err)
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(errorCode.HTTPCode)
+		json.NewEncoder(w).Encode(errorCode)
+	}
 }

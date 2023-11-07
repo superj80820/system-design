@@ -1,21 +1,35 @@
 package logger
 
 import (
+	"context"
 	"os"
 
-	log "github.com/go-kit/kit/log/logrus"
-	logKit "github.com/go-kit/log"
-	"github.com/sirupsen/logrus"
+	"github.com/pkg/errors"
+	httpKit "github.com/superj80820/system-design/kit/http"
+	"go.uber.org/zap"
 )
 
-type Logger logKit.Logger
+type Logger struct {
+	*zap.Logger
+}
 
-func NewLogger(logger logrus.FieldLogger, options ...log.Option) logKit.Logger {
-	if logger == nil {
-		logrusLogger := logrus.New()
-		logrusLogger.Out = os.Stderr
-		logrusLogger.Formatter = &logrus.JSONFormatter{}
-		return log.NewLogger(logrusLogger, options...)
+type Field = zap.Field
+
+func NewLogger(path string) (*Logger, error) {
+	os.OpenFile(path, os.O_RDONLY|os.O_CREATE, 0666)
+	c := zap.NewProductionConfig()
+	c.OutputPaths = []string{"stdout", path}
+	logger, err := c.Build()
+	if err != nil {
+		return nil, errors.Wrap(err, "create logger failed")
 	}
-	return log.NewLogger(logger, options...)
+	return &Logger{logger}, err
+}
+
+func (l *Logger) WithMetadata(ctx context.Context) *Logger {
+	return &Logger{l.Logger.With(zap.String("trace-id", httpKit.GetTraceID(ctx)))}
+}
+
+func (l *Logger) With(fields ...Field) *Logger {
+	return &Logger{l.Logger.With(fields...)}
 }

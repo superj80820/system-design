@@ -19,10 +19,10 @@ import (
 type urlService struct {
 	db     *mysqlKit.DB
 	cache  *redisKit.Cache
-	logger loggerKit.Logger
+	logger *loggerKit.Logger
 }
 
-func CreateURLService(db *mysqlKit.DB, cache *redisKit.Cache, logger loggerKit.Logger) (*urlService, error) {
+func CreateURLService(db *mysqlKit.DB, cache *redisKit.Cache, logger *loggerKit.Logger) (*urlService, error) {
 	if db == nil || cache == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}

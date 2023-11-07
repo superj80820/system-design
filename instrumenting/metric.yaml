@@ -1,0 +1,24 @@
+version: "3.1"
+
+services:
+  prometheus:
+    image: prom/prometheus # TODO: version
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    ports:
+      - 9090:9090
+    restart: unless-stopped
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - ./prom-data:/prometheus # TODO: volumes prom_data
+
+  grafana:
+    image: grafana/grafana # TODO: version
+    ports:
+      - 3000:3000
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=grafana
+    volumes:
+      - ./grafana:/etc/grafana/provisioning/datasources

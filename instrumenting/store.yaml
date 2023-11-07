@@ -1,4 +1,4 @@
-version: '3.1'
+version: "3.1"
 
 services:
   db:
@@ -6,27 +6,27 @@ services:
     # NOTE: use of "mysql_native_password" is not recommended: https://dev.mysql.com/doc/refman/8.0/en/upgrading-from-previous-series.html#upgrade-caching-sha2-password
     # (this is just an example, not intended to be a production configuration)
     command: --default-authentication-plugin=mysql_native_password
-    restart: always
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: example
       MYSQL_DATABASE: db
     volumes:
       - ./ddl.sql:/docker-entrypoint-initdb.d/ddl.sql
-      - ./data:/var/lib/mysql
+      - ./db-data:/var/lib/mysql
     ports:
       - 3306:3306
 
   adminer:
     image: adminer:4.8.1-standalone
-    restart: always
+    restart: unless-stopped
     ports:
       - 8080:8080
 
   cache:
-    restart: always
+    restart: unless-stopped
     image: redis/redis-stack:7.2.0-v6
     ports:
       - 6379:6379
       - 8001:8001
     volumes:
-      - ./cache:/data
+      - ./cache-data:/data

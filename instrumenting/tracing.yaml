@@ -1,0 +1,12 @@
+version: "3.1"
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest # TODO: version
+    restart: unless-stopped
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+      - "4317:4317"

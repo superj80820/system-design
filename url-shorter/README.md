@@ -11,3 +11,4 @@
 8. unit test
 9. pool
 10. TODO: bloom filter build script
+11. graceful shutdown
