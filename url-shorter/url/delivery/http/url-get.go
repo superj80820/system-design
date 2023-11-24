@@ -4,9 +4,11 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/pkg/errors"
+
 	"github.com/go-kit/kit/endpoint"
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
+	"github.com/superj80820/system-design/kit/code"
 	"github.com/superj80820/system-design/url-shorter/domain"
 )
 
@@ -32,7 +34,7 @@ func DecodeURLGetRequests(ctx context.Context, r *http.Request) (interface{}, er
 	vars := mux.Vars(r)
 	shortURL, ok := vars["shortURL"]
 	if !ok {
-		return nil, errors.New("get shortURL failed")
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get shortURL failed"))
 	}
 	return urlGetRequest{ShortURL: shortURL}, nil
 }

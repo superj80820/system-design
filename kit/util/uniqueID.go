@@ -12,7 +12,7 @@ type UniqueIDGenerate struct {
 
 var singletonUniqueIDGenerate *UniqueIDGenerate
 
-func GetUniqueIDGenerate() (*UniqueIDGenerate, error) {
+func GetUniqueIDGenerate() (*UniqueIDGenerate, error) { // TODO: don't use lazy, use DI?
 	if singletonUniqueIDGenerate != nil {
 		return singletonUniqueIDGenerate, nil // TODO: york
 	}

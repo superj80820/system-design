@@ -72,7 +72,7 @@ func (cache *Cache) MaybeExistsBF(ctx context.Context, key string, values ...int
 	return maybeExists, nil
 }
 
-func CreateSingletonCache(address, password string, dbSelect int) (*Cache, error) {
+func CreateCache(address, password string, dbSelect int) (*Cache, error) {
 	redisClient := goRedis.NewClient(&goRedis.Options{
 		Addr:     address,
 		Password: password,

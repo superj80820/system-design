@@ -10,6 +10,10 @@ func String(key string, val string) Field {
 	return zap.String(key, val)
 }
 
+func Error(err error) Field {
+	return zap.Error(err)
+}
+
 func Int(key string, val int) Field {
 	return zap.Int(key, val)
 }

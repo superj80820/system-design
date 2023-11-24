@@ -18,6 +18,7 @@ import (
 	utilKit "github.com/superj80820/system-design/kit/util"
 	deliveryHTTP "github.com/superj80820/system-design/url-shorter/url/delivery/http"
 	"github.com/superj80820/system-design/url-shorter/url/usecase"
+	"go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -26,23 +27,39 @@ const (
 )
 
 func main() {
-	logger, err := loggerKit.NewLogger("./go.log") // TODO: 實作檔案大小
+	var (
+		enableTracer = utilKit.GetEnvBool("ENABLE_TRACER", false)
+		enableMetric = utilKit.GetEnvBool("ENABLE_METRIC", false)
+		env          = utilKit.GetEnvString("ENV", "development")
+	)
+
+	logLevel := loggerKit.InfoLevel
+	if env == "development" {
+		logLevel = loggerKit.DebugLevel
+	}
+	logger, err := loggerKit.NewLogger("./go.log", logLevel) // TODO: 實作檔案大小
 	if err != nil {
 		panic(err)
 	}
-	singletonDB, err := mysqlKit.CreateSingletonDB("root:example@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local")
+	singletonDB, err := mysqlKit.CreateDB("root:example@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local")
 	if err != nil {
 		panic(err)
 	}
-	singletonCache, err := redisKit.CreateSingletonCache("localhost:6379", "", 0)
+	singletonCache, err := redisKit.CreateCache("localhost:6379", "", 0)
 	if err != nil {
 		panic(err)
 	}
 
 	rateLimit := utilKit.CreateCacheRateLimit(singletonCache, 3, 10)
-	tracer, err := traceKit.CreateTracer(context.Background(), SERVICE_NAME)
-	if err != nil {
-		panic(err)
+
+	var tracer trace.Tracer
+	if enableTracer {
+		tracer, err = traceKit.CreateTracer(context.Background(), SERVICE_NAME)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		tracer = traceKit.CreateNoOpTracer()
 	}
 
 	urlService, err := usecase.CreateURLService(singletonDB, singletonCache, logger)
@@ -60,11 +77,11 @@ func main() {
 	options := []httptransport.ServerOption{
 		httptransport.ServerBefore(httpKit.CustomBeforeCtx(tracer)),
 		httptransport.ServerAfter(httpKit.CustomAfterCtx),
-		httptransport.ServerErrorEncoder(httpKit.EncodeErrorResponse()),
+		httptransport.ServerErrorEncoder(httpKit.EncodeHTTPErrorResponse()),
 	}
 	urlShortenHandler := httptransport.NewServer(
 		customMiddleware(deliveryHTTP.MakeURLShortenEndpoint(urlService)),
-		deliveryHTTP.DecodeURLShortenRequests,
+		deliveryHTTP.DecodeURLShortenRequest,
 		deliveryHTTP.EncodeURLShortenResponse,
 		options...,
 	)
@@ -76,7 +93,9 @@ func main() {
 	)
 	r.Methods("POST").Path("/api/v1/data/shorten").Handler(urlShortenHandler)
 	r.Methods("GET").Path("/api/v1/shortUrl/{shortURL}").Handler(urlGetHandler)
-	r.Handle("/metrics", promhttp.Handler())
+	if enableMetric {
+		r.Handle("/metrics", promhttp.Handler())
+	}
 
 	log.Fatal(http.ListenAndServe(":9091", r))
 }

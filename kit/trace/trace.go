@@ -15,6 +15,11 @@ import (
 func CreateTracer(ctx context.Context, serviceName string) (trace.Tracer, error) {
 	return CreateTracerWithVersion(ctx, serviceName, "0.0.0")
 }
+
+func CreateNoOpTracer() trace.Tracer {
+	return trace.NewNoopTracerProvider().Tracer("no-op")
+}
+
 func CreateTracerWithVersion(ctx context.Context, serviceName, serviceVersion string) (trace.Tracer, error) {
 	client := otlptracegrpc.NewClient() // TODO: why grpc not http?
 	exporter, err := otlptrace.New(ctx, client)

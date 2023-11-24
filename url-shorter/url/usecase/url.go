@@ -7,7 +7,7 @@ import (
 
 	"github.com/jxskiss/base62"
 	"github.com/pkg/errors"
-	httpKit "github.com/superj80820/system-design/kit/http"
+	"github.com/superj80820/system-design/kit/code"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	mysqlKit "github.com/superj80820/system-design/kit/mysql"
 	redisKit "github.com/superj80820/system-design/kit/redis"
@@ -79,7 +79,7 @@ func (u urlService) Get(ctx context.Context, shortURL string) (string, error) {
 		return "", errors.Wrap(err, "check exists failed")
 	}
 	if !maybeExists {
-		return "", httpKit.CreateErrorHTTPCode(http.StatusNotFound)
+		return "", code.CreateErrorCode(http.StatusNotFound)
 	}
 
 	val, exist, err := u.cache.Get(ctx, shortURL)

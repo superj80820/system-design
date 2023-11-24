@@ -2,17 +2,13 @@ package http
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"strings"
 
+	"github.com/superj80820/system-design/kit/code"
 	"go.opentelemetry.io/otel/trace"
 )
-
-// const ( // TODO check correct
-// 	_CTX_IP_KEY   = "ip"
-// 	_CTX_HOST     = "host"
-// 	_CTX_URL_PATH = "url_path"
-// 	_CTX_TRACE_ID = "trace_id"
-// )
 
 type ctxKeyType int
 
@@ -21,6 +17,8 @@ const ( // TODO check correct
 	_CTX_HOST
 	_CTX_URL_PATH
 	_CTX_TRACE_ID
+	_CTX_HTTP_CODE
+	_CTX_TOKEN
 )
 
 func ReadUserIP(r *http.Request) string {
@@ -31,11 +29,12 @@ func ReadUserIP(r *http.Request) string {
 	if IPAddress == "" {
 		IPAddress = r.RemoteAddr
 	}
-	return IPAddress
+	return strings.Split(IPAddress, ":")[0]
 }
 
 func CustomBeforeCtx(tracer trace.Tracer) func(ctx context.Context, r *http.Request) context.Context {
 	return func(ctx context.Context, r *http.Request) context.Context {
+		ctx = context.WithValue(ctx, _CTX_TOKEN, r.Header.Get("Authentication"))
 		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)
 		ctx = context.WithValue(ctx, _CTX_URL_PATH, r.URL.Path)
 		ctx = context.WithValue(ctx, _CTX_IP_KEY, ReadUserIP(r)) // TODO: check correct
@@ -64,4 +63,24 @@ func GetIP(ctx context.Context) string {
 
 func GetURL(ctx context.Context) string {
 	return ctx.Value(_CTX_URL_PATH).(string)
+}
+
+func GetToken(ctx context.Context) string {
+	return ctx.Value(_CTX_TOKEN).(string)
+}
+
+func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.ResponseWriter) {
+	return func(ctx context.Context, err error, w http.ResponseWriter) {
+		if err == nil {
+			panic("encodeError with nil error")
+		}
+
+		ctx = CustomAfterCtx(ctx, w)
+
+		errorCode := code.CreateHTTPError(code.ParseErrorCode(err))
+
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(errorCode.HTTPCode)
+		json.NewEncoder(w).Encode(errorCode)
+	}
 }

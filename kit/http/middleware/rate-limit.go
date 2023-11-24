@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-kit/kit/endpoint"
 	"github.com/pkg/errors"
+	"github.com/superj80820/system-design/kit/code"
 	httpKit "github.com/superj80820/system-design/kit/http"
 )
 
@@ -18,7 +19,7 @@ func CreateRateLimitMiddleware(passFunc func(ctx context.Context, key string) (p
 				return nil, errors.Wrap(err, fmt.Sprint("get rate limit failed"))
 			}
 			if !pass {
-				return nil, httpKit.CreateErrorHTTPCodeWithCode(http.StatusTooManyRequests, 1, expiry)
+				return nil, code.CreateErrorCode(http.StatusTooManyRequests).AddCode(code.RateLimit, expiry)
 			}
 			return e(ctx, request)
 		}

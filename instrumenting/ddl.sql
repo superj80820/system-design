@@ -6,7 +6,33 @@ CREATE TABLE `url` (
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   INDEX `index_short_url` (`short_url`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `account` (
+  `id` bigint(20) NOT NULL,
+  `email` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_email` (`email`),
+  INDEX `index_email` (`email`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `account_token` (
+  `id` bigint(20) NOT NULL,
+  `token` varchar(255) NOT NULL,
+  `status` tinyint(1) NOT NULL DEFAULT '0',
+  `type` int(11) NOT NULL DEFAULT '0',
+  `user_id` bigint(20) NOT NULL,
+  `expire_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `index_user_id` (`user_id`),
+  UNIQUE KEY `unique_token` (`token`),
+  FOREIGN KEY (`user_id`) REFERENCES account(`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
 
 -- CREATE TABLE `g_account` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
@@ -19,7 +45,6 @@ CREATE TABLE `url` (
 --   PRIMARY KEY (`id`),
 --   UNIQUE KEY `idx_uid_currency` (`user_id`,`currency`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=174 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_bill` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -35,7 +60,6 @@ CREATE TABLE `url` (
 --   KEY `idx_gsoci` (`user_id`,`currency`,`settled`,`id`),
 --   KEY `idx_s` (`settled`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=12437574 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_config` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -44,7 +68,6 @@ CREATE TABLE `url` (
 --   `value` varchar(255) NOT NULL,
 --   PRIMARY KEY (`id`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_fill` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -69,7 +92,6 @@ CREATE TABLE `url` (
 --   KEY `idx_gsoi` (`order_id`,`settled`,`id`),
 --   KEY `idx_si` (`settled`,`id`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=6271192 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_order` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -92,7 +114,6 @@ CREATE TABLE `url` (
 --   KEY `idx_uspsi` (`user_id`,`product_id`,`status`,`side`,`id`),
 --   KEY `idx_uid_coid` (`user_id`,`client_oid`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=5820825 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_product` (
 --   `id` varchar(255) NOT NULL,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -108,7 +129,6 @@ CREATE TABLE `url` (
 --   `quote_max_size` decimal(32,16) NOT NULL,
 --   PRIMARY KEY (`id`)
 -- ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_tick` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -126,7 +146,6 @@ CREATE TABLE `url` (
 --   PRIMARY KEY (`id`),
 --   UNIQUE KEY `p_g_t` (`product_id`,`granularity`,`time`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=2547722 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_trade` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -142,7 +161,6 @@ CREATE TABLE `url` (
 --   `log_seq` bigint(20) NOT NULL DEFAULT '0',
 --   PRIMARY KEY (`id`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=231612 DEFAULT CHARSET=utf8;
-
 -- CREATE TABLE `g_user` (
 --   `id` bigint(20) NOT NULL AUTO_INCREMENT,
 --   `created_at` timestamp NULL DEFAULT NULL,
@@ -153,8 +171,6 @@ CREATE TABLE `url` (
 --   PRIMARY KEY (`id`),
 --   UNIQUE KEY `idx_email` (`email`)
 -- ) ENGINE=InnoDB AUTO_INCREMENT=41 DEFAULT CHARSET=utf8;
-
-
 -- insert into `g_product`(`id`,`created_at`,`updated_at`,`base_currency`,`quote_currency`,`base_min_size`,`base_max_size`,`base_scale`,`quote_scale`,`quote_increment`,`quote_min_size`,`quote_max_size`) values
 -- ('BCH-USDT',null,null,'BCH','USDT',0.0000100000000000,10000.0000000000000000,4,2,0.01,0E-16,0E-16),
 -- ('BTC-USDT',null,null,'BTC','USDT',0.0000100000000000,10000000.0000000000000000,6,2,0.01,0E-16,0E-16),
