@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/gorilla/websocket"
+	"github.com/pkg/errors"
 )
 
 // TODO: gRPC convert
@@ -149,7 +150,8 @@ func CreateErrorCode(code int, options ...errorCodeOption) *errorCode {
 }
 
 func ParseErrorCode(err error) *errorCode {
-	switch errorCode := err.(type) {
+	causeErr := errors.Cause(err)
+	switch errorCode := causeErr.(type) {
 	case *errorCode:
 		return errorCode
 	}

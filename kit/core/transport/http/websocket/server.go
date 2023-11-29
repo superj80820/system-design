@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync"
 
 	httptransport "github.com/go-kit/kit/transport/http"
 	"github.com/gorilla/websocket"
+	"github.com/oklog/run"
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/kit/core/endpoint"
 )
@@ -111,29 +111,20 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inCh, outCh, doneCh, errCh := make(chan *IN), make(chan *OUT), make(chan bool), make(chan error)
-	goWithErrorHandle := func(fn func() error) {
-		go func() {
-			select {
-			case <-doneCh:
-			case errCh <- fn():
-			}
-		}()
-	}
+	inCh, outCh, doneCh := make(chan *IN), make(chan *OUT), make(chan bool)
+	stream := endpoint.CreateServerStream[IN, OUT](inCh, outCh, doneCh)
 
-	stream := endpoint.Stream[IN, OUT]{
-		InCh:   inCh,
-		OutCh:  outCh,
-		DoneCh: doneCh,
-		ErrCh:  errCh,
+	ctx, cancel := context.WithCancel(ctx)
+	var g run.Group
+	interruptFunc := func(err error) {
+		cancel()
+		// 	s.errorHandler.Handle(ctx, err) // TODO
+		s.errorEncoder(ctx, err, ws)
+		ws.Close()
 	}
-
-	wg := new(sync.WaitGroup)
-	wg.Add(3)
-	goWithErrorHandle(func() error {
-		defer wg.Done()
+	g.Add(func() error {
 		defer close(inCh)
-
+		defer fmt.Println("close3")
 		for {
 			mt, msg, err := ws.ReadMessage()
 			if err != nil {
@@ -146,19 +137,20 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			select {
-			case <-doneCh:
+			case <-ctx.Done():
 				return nil
 			case inCh <- in:
 			}
 		}
+	}, func(err error) {
+		interruptFunc(err)
 	})
 
-	goWithErrorHandle(func() error {
-		defer wg.Done()
-
+	g.Add(func() error {
+		defer fmt.Println("close2")
 		for {
 			select {
-			case <-doneCh:
+			case <-ctx.Done():
 				return nil
 			case out, ok := <-outCh:
 				if !ok {
@@ -173,45 +165,25 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}, func(err error) {
+		interruptFunc(err)
 	})
 
-	goWithErrorHandle(func() error {
-		defer wg.Done()
-
+	g.Add(func() error {
+		defer fmt.Println("close1")
 		if err := s.e(ctx, stream); err != nil {
+			fmt.Println("error", err)
 			return err
 		}
-
 		return nil
+	}, func(err error) {
+		interruptFunc(err)
 	})
 
-	go func() {
-		err := <-errCh
-		// 	s.errorHandler.Handle(ctx, err) // TODO
-		s.errorEncoder(ctx, err, ws)
-		close(doneCh)
-		close(outCh)
-		ws.Close()
-		return
-	}()
+	g.Run()
 
-	wg.Wait()
+	close(doneCh)
+	close(outCh)
 
 	fmt.Println("close all")
-
-	// go func() { // close after doneCh case
-	// 	<-ctx.Done()
-	// 	close(doneCh)
-	// 	close(outCh)
-	// 	ws.Close()
-	// 	return nil
-	// }()
-
-	// if err := eg.Wait(); err != nil {
-	// 	once.Do(func() {
-	// 		// 	s.errorHandler.Handle(ctx, err) // TODO
-	// 		s.errorEncoder(ctx, err, ws)
-	// 	})
-	// 	return
-	// }
 }

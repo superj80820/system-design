@@ -2,70 +2,48 @@ package endpoint
 
 import (
 	"context"
+	"errors"
 	"net/http"
 )
 
 type MessageType int
 
-type Stream[IN, OUT any] struct {
-	InCh   chan *IN
-	OutCh  chan *OUT
-	DoneCh chan bool
-	ErrCh  chan error
+type Stream[IN, OUT any] interface {
+	Send(out *OUT)
+	Recv() (*IN, error)
 }
 
-func (s *Stream[IN, OUT]) SendToOut(out *OUT) {
-	select {
-	case <-s.DoneCh:
-	case s.OutCh <- out:
+func CreateServerStream[IN, OUT any](inCh chan *IN, outCh chan *OUT, doneCh chan bool) *ServerStream[IN, OUT] {
+	return &ServerStream[IN, OUT]{
+		inCh:   inCh,
+		outCh:  outCh,
+		doneCh: doneCh,
 	}
 }
 
-func (s *Stream[IN, OUT]) RecvFromIn() (*IN, bool) {
+type ServerStream[IN, OUT any] struct { // TODO: think name
+	inCh   chan *IN
+	outCh  chan *OUT
+	doneCh chan bool
+}
+
+func (s *ServerStream[IN, OUT]) Send(out *OUT) {
 	select {
-	case <-s.DoneCh:
-		return nil, false
-	case in, ok := <-s.InCh:
+	case <-s.doneCh:
+	case s.outCh <- out:
+	}
+}
+
+func (s *ServerStream[IN, OUT]) Recv() (*IN, error) {
+	select {
+	case <-s.doneCh:
+		return nil, errors.New("stream already done")
+	case in, ok := <-s.inCh:
 		if !ok {
-			return nil, false
+			return nil, errors.New("receive input failed")
 		}
-		return in, true
+		return in, nil
 	}
-}
-
-func (s *Stream[IN, OUT]) AddInMiddleware(fn func(in *IN) (*IN, error)) Stream[IN, OUT] { // TODO: pointer
-	nextInCh := make(chan *IN)
-	go func() {
-		defer close(nextInCh)
-		for in := range s.InCh {
-			in, err := fn(in)
-			if err != nil {
-				s.ErrCh <- err
-				return
-			}
-			nextInCh <- in
-		}
-	}()
-	return Stream[IN, OUT]{
-		InCh:   nextInCh,
-		OutCh:  s.OutCh,
-		DoneCh: s.DoneCh,
-		ErrCh:  s.ErrCh,
-	}
-}
-
-func (s *Stream[IN, OUT]) AddOutMiddleware(fn func(out *OUT) (*OUT, error)) {
-	nextOutCh := make(chan *OUT)
-	go func() {
-		defer close(nextOutCh)
-		for out := range s.OutCh {
-			out, err := fn(out)
-			if err != nil {
-				s.ErrCh <- err
-			}
-			nextOutCh <- out
-		}
-	}()
 }
 
 type Middleware[IN, OUT any] func(BiStream[IN, OUT]) BiStream[IN, OUT]

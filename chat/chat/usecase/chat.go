@@ -12,6 +12,7 @@ import (
 	"github.com/superj80820/system-design/kit/core/endpoint"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	mqKit "github.com/superj80820/system-design/kit/mq"
+	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -67,14 +68,20 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 	// TODO: subscribe channel message for me
 
 	var (
-		joinObservers []*mqKit.Observer
-		channelName   string
+		joinObservers []*mqReaderManagerKit.Observer
 	)
+	defer fmt.Println("bye")
+	defer func() {
+		fmt.Println(len(joinObservers))
+		for _, joinObserver := range joinObservers {
+			chat.channelMessageTopic.UnSubscribe(joinObserver)
+		}
+	}()
 	for {
-		req, ok := stream.RecvFromIn()
-		if !ok {
-			fmt.Println("break")
-			break
+		req, err := stream.Recv()
+		if err != nil {
+			fmt.Println("unsub")
+			return errors.Wrap(err, "receive input failed")
 		}
 		switch req.Action {
 		case domain.SendUser:
@@ -94,7 +101,6 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 				return errors.Wrap(err, "produce message failed")
 			}
 		case domain.JoinChannel:
-			channelName = req.SendChannelReq.ChannelName
 			channelID := chat.chatRepo.GetChannelID(req.SendChannelReq.ChannelName)
 
 			cur := chat.chatRepo.GetHistory(req.JoinChannelReq.CurMaxMessageID, channelID)
@@ -104,15 +110,16 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 					return errors.Wrap(err, "get history failed")
 				}
 
-				stream.SendToOut(&domain.ChatResponse{
+				stream.Send(&domain.ChatResponse{
 					Data:      message.Content,
 					UserID:    message.UserID,
 					MessageID: message.MessageID,
 				})
 			}
 
+			fmt.Println("sub1")
 			// TODO: subscribe channel users status
-			joinObserver := chat.channelMessageTopic.Subscribe(channelName, func(message []byte) error {
+			joinObserver := chat.channelMessageTopic.Subscribe(strconv.Itoa(channelID), func(message []byte) error {
 				chMsg := new(domain.ChannelMessage)
 				if err := json.Unmarshal(message, chMsg); err != nil {
 					return errors.Wrap(err, "unmarshal error failed")
@@ -122,7 +129,7 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 					return nil
 				}
 
-				stream.SendToOut(&domain.ChatResponse{
+				stream.Send(&domain.ChatResponse{
 					Data:      chMsg.Content,
 					UserID:    chMsg.UserID,
 					MessageID: chMsg.MessageID,
@@ -130,13 +137,8 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 
 				return nil
 			})
+			fmt.Println("sub2")
 			joinObservers = append(joinObservers, joinObserver)
 		}
 	}
-
-	for _, joinObserver := range joinObservers {
-		chat.channelMessageTopic.UnSubscribe(channelName, joinObserver) // TODO: maybe defer
-	}
-
-	return nil
 }

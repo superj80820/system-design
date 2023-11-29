@@ -12,6 +12,8 @@ import (
 	"github.com/superj80820/system-design/kit/core/endpoint"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
+	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
+	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
 
 	"github.com/superj80820/system-design/chat/chat/repository"
 	"github.com/superj80820/system-design/chat/chat/usecase"
@@ -58,8 +60,8 @@ func main() {
 		context.TODO(),
 		kafkaURL,
 		channelMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqKit.LastOffset),
-		mqKit.ProduceWay(&mqKit.Hash{}),
+		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
+		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
@@ -82,7 +84,7 @@ func main() {
 	// 	panic(err)
 	// }
 
-	rateLimit := utilKit.CreateCacheRateLimit(singletonCache, 3, 10)
+	rateLimit := utilKit.CreateCacheRateLimit(singletonCache, 5, 10)
 
 	tracer := traceKit.CreateNoOpTracer()
 

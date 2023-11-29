@@ -29,14 +29,21 @@ func CreateRateLimit[IN, OUT any](passFunc func(ctx context.Context, key string)
 				return err
 			}
 
-			return next(ctx, s.AddInMiddleware(func(in *IN) (*IN, error) { // TODO: think why can't cover
-				if err := check(); err != nil {
-					fmt.Println("arte11")
-					return nil, err
-				}
-				fmt.Println("arte")
-				return in, nil
-			}))
+			// TODO: important think why can't cover channel
+			return next(ctx, &rateLimit[IN, OUT]{Stream: s, check: check})
 		}
 	}
+}
+
+type rateLimit[IN, OUT any] struct {
+	endpoint.Stream[IN, OUT]
+
+	check func() error
+}
+
+func (a *rateLimit[IN, OUT]) RecvFromIn() (*IN, error) {
+	if err := a.check(); err != nil {
+		return nil, err
+	}
+	return a.Stream.Recv()
 }
