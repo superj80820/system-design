@@ -36,6 +36,8 @@ func CreateSpecPartitionReaderManager(topic string, startOffset int64, partition
 		option(rm)
 	}
 
+	rm.reader.Run()
+
 	return rm, nil
 }
 
@@ -59,10 +61,6 @@ func (s *specPartitionReaderManager) RemoveObserverWithHook(observer *Observer) 
 	}
 	go observer.unSubscribeHook()
 	return true
-}
-
-func (s *specPartitionReaderManager) Run() {
-	s.reader.Run()
 }
 
 func (s *specPartitionReaderManager) StartConsume(ctx context.Context) bool {

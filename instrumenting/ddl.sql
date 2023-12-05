@@ -24,14 +24,64 @@ CREATE TABLE `account_token` (
   `token` varchar(255) NOT NULL,
   `status` tinyint(1) NOT NULL DEFAULT '0',
   `type` int(11) NOT NULL DEFAULT '0',
+  -- user_id to account_id
   `user_id` bigint(20) NOT NULL,
   `expire_at` timestamp NULL DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT NULL,
   `updated_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
+  -- index_user_id to index_account_id
   INDEX `index_user_id` (`user_id`),
   UNIQUE KEY `unique_token` (`token`),
+  -- user_id to account_id
   FOREIGN KEY (`user_id`) REFERENCES account(`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `channel` (
+  `id` bigint(20) NOT NULL,
+  `name` VARCHAR(255) NOT NULL,
+  `creator_account_id` bigint(20) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  FOREIGN KEY (`creator_account_id`) REFERENCES account(`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `channel_account` (
+  `id` bigint(20) NOT NULL,
+  `channel_id` bigint(20) NOT NULL,
+  `account_id` bigint(20) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `index_account_id` (`account_id`),
+  UNIQUE KEY `index_channel_id_account_id` (`channel_id`, `account_id`),
+  FOREIGN KEY (`account_id`) REFERENCES account(`id`),
+  FOREIGN KEY (`channel_id`) REFERENCES channel(`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `account_friend` (
+  `id` bigint(20) NOT NULL,
+  `account_id` bigint(20) NOT NULL,
+  `friend_account_id` bigint(20) NOT NULL,
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `index_account_id` (`account_id`),
+  FOREIGN KEY (`account_id`) REFERENCES account(`id`),
+  FOREIGN KEY (`friend_account_id`) REFERENCES account(`id`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8;
+
+CREATE TABLE `account_chat_information` (
+  `id` bigint(20) NOT NULL,
+  `account_id` bigint(20) NOT NULL,
+  -- TODO: think bool
+  `online` tinyint(1) NOT NULL DEFAULT '0',
+  `created_at` timestamp NULL DEFAULT NULL,
+  `updated_at` timestamp NULL DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  INDEX `index_account_id` (`account_id`),
+  FOREIGN KEY (`account_id`) REFERENCES account(`id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8;
 
 -- CREATE TABLE `g_account` (

@@ -5,7 +5,6 @@ import (
 )
 
 type ReaderManager interface {
-	Run()
 	AddObserver(observer *Observer) bool
 	SyncStartConsume(ctx context.Context) bool
 	StartConsume(ctx context.Context) bool

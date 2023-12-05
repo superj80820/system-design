@@ -50,6 +50,22 @@ func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) TX {
 	return TX{db.gormClient.FirstOrCreate(dest, conds...)}
 }
 
+func (db *DB) Model(value interface{}) TX {
+	return TX{db.gormClient.Model(value)}
+}
+
+func (db *DB) Where(query interface{}, args ...interface{}) TX {
+	return TX{db.gormClient.Where(query, args...)}
+}
+
+func (db *DB) Update(column string, value interface{}) TX {
+	return TX{db.gormClient.Update(column, value)}
+}
+
+func (db *DB) Find(dest interface{}, conds ...interface{}) TX {
+	return TX{db.gormClient.Find(dest, conds...)}
+}
+
 func (db *DB) Create(value interface{}) error {
 	return db.gormClient.Create(value).Error
 }

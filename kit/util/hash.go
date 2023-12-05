@@ -16,28 +16,13 @@ var (
 	}
 )
 
-func SHA256(str string) string {
+func GetSHA256(str string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(str)))
 }
 
-type ConsistentHash struct { // TODO
-	Hasher hash.Hash32
-
-	// lock protects Hasher while calculating the hash code.  It is assumed that
-	// the Hasher field is read-only once the Balancer is created, so as a
-	// performance optimization, reads of the field are not protected.
-	lock sync.Mutex
-}
-
-func (h *ConsistentHash) Get(key string, partitionsLen int) int {
-	hasher := h.Hasher
-	if hasher != nil {
-		h.lock.Lock()
-		defer h.lock.Unlock()
-	} else {
-		hasher = fnv1aPool.Get().(hash.Hash32)
-		defer fnv1aPool.Put(hasher)
-	}
+func GetConsistentHash(key string, partitionsLen int) int {
+	hasher := fnv1aPool.Get().(hash.Hash32)
+	defer fnv1aPool.Put(hasher)
 
 	hasher.Reset()
 	if _, err := hasher.Write([]byte(key)); err != nil {

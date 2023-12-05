@@ -63,7 +63,7 @@ func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 		return nil, errors.Wrap(err, "get db user failed")
 	}
 
-	if account.Password != utilKit.SHA256(password) {
+	if account.Password != utilKit.GetSHA256(password) {
 		return nil, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid)
 	}
 

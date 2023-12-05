@@ -167,8 +167,7 @@ func (r *Reader) GetObserversLen() int {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 
-	length := len(r.observers)
-	return length
+	return len(r.observers)
 }
 
 func (r *Reader) RangeAllObservers(fn func(key *Observer, value *Observer) bool) {

@@ -36,6 +36,8 @@ func CreateGroupIDReaderManager(brokers []string, topic, groupID string, startOf
 		option(rm)
 	}
 
+	rm.reader.Run()
+
 	return rm, nil
 }
 
@@ -59,10 +61,6 @@ func (g *groupIDReaderManager) RemoveObserverWithHook(observer *Observer) bool {
 	}
 	go observer.unSubscribeHook()
 	return true
-}
-
-func (g *groupIDReaderManager) Run() {
-	g.reader.Run()
 }
 
 func (g *groupIDReaderManager) StartConsume(ctx context.Context) bool {

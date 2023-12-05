@@ -87,21 +87,21 @@ func TestReaderByPartitionBindObserver(t *testing.T) {
 	}
 }
 
-// func TestReaderBySpecPartition(t *testing.T) {
-// 	for _, test := range tests {
-// 		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-// 			return CreateSpecPartitionReaderManager("topic", LastOffset, 1, []string{}, options...)
-// 		})))
-// 	}
-// }
+func TestReaderBySpecPartition(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
+			return CreateSpecPartitionReaderManager("topic", LastOffset, 1, []string{}, options...)
+		})))
+	}
+}
 
-// func TestReaderByGroupID(t *testing.T) {
-// 	for _, test := range tests {
-// 		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-// 			return CreateGroupIDReaderManager([]string{}, "topic", "groupID", LastOffset, options...)
-// 		})))
-// 	}
-// }
+func TestReaderByGroupID(t *testing.T) {
+	for _, test := range tests {
+		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
+			return CreateGroupIDReaderManager([]string{}, "topic", "groupID", LastOffset, options...)
+		})))
+	}
+}
 
 func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManagerConfigOption) (ReaderManager, error)) *testSetupData {
 	kafkaReaderMock := new(mocks.KafkaReader)
@@ -142,8 +142,6 @@ func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManager
 		return nil
 	}))
 	rm.AddObserver(observer)
-
-	rm.Run()
 
 	return &testSetupData{
 		readerManager:   rm,

@@ -56,12 +56,12 @@ type partitionBindObserverReaderManager struct {
 
 	watchBalanceDuration time.Duration
 
-	consistentHash util.ConsistentHash
-
-	lock *sync.RWMutex
+	lock sync.RWMutex
 }
 
 type partitionBindObserverReaderManagerOption func(*partitionBindObserverReaderManager)
+
+var defaultWatchBalanceDuration = 5 * time.Second
 
 func useMockKafkaControllerConnProvider(fn func() (KafkaConn, error)) readerManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
@@ -129,40 +129,43 @@ func CreatePartitionBindObserverReaderManager(url string, startOffset int64, bro
 
 		topic: topic,
 
+		watchBalanceDuration: defaultWatchBalanceDuration,
+
 		readers: make(map[int]*Reader),
-		lock:    &sync.RWMutex{},
 	}
 
 	for _, option := range config.partitionBindObserverReaderManagerOptions {
 		option(rm)
 	}
 
-	if err := rm.setKafkaControllerConn(); err != nil {
-		return nil, errors.Wrap(err, "set kafka controller connect failed")
+	var err error
+	rm.kafkaControllerConn, err = rm.kafkaControllerConnProvider()
+	if err != nil {
+		return nil, errors.Wrap(err, "create kafka controller connect failed")
 	}
-	if _, err := rm.fetchPartitionsInfoThenSetReaders(); err != nil {
+	if _, err := rm.fetchPartitionsInfo(); err != nil {
 		return nil, errors.Wrap(err, "fetch partitions information then set readers failed")
 	}
 	go func() {
 		ticker := time.NewTicker(rm.watchBalanceDuration)
 		for range ticker.C {
-			if _, err := rm.fetchPartitionsInfoThenSetReaders(); err != nil {
-				rm.errorHandleFn(errors.Wrap(err, "fetch partitions information then set readers failed"))
-				continue
-			}
+			func() {
+				rm.lock.Lock()
+				defer rm.lock.Unlock()
+
+				isPartitionChange, err := rm.fetchPartitionsInfo()
+				if err != nil {
+					rm.errorHandleFn(errors.Wrap(err, "fetch partitions information then set readers failed"))
+					return
+				}
+				if isPartitionChange {
+					rm.balanceObservers()
+				}
+			}()
 		}
 	}()
 
 	return rm, nil
-}
-
-func (p *partitionBindObserverReaderManager) Run() {
-	p.lock.RLock()
-	defer p.lock.RUnlock()
-
-	for _, reader := range p.readers {
-		reader.Run()
-	}
 }
 
 func (p *partitionBindObserverReaderManager) StartConsume(ctx context.Context) bool {
@@ -199,16 +202,14 @@ func (p *partitionBindObserverReaderManager) AddObserver(observer *Observer) boo
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	ok := p.readers[p.consistentHash.Get(observer.key, len(p.topicPartitionInfo))].AddObserver(observer)
-
-	return ok
+	return p.readers[util.GetConsistentHash(observer.key, len(p.topicPartitionInfo))].AddObserver(observer)
 }
 
 func (p *partitionBindObserverReaderManager) RemoveObserverWithHook(observer *Observer) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if ok := p.readers[p.consistentHash.Get(observer.key, len(p.topicPartitionInfo))].RemoveObserver(observer); !ok {
+	if ok := p.readers[util.GetConsistentHash(observer.key, len(p.topicPartitionInfo))].RemoveObserver(observer); !ok {
 		return false
 	}
 	go observer.unSubscribeHook()
@@ -239,30 +240,16 @@ func (p *partitionBindObserverReaderManager) GetObserversLen() int {
 	return allObserversLen
 }
 
-func (p *partitionBindObserverReaderManager) setKafkaControllerConn() error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
-	var err error
-	p.kafkaControllerConn, err = p.kafkaControllerConnProvider()
-	if err != nil {
-		return errors.Wrap(err, "create kafka controller connect failed")
-	}
-
-	return nil
-}
-
-func (p *partitionBindObserverReaderManager) fetchPartitionsInfoThenSetReaders() (bool, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-
+func (p *partitionBindObserverReaderManager) fetchPartitionsInfo() (bool, error) {
 	partitions, err := p.kafkaControllerConn.ReadPartitions(p.topic)
 	if err != nil {
 		return false, errors.Wrap(err, "read partitions information failed")
 	}
+
 	if len(p.topicPartitionInfo) == len(partitions) {
 		return false, nil
 	}
+
 	p.topicPartitionInfo = partitions
 
 	for _, partition := range p.topicPartitionInfo {
@@ -271,8 +258,15 @@ func (p *partitionBindObserverReaderManager) fetchPartitionsInfoThenSetReaders()
 		if _, ok := p.readers[partition.ID]; !ok {
 			p.readers[partition.ID] = r
 		}
+
+		r.Run()
 	}
 
+	return true, nil
+
+}
+
+func (p *partitionBindObserverReaderManager) balanceObservers() {
 	var observerInfos []struct {
 		originReaderIdx int
 		originReader    *Reader
@@ -295,12 +289,10 @@ func (p *partitionBindObserverReaderManager) fetchPartitionsInfoThenSetReaders()
 	}
 
 	for _, observerInfo := range observerInfos {
-		nextIdx := p.consistentHash.Get(observerInfo.observer.key, len(p.topicPartitionInfo))
+		nextIdx := util.GetConsistentHash(observerInfo.observer.key, len(p.topicPartitionInfo))
 		if observerInfo.originReaderIdx != nextIdx {
 			observerInfo.originReader.RemoveObserver(observerInfo.observer)
 			p.readers[nextIdx].AddObserver(observerInfo.observer)
 		}
 	}
-
-	return true, nil
 }

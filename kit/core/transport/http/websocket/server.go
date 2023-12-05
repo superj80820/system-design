@@ -124,7 +124,6 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	g.Add(func() error {
 		defer close(inCh)
-		defer fmt.Println("close3")
 		for {
 			mt, msg, err := ws.ReadMessage()
 			if err != nil {
@@ -147,7 +146,6 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	g.Add(func() error {
-		defer fmt.Println("close2")
 		for {
 			select {
 			case <-ctx.Done():
@@ -170,9 +168,7 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	g.Add(func() error {
-		defer fmt.Println("close1")
 		if err := s.e(ctx, stream); err != nil {
-			fmt.Println("error", err)
 			return err
 		}
 		return nil

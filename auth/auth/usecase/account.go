@@ -38,7 +38,7 @@ func (a *accountService) Register(email, password string) error {
 	tx := a.db.FirstOrCreate(&repository.AccountEntity{
 		ID:       uniqueIDGenerate.Generate().GetInt64(),
 		Email:    email,
-		Password: utilKit.SHA256(password),
+		Password: utilKit.GetSHA256(password),
 	}, repository.AccountEntity{Email: email})
 	if !tx.IsCreate(tx.Error) {
 		return code.CreateErrorCode(http.StatusForbidden)

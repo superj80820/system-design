@@ -14,6 +14,7 @@ import (
 	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
 	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
+	mysqlKit "github.com/superj80820/system-design/kit/mysql"
 
 	"github.com/superj80820/system-design/chat/chat/repository"
 	"github.com/superj80820/system-design/chat/chat/usecase"
@@ -35,19 +36,25 @@ var (
 	channelMessageTopicName = "quickstart-events-par-3"
 	userMessageTopicName    = "user-message"
 	userStatusTopicName     = "user-status"
+	serviceName             = "chat-service"
 )
 
 func main() {
 	flag.Parse()
 
+	mysqlDB, err := mysqlKit.CreateDB("root:example@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local")
+	if err != nil {
+		panic(err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:30001,localhost:30002,localhost:30003/?replicaSet=my-replica-set"))
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:30001,localhost:30002,localhost:30003/?replicaSet=my-replica-set"))
 	if err != nil {
 		panic(err) // TODO
 	}
 	defer func() { // TODO: sequence
-		if err := client.Disconnect(ctx); err != nil {
+		if err := mongoDB.Disconnect(ctx); err != nil {
 			panic(err) // TODO
 		}
 	}()
@@ -66,31 +73,40 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	// userMessageTopic, err := mqKit.CreateMQTopic(
-	// 	context.TODO(),
-	// 	kafkaURL,
-	// 	userMessageTopicName,
-	// 	mqKit.ConsumeByGroupID(*groupID, mqKit.LastOffset),
-	// )
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// userStatusTopic, err := mqKit.CreateMQTopic(
-	// 	context.TODO(),
-	// 	kafkaURL,
-	// 	userStatusTopicName,
-	// )
-	// if err != nil {
-	// 	panic(err)
-	// }
+	userMessageTopic, err := mqKit.CreateMQTopic(
+		context.TODO(),
+		kafkaURL,
+		userMessageTopicName,
+		mqKit.ConsumeByGroupID(*groupID, mqReaderManagerKit.LastOffset),
+	)
+	if err != nil {
+		panic(err)
+	}
+	userStatusTopic, err := mqKit.CreateMQTopic(
+		context.TODO(),
+		kafkaURL,
+		userStatusTopicName,
+		mqKit.ConsumeByGroupID(serviceName, mqReaderManagerKit.LastOffset),
+	)
+	if err != nil {
+		panic(err)
+	}
 
 	rateLimit := utilKit.CreateCacheRateLimit(singletonCache, 5, 10)
 
 	tracer := traceKit.CreateNoOpTracer()
 
-	chatRepo := repository.MakeChatRepo(client)
+	chatRepo, err := repository.CreateChatRepo(mongoDB, mysqlDB)
+	if err != nil {
+		panic(err)
+	}
 
-	chatUseCase := usecase.MakeChatUseCase(chatRepo, channelMessageTopic, nil, nil)
+	chatUseCase := usecase.MakeChatUseCase(
+		chatRepo,
+		channelMessageTopic,
+		userMessageTopic,
+		userStatusTopic,
+	)
 
 	r := mux.NewRouter()
 	r.Handle("/ws/channel",

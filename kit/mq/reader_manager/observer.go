@@ -31,3 +31,7 @@ func CreateObserver(key string, notify Notify, options ...ObserverOption) *Obser
 func AddUnSubscribeHook(unSubscribeHook unSubscribeHook) ObserverOption {
 	return func(o *Observer) { o.unSubscribeHook = unSubscribeHook }
 }
+
+func (o *Observer) GetKey() string {
+	return o.key
+}
