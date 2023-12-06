@@ -1,31 +1,32 @@
 package mysql
 
 import (
-	mysqlDriver "github.com/go-sql-driver/mysql"
+	goMysql "github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
 
-var ErrRecordNotFound = gorm.ErrRecordNotFound // TODO: test found
+var (
+	ErrRecordNotFound = gorm.ErrRecordNotFound // TODO: test found
+	ErrDuplicatedKey  = gorm.ErrDuplicatedKey
+)
 
 type DB struct {
 	gormClient *gorm.DB
 }
 
-type TX struct {
-	*gorm.DB
-}
+type TX = *gorm.DB
 
-func (tx *TX) IsCreate(err error) bool {
-	var mysqlErr *mysqlDriver.MySQLError
-	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-		return false
-	}
+// func (tx *TX) IsCreate(err error) bool {
+// 	var mysqlErr *mysqlDriver.MySQLError
+// 	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+// 		return false
+// 	}
 
-	return tx.RowsAffected != 0
-}
+// 	return tx.RowsAffected != 0
+// }
 
 func CreateDB(dsn string) (*DB, error) {
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
@@ -46,28 +47,28 @@ func CreateDB(dsn string) (*DB, error) {
 	}, nil
 }
 
-func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) TX {
-	return TX{db.gormClient.FirstOrCreate(dest, conds...)}
+func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) error {
+	return db.gormClient.FirstOrCreate(dest, conds...).Error
 }
 
 func (db *DB) Model(value interface{}) TX {
-	return TX{db.gormClient.Model(value)}
+	return db.gormClient.Model(value)
 }
 
 func (db *DB) Where(query interface{}, args ...interface{}) TX {
-	return TX{db.gormClient.Where(query, args...)}
+	return db.gormClient.Where(query, args...)
 }
 
 func (db *DB) Update(column string, value interface{}) TX {
-	return TX{db.gormClient.Update(column, value)}
+	return db.gormClient.Update(column, value)
 }
 
 func (db *DB) Find(dest interface{}, conds ...interface{}) TX {
-	return TX{db.gormClient.Find(dest, conds...)}
+	return db.gormClient.Find(dest, conds...)
 }
 
-func (db *DB) Create(value interface{}) error {
-	return db.gormClient.Create(value).Error
+func (db *DB) Create(value interface{}) TX {
+	return db.gormClient.Create(value)
 }
 
 func (db *DB) First(dest interface{}, conds ...interface{}) error {
@@ -80,4 +81,12 @@ func (db *DB) Last(dest interface{}, conds ...interface{}) error {
 
 func (db *DB) Save(value interface{}) error {
 	return db.gormClient.Save(value).Error // TODO: check ...
+}
+
+func ConvertMySQLErr(err error) (error, bool) {
+	var mysqlErr *goMysql.MySQLError
+	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+		return ErrDuplicatedKey, true
+	}
+	return nil, false
 }

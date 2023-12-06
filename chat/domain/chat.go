@@ -8,11 +8,27 @@ import (
 )
 
 type Channel struct {
-	ChannelID int `bson:"channel_id" json:"channel_id"`
+	ChannelID        int64 `bson:"channel_id" json:"channel_id" gorm:"column:id"` // TODO: check gorm label
+	Name             string
+	CreatorAccountID int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
-type Account struct {
-	ID int
+type AccountChannel struct {
+	ID        int64
+	AccountID int64
+	ChannelID int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type AccountFriend struct {
+	ID         int64
+	Account1ID int64 `gorm:"column:account_1_id"`
+	Account2ID int64 `gorm:"column:account_2_id"`
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type ChatRepository interface {
@@ -22,11 +38,11 @@ type ChatRepository interface {
 	InsertFriendMessage(ctx context.Context, friendMessage *FriendMessage) error
 	InsertChannelMessage(ctx context.Context, channelMessage *ChannelMessage) error
 	GetChannelByName(channelName string) (*Channel, error)
+	GetOrCreateUserChatInformation(ctx context.Context, userID int) (*AccountChatInformation, error)
 
-	Online(ctx context.Context, id int)
-	Offline(ctx context.Context, id int)
+	UpdateOnlineStatus(ctx context.Context, id int, onlineStatus OnlineStatusEnum)
 	GetAccountChannels(ctx context.Context, id int) ([]*Channel, error)
-	GetAccountFriends(ctx context.Context, id int) ([]*Account, error)
+	GetAccountFriends(ctx context.Context, id int) ([]*AccountFriend, error)
 }
 
 type ChatClientAction string
@@ -113,4 +129,17 @@ type ChatService interface {
 	Chat(context.Context, endpoint.Stream[ChatRequest, ChatResponse]) error
 }
 
-type AccountChatInformation struct{}
+type OnlineStatusEnum int
+
+const (
+	OfflineStatus OnlineStatusEnum = iota
+	OnlineStatus
+)
+
+type AccountChatInformation struct {
+	ID        int64            `json:"id"`
+	AccountID int64            `json:"account_id"`
+	Online    OnlineStatusEnum `json:"online"`
+	CreatedAt time.Time        `json:"create_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
+}

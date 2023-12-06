@@ -67,6 +67,10 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 	}
 
 	// TODO: think need tx?
+	if _, err := chat.chatRepo.GetOrCreateUserChatInformation(ctx, accountID); err != nil {
+		return errors.Wrap(err, "create user chat information failed")
+	}
+
 	chat.chatRepo.Online(ctx, accountID)
 	chat.accountStatusTopic.Produce(ctx, &StatusMessage{&domain.StatusMessage{ // TODO: refactor
 		StatusType: domain.OnlineStatusType,

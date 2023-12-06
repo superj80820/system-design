@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,24 +14,32 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type channel struct {
+	*domain.Channel
+}
+
+func (channel) TableName() string {
+	return "channel"
+}
+
 type accountChatInformation struct {
-	*domain.AccountChatInformation
+	*domain.AccountChatInformation // TODO: is great way
 }
 
 func (accountChatInformation) TableName() string {
 	return "account_chat_information"
 }
 
-type channel struct {
-	*domain.Channel
+type accountChannel struct {
+	*domain.AccountChannel
 }
 
-func (channel) TableName() string {
-	return "channel_account"
+func (accountChannel) TableName() string {
+	return "account_channel"
 }
 
 type accountFriend struct {
-	*domain.Account
+	*domain.AccountFriend
 }
 
 func (accountFriend) TableName() string {
@@ -91,47 +98,6 @@ func CreateChatRepo(client *mongo.Client, db *mysqlKit.DB, options ...ChatRepoOp
 	}
 
 	return &chatRepo, nil
-}
-
-func (chat *ChatRepo) GetChannelByName(name string) (*domain.Channel, error) {
-	var channelInstance channel
-	if err := chat.mysqlDB.First(&channelInstance, "name = ?", name); err != nil {
-		return nil, errors.Wrap(err, "get channel failed")
-	}
-	return channelInstance.Channel, nil
-	// TODO
-	// uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
-	// if err != nil {
-	// 	panic(err) // TODO
-	// }
-
-	// var (
-	// 	channelID   int
-	// 	channelInfo ChannelInfo
-	// )
-
-	// filter := bson.D{{Key: "channel_name", Value: channelName}}
-	// ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	// defer cancel()
-	// err = chat.channelMessageCollection.FindOne(ctx, filter).Decode(&channelInfo)
-	// if err == mongo.ErrNoDocuments {
-	// 	fmt.Println("record does not exist")
-
-	// 	channelID = int(uniqueIDGenerate.Generate().GetInt64())
-
-	// 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second) // TODO: need time?
-	// 	defer cancel()
-	// 	chat.channelMessageCollection.InsertOne(ctx, bson.D{
-	// 		{Key: "channel_id", Value: channelID},
-	// 		{Key: "channel_name", Value: channelName},
-	// 	})
-	// } else if err != nil {
-	// 	log.Fatal(err)
-	// } else {
-	// 	channelID = channelInfo.ID
-	// }
-
-	// return channelID
 }
 
 func (chat *ChatRepo) GetHistoryMessage(ctx context.Context, accountID, offset, page int) ([]*domain.FriendOrChannelMessage, bool, error) {
@@ -246,7 +212,7 @@ func (chat *ChatRepo) GetHistoryMessage(ctx context.Context, accountID, offset, 
 	}
 
 	results := make([]*domain.FriendOrChannelMessage, len(metadatas))
-	for idx, metadata := range metadatas { // TODO: check sort
+	for idx, metadata := range metadatas {
 		switch metadata.MessageType {
 		case domain.ChannelMessageType:
 			results[idx] = &domain.FriendOrChannelMessage{
@@ -268,40 +234,167 @@ func (chat *ChatRepo) GetHistoryMessage(ctx context.Context, accountID, offset, 
 	return results, false, nil
 }
 
-func (chat *ChatRepo) GetAccountChannels(ctx context.Context, id int) ([]*domain.Channel, error) {
-	var channels []*domain.Channel // TODO: test pointer
-	if err := chat.
+func (chat *ChatRepo) CreateChannel(ctx context.Context, userID int, channelName string) (int64, error) {
+	// TODO: tx
+	channelID := chat.uniqueIDGenerate.Generate().GetInt64()
+	channelInstance := channel{Channel: &domain.Channel{
+		ChannelID:        channelID,
+		Name:             channelName,
+		CreatorAccountID: int64(userID),
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}} // TODO: is great way?
+	result := chat.
 		mysqlDB.
-		Model(&channel{}). // TODO: test model work
-		Where("account_id = ?", strconv.Itoa(id)).Find(&channels).Error; err != nil {
+		Create(&channelInstance)
+	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		return 0, errors.Wrap(mySQLErr, "create mysql error")
+	} else if result.Error != nil {
+		return 0, errors.Wrap(result.Error, "create channel failed")
+	}
+
+	accountChannelInstance := accountChannel{ // TODO: should use CreateAccountChannels?
+		AccountChannel: &domain.AccountChannel{
+			ID:        chat.uniqueIDGenerate.Generate().GetInt64(),
+			AccountID: int64(userID),
+			ChannelID: channelID,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	result = chat.
+		mysqlDB.
+		Create(&accountChannelInstance)
+	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		return 0, errors.Wrap(mySQLErr, "get mysql error")
+	} else if result.Error != nil {
+		return 0, errors.Wrap(result.Error, "create user to channel failed")
+	}
+
+	return channelID, nil
+}
+
+func (chat *ChatRepo) CreateAccountChannels(ctx context.Context, userID, channelID int) error {
+	accountChannelInstance := accountChannel{
+		AccountChannel: &domain.AccountChannel{
+			ID:        chat.uniqueIDGenerate.Generate().GetInt64(),
+			AccountID: int64(userID),
+			ChannelID: int64(channelID),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+	result := chat.
+		mysqlDB.
+		Create(&accountChannelInstance)
+	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		return errors.Wrap(mySQLErr, "get mysql error")
+	} else if result.Error != nil {
+		return errors.Wrap(result.Error, "create user to channel failed")
+	}
+
+	return nil
+}
+
+func (chat *ChatRepo) GetAccountChannels(ctx context.Context, userID int) ([]int64, error) {
+	var accountChannels []*domain.AccountChannel // TODO: test pointer
+	err := chat.
+		mysqlDB.
+		Model(&accountChannel{}). // TODO: test model work
+		Where("account_id = ?", userID).
+		Find(&accountChannels).Error
+	if err != nil {
 		return nil, errors.Wrap(err, "get channels failed")
+	}
+	channels := make([]int64, len(accountChannels))
+	for idx, channel := range accountChannels {
+		channels[idx] = channel.ChannelID
 	}
 	return channels, nil
 }
 
-func (chat *ChatRepo) GetAccountFriends(ctx context.Context, id int) ([]*domain.Account, error) {
-	var accounts []*domain.Account // TODO: test pointer
-	if err := chat.
+func (chat *ChatRepo) CreateAccountFriends(ctx context.Context, userID, friendID int) error {
+	if userID == friendID {
+		return errors.New("can not create same user to friend")
+	}
+	user1ID, user2ID := userID, friendID
+	if userID > friendID {
+		user1ID, user2ID = friendID, userID
+	}
+	accountFriendInstance := accountFriend{
+		AccountFriend: &domain.AccountFriend{
+			ID:         chat.uniqueIDGenerate.Generate().GetInt64(),
+			Account1ID: int64(user1ID),
+			Account2ID: int64(user2ID),
+		},
+	}
+	result := chat.
+		mysqlDB.
+		Create(&accountFriendInstance)
+	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		return errors.Wrap(mySQLErr, "get mysql error")
+	} else if result.Error != nil {
+		return errors.Wrap(result.Error, "create friend failed")
+	}
+
+	return nil
+}
+
+func (chat *ChatRepo) GetAccountFriends(ctx context.Context, userID int) ([]int64, error) {
+	var accountFriends []*domain.AccountFriend // TODO: test pointer
+	err := chat.
 		mysqlDB.
 		Model(&accountFriend{}). // TODO: test model work
-		Where("account_id = ?", strconv.Itoa(id)).Find(&accounts).Error; err != nil {
+		Where("account_1_id = ? or account_2_id = ?", userID, userID).
+		Find(&accountFriends).Error
+	if err != nil {
 		return nil, errors.Wrap(err, "get channels failed")
 	}
-	return accounts, nil
+	friends := make([]int64, len(accountFriends))
+	for idx, friend := range accountFriends {
+		if friend.Account1ID == int64(userID) {
+			friends[idx] = friend.Account2ID
+		} else {
+			friends[idx] = friend.Account1ID
+		}
+	}
+	return friends, nil // TODO: check
 }
 
-func (chat *ChatRepo) Offline(ctx context.Context, id int) {
-	chat.
+func (chat *ChatRepo) UpdateOnlineStatus(ctx context.Context, userID int, onlineStatus domain.OnlineStatusEnum) error {
+	err := chat.
 		mysqlDB.
 		Model(&accountChatInformation{}).
-		Where("account_id = ?", id).
-		Update("online", 0)
+		Where("account_id = ?", userID).
+		Updates(accountChatInformation{
+			AccountChatInformation: &domain.AccountChatInformation{
+				Online:    onlineStatus,
+				UpdatedAt: time.Now(),
+			},
+		}).Error
+	if err != nil {
+		return errors.Wrap(err, "get user chat information failed")
+	}
+	return nil
 }
 
-func (chat *ChatRepo) Online(ctx context.Context, id int) {
-	chat.
+func (chat *ChatRepo) GetOrCreateUserChatInformation(ctx context.Context, userID int) (*domain.AccountChatInformation, error) {
+	var information accountChatInformation // TODO: is great way?
+	err := chat.
 		mysqlDB.
-		Model(&accountChatInformation{}).
-		Where("account_id = ?", id).
-		Update("online", 1)
+		Where(accountChatInformation{AccountChatInformation: &domain.AccountChatInformation{
+			AccountID: int64(userID),
+		}}).
+		Attrs(accountChatInformation{AccountChatInformation: &domain.AccountChatInformation{
+			ID:        chat.uniqueIDGenerate.Generate().GetInt64(),
+			AccountID: int64(userID),
+			Online:    domain.OfflineStatus,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}}).
+		FirstOrCreate(&information).Error
+	if err != nil {
+		return nil, errors.Wrap(err, "get user chat information failed")
+	}
+	return information.AccountChatInformation, nil
 }
