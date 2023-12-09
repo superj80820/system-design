@@ -82,7 +82,7 @@ var tests = []struct {
 func TestReaderByPartitionBindObserver(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreatePartitionBindObserverReaderManager("url", LastOffset, []string{}, "topic", options...)
+			return CreatePartitionBindObserverReaderManager(context.Background(), "url", LastOffset, []string{}, "topic", options...)
 		})))
 	}
 }
@@ -90,7 +90,7 @@ func TestReaderByPartitionBindObserver(t *testing.T) {
 func TestReaderBySpecPartition(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreateSpecPartitionReaderManager("topic", LastOffset, 1, []string{}, options...)
+			return CreateSpecPartitionReaderManager(context.Background(), "topic", LastOffset, 1, []string{}, options...)
 		})))
 	}
 }
@@ -98,7 +98,7 @@ func TestReaderBySpecPartition(t *testing.T) {
 func TestReaderByGroupID(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreateGroupIDReaderManager([]string{}, "topic", "groupID", LastOffset, options...)
+			return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", LastOffset, options...)
 		})))
 	}
 }
