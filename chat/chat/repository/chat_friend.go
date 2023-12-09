@@ -2,6 +2,8 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
@@ -10,8 +12,24 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+type friendMessage struct {
+	*domain.FriendMessage
+}
+
+func (f friendMessage) GetKey() string {
+	return strconv.FormatInt(f.FriendID, 10)
+}
+
+func (f friendMessage) Marshal() ([]byte, error) {
+	jsonData, err := json.Marshal(f)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return jsonData, nil
+}
+
 // TODO: test tx
-func (chat *ChatRepo) InsertFriendMessage(ctx context.Context, userID, friendID int64, content string) error {
+func (chat *ChatRepo) InsertFriendMessage(ctx context.Context, userID, friendID int64, content string) (int64, error) {
 	messageID := chat.uniqueIDGenerate.Generate().GetInt64()
 	metadataID := chat.uniqueIDGenerate.Generate().GetInt64()
 
@@ -24,18 +42,20 @@ func (chat *ChatRepo) InsertFriendMessage(ctx context.Context, userID, friendID 
 		UpdatedAt:   time.Now(),
 	})
 	if err != nil {
-		return errors.Wrap(err, "insert metadata failed")
+		return 0, errors.Wrap(err, "insert metadata failed")
 	}
 	_, err = chat.friendMessageCollection.InsertOne(ctx, domain.FriendMessage{
 		MessageID: messageID,
 		Content:   content,
 		FriendID:  friendID,
 		UserID:    userID,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 	})
 	if err != nil {
-		return errors.Wrap(err, "insert friend message failed")
+		return 0, errors.Wrap(err, "insert friend message failed")
 	}
-	return nil
+	return messageID, nil
 }
 
 func (chat *ChatRepo) GetHistoryMessageByFriend(ctx context.Context, accountID, friendID, offset, page int) ([]*domain.FriendMessage, bool, error) { // TODO: function args
@@ -68,4 +88,16 @@ func (chat *ChatRepo) GetHistoryMessageByFriend(ctx context.Context, accountID, 
 		return results, true, nil
 	}
 	return results, false, nil
+}
+
+func (chat *ChatRepo) SendFriendMessage(ctx context.Context, userID, friendID, messageID int, content string) error {
+	if err := chat.accountMessageTopic.Produce(ctx, friendMessage{&domain.FriendMessage{
+		MessageID: int64(messageID),
+		Content:   content,
+		UserID:    int64(userID),
+		FriendID:  int64(friendID),
+	}}); err != nil {
+		return errors.Wrap(err, "produce message failed")
+	}
+	return nil
 }

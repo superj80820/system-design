@@ -2,12 +2,21 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/chat/domain"
+
+	httpKit "github.com/superj80820/system-design/kit/http"
+	mqKit "github.com/superj80820/system-design/kit/mq"
+	mqKitReader "github.com/superj80820/system-design/kit/mq/reader_manager"
 	mysqlKit "github.com/superj80820/system-design/kit/mysql"
 	utilKit "github.com/superj80820/system-design/kit/util"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -46,32 +55,59 @@ func (accountFriend) TableName() string {
 	return "account_friend"
 }
 
+type statusMessage struct {
+	*domain.StatusMessage
+}
+
+func (s statusMessage) GetKey() string {
+	return strconv.Itoa(s.UserID)
+}
+
+func (s statusMessage) Marshal() ([]byte, error) {
+	jsonData, err := json.Marshal(s)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return jsonData, nil
+}
+
 type ChannelInfo struct {
 	ID   int    `bson:"channel_id"`
 	Name string `bson:"channel_name"`
 }
+
+var _ domain.ChatRepository = (*ChatRepo)(nil)
 
 type ChatRepo struct {
 	messageMetadataCollection *mongo.Collection
 	channelMessageCollection  *mongo.Collection
 	friendMessageCollection   *mongo.Collection
 
+	channelMessageTopic     *mqKit.MQTopic // TODO: to domain
+	accountMessageTopic     *mqKit.MQTopic
+	accountStatusTopic      *mqKit.MQTopic
+	friendOnlineStatusTopic *mqKit.MQTopic
+
 	mysqlDB *mysqlKit.DB
 
 	pageSize int
 
 	uniqueIDGenerate *utilKit.UniqueIDGenerate
+
+	channelMessageObservers     utilKit.GenericSyncMap[string, *mqKitReader.Observer]
+	accountMessageObservers     utilKit.GenericSyncMap[string, *mqKitReader.Observer]
+	accountStatusObservers      utilKit.GenericSyncMap[string, *mqKitReader.Observer]
+	friendOnlineStatusObservers utilKit.GenericSyncMap[string, *mqKitReader.Observer]
 }
 
-type ChatRepoOption func(*ChatRepo)
-
-func SetPageSize(size int) ChatRepoOption {
-	return func(cr *ChatRepo) {
-		cr.pageSize = size
-	}
-}
-
-func CreateChatRepo(client *mongo.Client, db *mysqlKit.DB, options ...ChatRepoOption) (*ChatRepo, error) {
+func CreateChatRepo(
+	client *mongo.Client,
+	db *mysqlKit.DB,
+	channelMessageTopic,
+	accountMessageTopic,
+	accountStatusTopic,
+	friendOnlineStatusTopic *mqKit.MQTopic,
+	options ...ChatRepoOption) (*ChatRepo, error) {
 	messageMetadataCollection := client.Database("chat").Collection("message_metadata")
 	channelMessageCollection := client.Database("chat").Collection("channel_message")
 	friendMessageCollection := client.Database("chat").Collection("friend_message")
@@ -91,6 +127,11 @@ func CreateChatRepo(client *mongo.Client, db *mysqlKit.DB, options ...ChatRepoOp
 		uniqueIDGenerate: uniqueIDGenerate,
 
 		mysqlDB: db,
+
+		channelMessageTopic:     channelMessageTopic,
+		accountMessageTopic:     accountMessageTopic,
+		accountStatusTopic:      accountStatusTopic,
+		friendOnlineStatusTopic: friendOnlineStatusTopic,
 	}
 
 	for _, option := range options {
@@ -98,6 +139,81 @@ func CreateChatRepo(client *mongo.Client, db *mysqlKit.DB, options ...ChatRepoOp
 	}
 
 	return &chatRepo, nil
+}
+
+type ChatRepoOption func(*ChatRepo)
+
+func SetPageSize(size int) ChatRepoOption {
+	return func(cr *ChatRepo) {
+		cr.pageSize = size
+	}
+}
+
+func (chat *ChatRepo) SubscribeUserStatus(ctx context.Context, userID int, notify func(*domain.StatusMessage) error) {
+	accountStatusObserver := chat.accountStatusTopic.Subscribe(strconv.Itoa(userID), func(message []byte) error {
+		fmt.Println("sub")
+		var statusMessage domain.StatusMessage
+		if err := json.Unmarshal(message, &statusMessage); err != nil {
+			return errors.Wrap(err, "unmarshal status message failed")
+		}
+
+		if statusMessage.UserID != userID {
+			return nil
+		}
+
+		return notify(&statusMessage)
+	})
+	chat.accountStatusObservers.Store(strconv.FormatInt(httpKit.GetRequestID(ctx), 10)+":"+strconv.Itoa(userID), accountStatusObserver)
+}
+
+func (chat *ChatRepo) SubscribeChannelMessage(ctx context.Context, channelID int, notify func(*domain.ChannelMessage) error) {
+	channelMessageObserver := chat.channelMessageTopic.Subscribe(strconv.Itoa(channelID), func(message []byte) error {
+		var channelMessage domain.ChannelMessage
+		if err := json.Unmarshal(message, &channelMessage); err != nil {
+			return errors.Wrap(err, "unmarshal channel message failed")
+		}
+
+		if channelMessage.ChannelID != int64(channelID) {
+			return nil
+		}
+
+		return notify(&channelMessage)
+	})
+	chat.channelMessageObservers.Store(strconv.FormatInt(httpKit.GetRequestID(ctx), 10)+":"+strconv.Itoa(channelID), channelMessageObserver)
+}
+
+func (chat *ChatRepo) SubscribeFriendOnlineStatus(ctx context.Context, friendID int, notify func(*domain.StatusMessage) error) {
+	friendOnlineStatusObserver := chat.friendOnlineStatusTopic.Subscribe(strconv.Itoa(friendID), func(message []byte) error {
+		var statusMessage domain.StatusMessage
+		if err := json.Unmarshal(message, &statusMessage); err != nil {
+			return errors.Wrap(err, "unmarshal status message failed")
+		}
+
+		if statusMessage.UserID != friendID ||
+			(statusMessage.StatusType != domain.OnlineStatusType &&
+				statusMessage.StatusType != domain.OfflineStatusType) {
+			return nil
+		}
+
+		return notify(&statusMessage)
+	})
+	chat.friendOnlineStatusObservers.Store(strconv.FormatInt(httpKit.GetRequestID(ctx), 10)+":"+strconv.Itoa(friendID), friendOnlineStatusObserver)
+}
+
+func (chat *ChatRepo) SubscribeFriendMessage(ctx context.Context, friendID int, notify func(*domain.FriendMessage) error) {
+	accountMessageObserver := chat.accountMessageTopic.Subscribe(strconv.Itoa(friendID), func(message []byte) error {
+		var friendMessage domain.FriendMessage
+		if err := json.Unmarshal(message, &friendMessage); err != nil {
+			return errors.Wrap(err, "unmarshal friend message failed")
+		}
+
+		if friendMessage.FriendID != int64(friendID) {
+			return nil
+		}
+
+		return notify(&friendMessage)
+	})
+	chat.accountMessageObservers.Store(strconv.FormatInt(httpKit.GetRequestID(ctx), 10)+":"+strconv.Itoa(friendID), accountMessageObserver)
 }
 
 func (chat *ChatRepo) GetHistoryMessage(ctx context.Context, accountID, offset, page int) ([]*domain.FriendOrChannelMessage, bool, error) {
@@ -274,6 +390,21 @@ func (chat *ChatRepo) CreateChannel(ctx context.Context, userID int, channelName
 	return channelID, nil
 }
 
+func (chat *ChatRepo) GetChannel(channelID int) (*domain.Channel, error) {
+	channelInstance := channel{
+		Channel: &domain.Channel{
+			ChannelID: int64(channelID),
+		},
+	}
+	err := chat.mysqlDB.First(&channelInstance)
+	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(err); ok {
+		return nil, errors.Wrap(mySQLErr, "get mysql error")
+	} else if err != nil {
+		return nil, errors.Wrap(err, "get channel information failed")
+	}
+	return channelInstance.Channel, nil
+}
+
 func (chat *ChatRepo) CreateAccountChannels(ctx context.Context, userID, channelID int) error {
 	accountChannelInstance := accountChannel{
 		AccountChannel: &domain.AccountChannel{
@@ -397,4 +528,69 @@ func (chat *ChatRepo) GetOrCreateUserChatInformation(ctx context.Context, userID
 		return nil, errors.Wrap(err, "get user chat information failed")
 	}
 	return information.AccountChatInformation, nil
+}
+
+func (chat *ChatRepo) SendUserStatusMessage(ctx context.Context, userID int, onlineStatus domain.StatusType) error {
+	if err := chat.accountStatusTopic.Produce(ctx, statusMessage{
+		StatusMessage: &domain.StatusMessage{
+			StatusType: onlineStatus,
+			UserID:     userID,
+		}}); err != nil {
+		return errors.Wrap(err, "produce user message failed")
+	}
+	return nil
+}
+
+func (chat *ChatRepo) UnSubscribeChannelMessage(ctx context.Context, channelID int) {
+	if observer, ok := chat.channelMessageObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(channelID)); ok {
+		chat.channelMessageTopic.UnSubscribe(observer)
+	}
+}
+
+func (chat *ChatRepo) UnSubscribeFriendMessage(ctx context.Context, friendID int) {
+	if observer, ok := chat.accountMessageObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(friendID)); ok {
+		chat.accountMessageTopic.UnSubscribe(observer)
+	}
+}
+
+func (chat *ChatRepo) UnSubscribeFriendOnlineStatus(ctx context.Context, friendID int) {
+	if observer, ok := chat.friendOnlineStatusObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(friendID)); ok {
+		chat.accountStatusTopic.UnSubscribe(observer)
+	}
+}
+
+func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
+	requestID := strconv.FormatInt(httpKit.GetRequestID(ctx), 10)
+	chat.accountMessageObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
+		if strings.Split(key, ":")[0] != requestID { // TODO: performance
+			return true
+		}
+		chat.accountMessageTopic.UnSubscribe(observer)
+		chat.accountMessageObservers.Delete(key) // TODO: test
+		return true
+	})
+	chat.channelMessageObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
+		if strings.Split(key, ":")[0] != requestID { // TODO: performance
+			return true
+		}
+		chat.channelMessageTopic.UnSubscribe(observer)
+		chat.channelMessageObservers.Delete(key) // TODO: test
+		return true
+	})
+	chat.accountStatusObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
+		if strings.Split(key, ":")[0] != requestID { // TODO: performance
+			return true
+		}
+		chat.accountStatusTopic.UnSubscribe(observer)
+		chat.accountStatusObservers.Delete(key) // TODO: test
+		return true
+	})
+	chat.friendOnlineStatusObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
+		if strings.Split(key, ":")[0] != requestID { // TODO: performance
+			return true
+		}
+		chat.friendOnlineStatusTopic.UnSubscribe(observer)
+		chat.friendOnlineStatusObservers.Delete(key) // TODO: test
+		return true
+	})
 }

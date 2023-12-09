@@ -2,6 +2,7 @@ package readermanager
 
 import (
 	"context"
+	"fmt"
 )
 
 type ReaderManager interface {
@@ -14,7 +15,9 @@ type ReaderManager interface {
 	GetObserversLen() int
 }
 
-func defaultErrorHandleFn(err error) {}
+func defaultErrorHandleFn(err error) {
+	fmt.Println("get error: ", err) // TODO
+}
 
 type readerManagerConfig struct {
 	readerManagerOptions                      []readerManagerOption

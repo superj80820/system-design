@@ -14,7 +14,7 @@ type specPartitionReaderManager struct {
 
 type specPartitionReaderManagerOption func(*specPartitionReaderManager)
 
-func CreateSpecPartitionReaderManager(topic string, startOffset int64, partition int, brokers []string, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOffset int64, partition int, brokers []string, options ...readerManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)

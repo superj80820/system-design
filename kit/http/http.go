@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/superj80820/system-design/kit/code"
+	utilKit "github.com/superj80820/system-design/kit/util"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -19,6 +20,7 @@ const ( // TODO check correct
 	_CTX_TRACE_ID
 	_CTX_HTTP_CODE
 	_CTX_TOKEN
+	_CTX_REQUEST_ID
 )
 
 func ReadUserIP(r *http.Request) string {
@@ -34,10 +36,11 @@ func ReadUserIP(r *http.Request) string {
 
 func CustomBeforeCtx(tracer trace.Tracer) func(ctx context.Context, r *http.Request) context.Context {
 	return func(ctx context.Context, r *http.Request) context.Context {
-		ctx = context.WithValue(ctx, _CTX_TOKEN, r.Header.Get("Authentication"))
-		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)
-		ctx = context.WithValue(ctx, _CTX_URL_PATH, r.URL.Path)
-		ctx = context.WithValue(ctx, _CTX_IP_KEY, ReadUserIP(r)) // TODO: check correct
+		ctx = context.WithValue(ctx, _CTX_TOKEN, r.Header.Get("Authentication")) // TODO: add
+		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)                          // TODO: add
+		ctx = context.WithValue(ctx, _CTX_URL_PATH, r.URL.Path)                  // TODO: add
+		ctx = context.WithValue(ctx, _CTX_IP_KEY, ReadUserIP(r))                 // TODO: check correct // TODO: add
+		ctx = AddRequestID(ctx)
 
 		ctx, span := tracer.Start(ctx, GetURL(ctx))
 		defer span.End()
@@ -67,6 +70,14 @@ func GetURL(ctx context.Context) string {
 
 func GetToken(ctx context.Context) string {
 	return ctx.Value(_CTX_TOKEN).(string)
+}
+
+func AddRequestID(ctx context.Context) context.Context {
+	return context.WithValue(ctx, _CTX_REQUEST_ID, utilKit.GetSnowflakeIDInt64())
+}
+
+func GetRequestID(ctx context.Context) int64 {
+	return ctx.Value(_CTX_REQUEST_ID).(int64)
 }
 
 func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.ResponseWriter) {

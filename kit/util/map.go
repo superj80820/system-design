@@ -22,6 +22,11 @@ func (s *GenericSyncMap[K, V]) Delete(key K) {
 	s.Map.Delete(key)
 }
 
+func (s *GenericSyncMap[K, V]) LoadAndDelete(key K) (V, bool) {
+	value, ok := s.Map.LoadAndDelete(key)
+	return value.(V), ok
+}
+
 func (s *GenericSyncMap[K, V]) Load(key K) (V, bool) {
 	value, ok := s.Map.Load(key)
 	return value.(V), ok

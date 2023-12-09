@@ -7,6 +7,41 @@ import (
 	"github.com/superj80820/system-design/kit/core/endpoint"
 )
 
+type ChatRepository interface {
+	GetOrCreateUserChatInformation(ctx context.Context, userID int) (*AccountChatInformation, error)
+	UpdateOnlineStatus(ctx context.Context, userID int, onlineStatus OnlineStatusEnum) error
+
+	CreateChannel(ctx context.Context, userID int, channelName string) (int64, error)
+	// GetChannel(channelID int) (*Channel, error) // TODO: no need?
+
+	CreateAccountChannels(ctx context.Context, userID, channelID int) error
+	CreateAccountFriends(ctx context.Context, userID, friendID int) error
+	GetAccountChannels(ctx context.Context, userID int) ([]int64, error)
+	GetAccountFriends(ctx context.Context, userID int) ([]int64, error)
+
+	GetHistoryMessage(ctx context.Context, accountID, offset, page int) ([]*FriendOrChannelMessage, bool, error)
+	GetHistoryMessageByChannel(ctx context.Context, channelID, offset, page int) ([]*ChannelMessage, bool, error)
+	GetHistoryMessageByFriend(ctx context.Context, accountID, friendID, offset, page int) ([]*FriendMessage, bool, error)
+
+	InsertFriendMessage(ctx context.Context, userID, friendID int64, content string) (int64, error)
+	InsertChannelMessage(ctx context.Context, userID, channelID int64, content string) (int64, error)
+
+	SendFriendMessage(ctx context.Context, userID, friendID, messageID int, content string) error
+	SendChannelMessage(ctx context.Context, userID, channelID, messageID int, content string) error
+	SendUserStatusMessage(ctx context.Context, userID int, onlineStatus StatusType) error
+
+	SubscribeUserStatus(ctx context.Context, userID int, notify func(*StatusMessage) error)
+	SubscribeFriendOnlineStatus(ctx context.Context, friend int, notify func(*StatusMessage) error)
+	SubscribeFriendMessage(ctx context.Context, friendID int, notify func(*FriendMessage) error)
+	SubscribeChannelMessage(ctx context.Context, channelID int, notify func(*ChannelMessage) error)
+
+	UnSubscribeFriendOnlineStatus(ctx context.Context, friendID int)
+	UnSubscribeFriendMessage(ctx context.Context, friendID int)
+	UnSubscribeChannelMessage(ctx context.Context, channelID int)
+
+	UnSubscribeAll(ctx context.Context)
+}
+
 type Channel struct {
 	ChannelID        int64 `bson:"channel_id" json:"channel_id" gorm:"column:id"` // TODO: check gorm label
 	Name             string
@@ -31,64 +66,6 @@ type AccountFriend struct {
 	UpdatedAt  time.Time
 }
 
-type ChatRepository interface {
-	GetHistoryMessage(ctx context.Context, accountID, offset, page int) ([]*FriendOrChannelMessage, bool, error)
-	GetHistoryMessageByChannel(ctx context.Context, channelID, offset, page int) ([]*ChannelMessage, bool, error)
-	GetHistoryMessageByFriend(ctx context.Context, accountID, friendID, offset, page int) ([]*FriendMessage, bool, error)
-	InsertFriendMessage(ctx context.Context, friendMessage *FriendMessage) error
-	InsertChannelMessage(ctx context.Context, channelMessage *ChannelMessage) error
-	GetChannelByName(channelName string) (*Channel, error)
-	GetOrCreateUserChatInformation(ctx context.Context, userID int) (*AccountChatInformation, error)
-
-	UpdateOnlineStatus(ctx context.Context, id int, onlineStatus OnlineStatusEnum)
-	GetAccountChannels(ctx context.Context, id int) ([]*Channel, error)
-	GetAccountFriends(ctx context.Context, id int) ([]*AccountFriend, error)
-}
-
-type ChatClientAction string
-
-const (
-	SendMessageToChannel     ChatClientAction = "send_message_to_channel"
-	SendMessageToFriend      ChatClientAction = "send_message_to_friend"
-	GetFriendHistoryMessage  ChatClientAction = "get_friend_history_message"
-	GetChannelHistoryMessage ChatClientAction = "get_channel_history_message"
-	GetHistoryMessage        ChatClientAction = "get_history_message"
-)
-
-type ChatRequest struct {
-	Action         ChatClientAction `json:"action"`
-	SendChannelReq struct {
-		ChannelName string `json:"channel_name"`
-		Message     string `json:"message"`
-	} `json:"send_channel_req,omitempty"`
-	ChannelHistoryReq struct {
-	} `json:"channel_history_req"`
-	JoinChannelReq struct {
-		ChannelName     string `json:"channel_name"`
-		CurMaxMessageID int    `json:"cur_max_message_id,omitempty"`
-	} `json:"join_channel_req,omitempty"`
-	GetFriendHistoryMessage struct { // TODO
-		FriendID        int `json:"friend_id"`
-		CurMaxMessageID int `json:"cur_max_message_id"`
-		Page            int `json:"page"`
-	}
-	GetChannelHistoryMessage struct { // TODO
-		ChannelID       int `json:"channel_id"`
-		CurMaxMessageID int `json:"cur_max_message_id"`
-		Page            int `json:"page"`
-	}
-	GetHistoryMessage struct { // TODO
-		CurMaxMessageID int `json:"cur_max_message_id"`
-		Page            int `json:"page"`
-	}
-}
-
-type ChatResponse struct {
-	Data      string `json:"data"`
-	UserID    int    `json:"user_id"`
-	MessageID int    `json:"message_id"`
-}
-
 type MessageType int
 
 const (
@@ -107,22 +84,26 @@ type MessageMetadata struct {
 	MetadataID  int64       `bson:"metadata_id" json:"metadata_id"`
 	MessageID   int64       `bson:"message_id" json:"message_id"`
 	UserID      int64       `bson:"user_id" json:"user_id"`
-	CreatedAt   time.Time   // TODO
-	UpdatedAt   time.Time   //TODO
+	CreatedAt   time.Time   `bson:"created_at"`
+	UpdatedAt   time.Time   `bson:"updated_at"`
 }
 
 type ChannelMessage struct {
-	MessageID int64  `bson:"message_id" json:"message_id"`
-	ChannelID int64  `bson:"channel_id" json:"channel_id"`
-	Content   string `bson:"content" json:"content"`
-	UserID    int64  `bson:"user_id" json:"user_id"`
+	MessageID int64     `bson:"message_id" json:"message_id"`
+	ChannelID int64     `bson:"channel_id" json:"channel_id"`
+	Content   string    `bson:"content" json:"content"`
+	UserID    int64     `bson:"user_id" json:"user_id"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }
 
 type FriendMessage struct {
-	MessageID int64  `bson:"message_id" json:"message_id"`
-	Content   string `bson:"content" json:"content"`
-	FriendID  int64  `bson:"friend_id" json:"friend_id"`
-	UserID    int64  `bson:"user_id" json:"user_id"`
+	MessageID int64     `bson:"message_id" json:"message_id"`
+	Content   string    `bson:"content" json:"content"`
+	FriendID  int64     `bson:"friend_id" json:"friend_id"`
+	UserID    int64     `bson:"user_id" json:"user_id"`
+	CreatedAt time.Time `bson:"created_at"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }
 
 type ChatService interface {

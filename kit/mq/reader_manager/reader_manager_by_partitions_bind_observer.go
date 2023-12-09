@@ -107,7 +107,7 @@ func defaultKafkaControllerConnProvider(url string) func() (KafkaConn, error) {
 	}
 }
 
-func CreatePartitionBindObserverReaderManager(url string, startOffset int64, brokers []string, topic string, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, startOffset int64, brokers []string, topic string, options ...readerManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -149,19 +149,24 @@ func CreatePartitionBindObserverReaderManager(url string, startOffset int64, bro
 	go func() {
 		ticker := time.NewTicker(rm.watchBalanceDuration)
 		for range ticker.C {
-			func() {
-				rm.lock.Lock()
-				defer rm.lock.Unlock()
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				func() {
+					rm.lock.Lock()
+					defer rm.lock.Unlock()
 
-				isPartitionChange, err := rm.fetchPartitionsInfo()
-				if err != nil {
-					rm.errorHandleFn(errors.Wrap(err, "fetch partitions information then set readers failed"))
-					return
-				}
-				if isPartitionChange {
-					rm.balanceObservers()
-				}
-			}()
+					isPartitionChange, err := rm.fetchPartitionsInfo()
+					if err != nil {
+						rm.errorHandleFn(errors.Wrap(err, "fetch partitions information then set readers failed"))
+						return
+					}
+					if isPartitionChange {
+						rm.balanceObservers()
+					}
+				}()
+			}
 		}
 	}()
 

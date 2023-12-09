@@ -33,7 +33,7 @@ var (
 	addr                    = flag.String("addr", "localhost:8080", "http server address")
 	groupID                 = flag.String("group-id", "chat-service", "kafka consume group id")
 	kafkaURL                = "localhost:9092"
-	channelMessageTopicName = "quickstart-events-par-3"
+	channelMessageTopicName = "channel-message"
 	userMessageTopicName    = "user-message"
 	userStatusTopicName     = "user-status"
 	serviceName             = "chat-service"
@@ -77,7 +77,8 @@ func main() {
 		context.TODO(),
 		kafkaURL,
 		userMessageTopicName,
-		mqKit.ConsumeByGroupID(*groupID, mqReaderManagerKit.LastOffset),
+		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
+		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
@@ -86,26 +87,36 @@ func main() {
 		context.TODO(),
 		kafkaURL,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName, mqReaderManagerKit.LastOffset),
+		mqKit.ConsumeByGroupID(serviceName+":user_status", mqReaderManagerKit.LastOffset),
 	)
 	if err != nil {
 		panic(err)
 	}
+	friendOnlineStatusTopic, err := mqKit.CreateMQTopic( // TODO: need?
+		context.TODO(),
+		kafkaURL,
+		userStatusTopicName,
+		mqKit.ConsumeByGroupID(serviceName+":friend_online_status", mqReaderManagerKit.LastOffset),
+	)
 
 	rateLimit := utilKit.CreateCacheRateLimit(singletonCache, 5, 10)
 
 	tracer := traceKit.CreateNoOpTracer()
 
-	chatRepo, err := repository.CreateChatRepo(mongoDB, mysqlDB)
+	chatRepo, err := repository.CreateChatRepo(
+		mongoDB,
+		mysqlDB,
+		channelMessageTopic,
+		userMessageTopic,
+		userStatusTopic,
+		friendOnlineStatusTopic,
+	)
 	if err != nil {
 		panic(err)
 	}
 
 	chatUseCase := usecase.MakeChatUseCase(
 		chatRepo,
-		channelMessageTopic,
-		userMessageTopic,
-		userStatusTopic,
 	)
 
 	r := mux.NewRouter()

@@ -2,8 +2,6 @@ package usecase
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -11,25 +9,261 @@ import (
 	"github.com/superj80820/system-design/chat/domain"
 	"github.com/superj80820/system-design/kit/core/endpoint"
 	httpKit "github.com/superj80820/system-design/kit/http"
-	mqKit "github.com/superj80820/system-design/kit/mq"
-	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
-	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type ChatUseCase struct {
 	chatRepo domain.ChatRepository
-
-	channelMessageTopic *mqKit.MQTopic // TODO: to domain
-	accountMessageTopic *mqKit.MQTopic
-	accountStatusTopic  *mqKit.MQTopic
 }
 
-func MakeChatUseCase(chatRepo domain.ChatRepository, channelMessageTopic, userMessageTopic, userStatusTopic *mqKit.MQTopic) *ChatUseCase {
+func MakeChatUseCase(chatRepo domain.ChatRepository) *ChatUseCase {
 	return &ChatUseCase{
-		chatRepo:            chatRepo,
-		channelMessageTopic: channelMessageTopic,
-		accountMessageTopic: userMessageTopic,
-		accountStatusTopic:  userStatusTopic,
+		chatRepo: chatRepo,
+	}
+}
+
+func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain.ChatRequest, domain.ChatResponse]) error {
+	token := httpKit.GetToken(ctx)
+	accountID, err := strconv.Atoi(token) // TODO
+	if err != nil {
+		return errors.Wrap(err, "get user id failed")
+	}
+
+	// TODO: think need tx?
+	_, err = chat.chatRepo.GetOrCreateUserChatInformation(ctx, accountID)
+	if err != nil {
+		return errors.Wrap(err, "create user chat information failed")
+	}
+
+	if err := chat.chatRepo.UpdateOnlineStatus(ctx, accountID, domain.OnlineStatus); err != nil {
+		return errors.Wrap(err, "update user online status failed")
+	}
+	chat.chatRepo.SendUserStatusMessage(ctx, accountID, domain.OnlineStatusType)
+
+	chat.chatRepo.SubscribeUserStatus(ctx, accountID, func(statusMessage *domain.StatusMessage) error {
+		stream.Send(&domain.ChatResponse{
+			MessageType:   domain.StatusMessageResponseMessageType,
+			StatusMessage: statusMessage,
+		})
+
+		switch statusMessage.StatusType {
+		case domain.AddFriendStatusType:
+			chat.chatRepo.SubscribeFriendMessage(
+				ctx,
+				statusMessage.AddFriendStatus.FriendID,
+				func(fm *domain.FriendMessage) error {
+					stream.Send(&domain.ChatResponse{
+						MessageType: domain.FriendResponseMessageType,
+						FriendMessage: &domain.FriendMessage{
+							UserID:    fm.UserID,
+							MessageID: fm.MessageID,
+							Content:   fm.Content,
+							FriendID:  fm.FriendID,
+						},
+					})
+					return nil
+				},
+			)
+			chat.chatRepo.SubscribeFriendOnlineStatus(ctx, statusMessage.AddFriendStatus.FriendID, func(sm *domain.StatusMessage) error {
+				switch sm.StatusType {
+				case domain.OnlineStatusType:
+					stream.Send(&domain.ChatResponse{
+						MessageType:  domain.FriendOnlineStatusResponseMessageType,
+						OnlineStatus: domain.OnlineStatus,
+					})
+				case domain.OfflineStatusType:
+					stream.Send(&domain.ChatResponse{
+						MessageType:  domain.FriendOnlineStatusResponseMessageType,
+						OnlineStatus: domain.OfflineStatus,
+					})
+				}
+				return nil
+			})
+		case domain.RemoveFriendStatusType:
+			chat.chatRepo.UnSubscribeFriendMessage(ctx, statusMessage.RemoveFriendStatus.FriendID)
+			chat.chatRepo.UnSubscribeFriendOnlineStatus(ctx, statusMessage.RemoveFriendStatus.FriendID)
+		case domain.AddChannelStatusType:
+			chat.chatRepo.SubscribeChannelMessage(ctx, statusMessage.AddChannelStatus.ChannelID, func(cm *domain.ChannelMessage) error {
+				stream.Send(&domain.ChatResponse{
+					MessageType: domain.ChannelResponseMessageType,
+					ChannelMessage: &domain.ChannelMessage{
+						MessageID: cm.MessageID,
+						ChannelID: cm.ChannelID,
+						Content:   cm.Content,
+						UserID:    cm.UserID,
+					},
+				})
+				return nil
+			})
+		case domain.RemoveChannelStatusType:
+			chat.chatRepo.UnSubscribeFriendMessage(ctx, statusMessage.RemoveChannelStatus.ChannelID)
+		}
+		return nil
+	})
+
+	accountChannels, err := chat.chatRepo.GetAccountChannels(ctx, accountID)
+	if err != nil {
+		return errors.Wrap(err, "get account channels failed")
+	}
+	stream.Send(&domain.ChatResponse{
+		MessageType:  domain.UserChannelsResponseMessageType,
+		UserChannels: accountChannels,
+	})
+
+	accountFriends, err := chat.chatRepo.GetAccountFriends(ctx, accountID)
+	if err != nil {
+		return errors.Wrap(err, "get account friends failed")
+	}
+	stream.Send(&domain.ChatResponse{
+		MessageType: domain.UserFriendsResponseMessageType,
+		UserFriends: accountFriends,
+	})
+
+	historyMessage, isEnd, err := chat.chatRepo.GetHistoryMessage(ctx, accountID, 0, 1) // TODO: number offset, page
+	if err != nil {
+		return errors.Wrap(err, "get history message failed")
+	}
+	stream.Send(&domain.ChatResponse{
+		MessageType: domain.FriendOrChannelMessageHistoryResponseMessageType,
+		FriendOrChannelMessageHistory: &domain.FriendOrChannelMessageHistory{
+			HistoryMessage: historyMessage,
+			IsEnd:          isEnd,
+		},
+	})
+
+	for _, accountChannel := range accountChannels {
+		accountChannelInt := int(accountChannel) //TODO: think overflow
+
+		chat.chatRepo.SubscribeChannelMessage(ctx, accountChannelInt, func(cm *domain.ChannelMessage) error {
+			stream.Send(&domain.ChatResponse{
+				MessageType: domain.ChannelResponseMessageType,
+				ChannelMessage: &domain.ChannelMessage{
+					MessageID: cm.MessageID,
+					ChannelID: cm.ChannelID,
+					Content:   cm.Content,
+					UserID:    cm.UserID,
+				},
+			})
+			return nil
+		})
+	}
+	for _, accountFriend := range accountFriends {
+		accountFriendInt := int(accountFriend) //TODO: think overflow
+
+		chat.chatRepo.SubscribeFriendMessage(
+			ctx,
+			accountFriendInt,
+			func(fm *domain.FriendMessage) error {
+				stream.Send(&domain.ChatResponse{
+					MessageType: domain.FriendResponseMessageType,
+					FriendMessage: &domain.FriendMessage{
+						UserID:    fm.UserID,
+						MessageID: fm.MessageID,
+						Content:   fm.Content,
+						FriendID:  fm.FriendID,
+					},
+				})
+				return nil
+			})
+		chat.chatRepo.SubscribeFriendOnlineStatus(ctx, accountFriendInt, func(sm *domain.StatusMessage) error {
+			switch sm.StatusType {
+			case domain.OnlineStatusType:
+				stream.Send(&domain.ChatResponse{
+					MessageType:  domain.FriendOnlineStatusResponseMessageType,
+					OnlineStatus: domain.OnlineStatus,
+				})
+			case domain.OfflineStatusType:
+				stream.Send(&domain.ChatResponse{
+					MessageType:  domain.FriendOnlineStatusResponseMessageType,
+					OnlineStatus: domain.OfflineStatus,
+				})
+			}
+			return nil
+		})
+	}
+
+	for {
+		req, err := stream.Recv()
+		if err != nil {
+			if err := chat.chatRepo.UpdateOnlineStatus(ctx, accountID, domain.OnlineStatus); err != nil { // TODO: defer?
+				return errors.Wrap(err, "update user online status failed")
+			}
+			chat.chatRepo.SendUserStatusMessage(ctx, accountID, domain.OfflineStatusType)
+			return errors.Wrap(err, "receive input failed")
+		}
+		switch req.Action {
+		case domain.SendMessageToFriend:
+			// TODO: tx?
+			messageID, err := chat.chatRepo.InsertFriendMessage(ctx, int64(accountID), req.SendFriendReq.FriendID, req.SendFriendReq.Message)
+			if err != nil {
+				return errors.Wrap(err, "insert friend message failed")
+			}
+			if err := chat.chatRepo.SendFriendMessage(ctx, accountID, int(req.SendFriendReq.FriendID), int(messageID), req.SendFriendReq.Message); err != nil { // TODO: is int64 to int safe? {
+				return errors.Wrap(err, "send friend message failed")
+			}
+		case domain.SendMessageToChannel:
+			// TODO: tx?
+			messageID, err := chat.chatRepo.InsertChannelMessage(ctx, int64(accountID), req.SendChannelReq.ChannelID, req.SendChannelReq.Message)
+			if err != nil {
+				return errors.Wrap(err, "insert channel message failed")
+			}
+			if err := chat.chatRepo.SendChannelMessage(ctx, accountID, int(req.SendChannelReq.ChannelID), int(messageID), req.SendChannelReq.Message); err != nil { // TODO: is int64 to int safe?
+				return errors.Wrap(err, "send channel message failed")
+			}
+		case domain.GetFriendHistoryMessage:
+			var friendHistoryMessage []*domain.FriendMessage
+			friendHistoryMessage, isEnd, err = chat.chatRepo.GetHistoryMessageByFriend( // TODO: curMaxMessageID?
+				ctx,
+				accountID,
+				req.GetFriendHistoryMessageReq.FriendID,
+				req.GetFriendHistoryMessageReq.CurMaxMessageID,
+				req.GetFriendHistoryMessageReq.Page,
+			)
+			if err != nil {
+				return errors.Wrap(err, "get friend message failed")
+			}
+			stream.Send(&domain.ChatResponse{
+				MessageType: domain.FriendMessageHistoryResponseMessageType,
+				FriendMessageHistory: &domain.FriendMessageHistory{
+					HistoryMessage: friendHistoryMessage,
+					IsEnd:          isEnd,
+				},
+			})
+		case domain.GetChannelHistoryMessage:
+			var channelHistoryMessage []*domain.ChannelMessage
+			channelHistoryMessage, isEnd, err = chat.chatRepo.GetHistoryMessageByChannel(
+				ctx,
+				req.GetChannelHistoryMessageReq.ChannelID,
+				req.GetChannelHistoryMessageReq.CurMaxMessageID,
+				req.GetChannelHistoryMessageReq.Page,
+			)
+			if err != nil {
+				return errors.Wrap(err, "get channel message failed")
+			}
+			stream.Send(&domain.ChatResponse{
+				MessageType: domain.ChannelMessageHistoryResponseMessageType,
+				ChannelMessageHistory: &domain.ChannelMessageHistory{
+					HistoryMessage: channelHistoryMessage,
+					IsEnd:          isEnd,
+				},
+			})
+		case domain.GetHistoryMessage:
+			historyMessage, isEnd, err = chat.chatRepo.GetHistoryMessage( // TODO: number offset, page
+				ctx,
+				accountID,
+				req.GetHistoryMessageReq.CurMaxMessageID,
+				req.GetHistoryMessageReq.Page,
+			)
+			if err != nil {
+				return errors.Wrap(err, "get history message failed")
+			}
+			stream.Send(&domain.ChatResponse{
+				MessageType: domain.FriendOrChannelMessageHistoryResponseMessageType,
+				FriendOrChannelMessageHistory: &domain.FriendOrChannelMessageHistory{
+					HistoryMessage: historyMessage,
+					IsEnd:          isEnd, // TODO: should use isEnd?
+				},
+			})
+		}
 	}
 }
 
@@ -54,281 +288,32 @@ func MakeChatUseCase(chatRepo domain.ChatRepository, channelMessageTopic, userMe
 
 // TODO: api to get user channels and friends
 
-func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain.ChatRequest, domain.ChatResponse]) error {
-	token := httpKit.GetToken(ctx)
-	accountID, err := strconv.Atoi(token) // TODO
-	if err != nil {
-		return errors.Wrap(err, "get user id failed")
-	}
-
-	uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
-	if err != nil {
-		return errors.Wrap(err, "get unique id failed")
-	}
-
-	// TODO: think need tx?
-	if _, err := chat.chatRepo.GetOrCreateUserChatInformation(ctx, accountID); err != nil {
-		return errors.Wrap(err, "create user chat information failed")
-	}
-
-	chat.chatRepo.Online(ctx, accountID)
-	chat.accountStatusTopic.Produce(ctx, &StatusMessage{&domain.StatusMessage{ // TODO: refactor
-		StatusType: domain.OnlineStatusType,
-	}})
-	defer func() {
-		chat.chatRepo.Offline(ctx, accountID)
-		chat.accountStatusTopic.Produce(ctx, &StatusMessage{&domain.StatusMessage{ // TODO: refactor
-			StatusType: domain.OfflineStatusType,
-		}})
-	}()
-
-	addAccountMessageObserverCh, removeAccountMessageObserverCh := observerManger(ctx, chat.accountMessageTopic)
-	addChannelMessageObserverCh, removeChannelMessageObserverCh := observerManger(ctx, chat.channelMessageTopic)
-	addAccountStatusObserverCh, removeAccountStatusObserverCh := observerManger(ctx, chat.accountStatusTopic)
-
-	accountStatusObserver := chat.accountStatusTopic.Subscribe(strconv.Itoa(accountID), func(message []byte) error {
-		statusMessage := new(domain.StatusMessage)
-		if err := json.Unmarshal(message, statusMessage); err != nil {
-			return errors.Wrap(err, "unmarshal status message failed")
-		}
-
-		if statusMessage.UserID != accountID {
-			return nil
-		}
-
-		stream.Send(&domain.ChatResponse{}) // TODO: response
-
-		switch statusMessage.StatusType {
-		case domain.AddFriendStatusType:
-			addFriendStatus := new(domain.AddFriendStatus)
-			json.Unmarshal([]byte(statusMessage.Content), addFriendStatus) // TODO: need byte? // TODO: error handle
-
-			friendMessageObserver := chat.accountMessageTopic.Subscribe(
-				strconv.Itoa(addFriendStatus.FriendUserID),
-				friendMessageNotify(addFriendStatus.FriendUserID, stream),
-			)
-			addAccountMessageObserverCh <- friendMessageObserver
-
-			friendStatusObserver := chat.accountStatusTopic.Subscribe(
-				strconv.Itoa(addFriendStatus.FriendUserID),
-				friendStatusNotify(addFriendStatus.FriendUserID, stream),
-			)
-			addAccountStatusObserverCh <- friendStatusObserver
-		case domain.RemoveFriendStatusType:
-			removeFriendStatus := new(domain.RemoveFriendStatus)
-			json.Unmarshal([]byte(statusMessage.Content), removeFriendStatus) // TODO: need byte? // TODO: error handle
-
-			removeAccountMessageObserverCh <- strconv.Itoa(removeFriendStatus.FriendUserID)
-			removeAccountStatusObserverCh <- strconv.Itoa(removeFriendStatus.FriendUserID)
-		case domain.AddChannelStatusType:
-			addChannelStatus := new(domain.AddChannelStatus)
-			json.Unmarshal([]byte(statusMessage.Content), addChannelStatus) // TODO: need byte? // TODO: error handle
-
-			channelMessageObserver := chat.channelMessageTopic.Subscribe(
-				strconv.Itoa(addChannelStatus.ChannelID),
-				channelMessageNotify(addChannelStatus.ChannelID, stream),
-			)
-			addChannelMessageObserverCh <- channelMessageObserver
-		case domain.RemoveChannelStatusType:
-			removeChannelStatus := new(domain.RemoveChannelStatus)
-			json.Unmarshal([]byte(statusMessage.Content), removeChannelStatus) // TODO: need byte? // TODO: error handle
-
-			removeChannelMessageObserverCh <- strconv.Itoa(removeChannelStatus.ChannelID)
-		}
-
-		return nil
-	})
-	defer chat.accountStatusTopic.UnSubscribe(accountStatusObserver)
-
-	accountChannels, err := chat.chatRepo.GetAccountChannels(ctx, accountID)
-	if err != nil {
-		return errors.Wrap(err, "get account channels failed")
-	}
-	accountFriends, err := chat.chatRepo.GetAccountFriends(ctx, accountID)
-	if err != nil {
-		return errors.Wrap(err, "get account friends failed")
-	}
-	historyMessage, _, err := chat.chatRepo.GetHistoryMessage(ctx, accountID, 0, 1) // TODO: number offset, page
-	if err != nil {
-		return errors.Wrap(err, "get history message failed")
-	}
-
-	accountChannelsMarshal, err := json.Marshal(accountChannels)
-	if err != nil {
-		return errors.Wrap(err, "get account channel failed")
-	}
-	stream.Send(&domain.ChatResponse{
-		Data: string(accountChannelsMarshal), // TODO
-	})
-	accountFriendsMarshal, err := json.Marshal(accountFriends)
-	if err != nil {
-		return errors.Wrap(err, "get friend channel failed")
-	}
-	stream.Send(&domain.ChatResponse{
-		Data: string(accountFriendsMarshal), // TODO
-	})
-	historyMessageMarshal, err := json.Marshal(historyMessage)
-	if err != nil {
-		return errors.Wrap(err, "get history message failed")
-	}
-	stream.Send(&domain.ChatResponse{
-		Data: string(historyMessageMarshal), // TODO
-	})
-
-	for _, accountChannel := range accountChannels {
-		channelMessageObserver := chat.channelMessageTopic.Subscribe(
-			strconv.Itoa(accountChannel.ID),
-			channelMessageNotify(accountChannel.ID, stream),
-		)
-		addChannelMessageObserverCh <- channelMessageObserver
-	}
-	for _, accountFriend := range accountFriends {
-		friendMessageObserver := chat.accountMessageTopic.Subscribe(
-			strconv.Itoa(accountFriend.ID),
-			friendMessageNotify(accountFriend.ID, stream),
-		)
-		addAccountMessageObserverCh <- friendMessageObserver
-
-		friendStatusObserver := chat.accountStatusTopic.Subscribe(
-			strconv.Itoa(accountFriend.ID),
-			friendStatusNotify(accountFriend.ID, stream),
-		)
-		addAccountStatusObserverCh <- friendStatusObserver
-	}
-
-	for {
-		req, err := stream.Recv()
-		if err != nil {
-			return errors.Wrap(err, "receive input failed")
-		}
-		switch req.Action {
-		case domain.SendMessageToFriend:
-			friendMessage := domain.FriendMessage{
-				MessageID: int(uniqueIDGenerate.Generate().GetInt64()),
-				Content:   req.SendChannelReq.Message,
-				UserID:    accountID,
-			}
-
-			if err := chat.chatRepo.InsertFriendMessage(ctx, &friendMessage); err != nil {
-				return errors.Wrap(err, "insert friend message failed")
-			}
-
-			if err := chat.channelMessageTopic.Produce(ctx, ChannelMessage{&domain.ChannelMessage{ // TODO refactor
-				MessageID: int(uniqueIDGenerate.Generate().GetInt64()),
-				Content:   req.SendChannelReq.Message,
-				UserID:    accountID,
-			}}); err != nil {
-				return errors.Wrap(err, "produce message failed")
-			}
-		case domain.SendMessageToChannel:
-			channelInfo, err := chat.chatRepo.GetChannelByName(req.SendChannelReq.ChannelName)
-			if err != nil {
-				return errors.Wrap(err, "get channel failed")
-			}
-			channelMessage := domain.ChannelMessage{
-				MessageID: int(uniqueIDGenerate.Generate().GetInt64()),
-				ChannelID: channelInfo.ID,
-				Content:   req.SendChannelReq.Message,
-				UserID:    accountID,
-			}
-
-			if err := chat.chatRepo.InsertChannelMessage(ctx, &channelMessage); err != nil {
-				return errors.Wrap(err, "insert channel message failed")
-			}
-
-			if err := chat.channelMessageTopic.Produce(ctx, ChannelMessage{&domain.ChannelMessage{
-				MessageID: int(uniqueIDGenerate.Generate().GetInt64()),
-				ChannelID: channelInfo.ID,
-				Content:   req.SendChannelReq.Message,
-				UserID:    accountID,
-			}}); err != nil {
-				return errors.Wrap(err, "produce message failed")
-			}
-		case domain.GetFriendHistoryMessage:
-			var friendHistoryMessage []*domain.FriendMessage
-			friendHistoryMessage, _, err = chat.chatRepo.GetHistoryMessageByFriend( // TODO: curMaxMessageID?
-				ctx,
-				accountID,
-				req.GetFriendHistoryMessage.FriendID,
-				req.GetFriendHistoryMessage.CurMaxMessageID,
-				req.GetFriendHistoryMessage.Page,
-			)
-			if err != nil {
-				return errors.Wrap(err, "get friend message failed")
-			}
-			friendHistoryMessageMarshal, err := json.Marshal(friendHistoryMessage)
-			if err != nil {
-				return errors.Wrap(err, "marshal friend history failed")
-			}
-			stream.Send(&domain.ChatResponse{
-				Data: string(friendHistoryMessageMarshal), // TODO
-			})
-		case domain.GetChannelHistoryMessage:
-			var channelHistoryMessage []*domain.ChannelMessage
-			channelHistoryMessage, _, err = chat.chatRepo.GetHistoryMessageByChannel(
-				ctx,
-				req.GetChannelHistoryMessage.ChannelID,
-				req.GetChannelHistoryMessage.CurMaxMessageID,
-				req.GetChannelHistoryMessage.Page,
-			)
-			if err != nil {
-				return errors.Wrap(err, "get channel message failed")
-			}
-			channelHistoryMessageMarshal, err := json.Marshal(channelHistoryMessage)
-			if err != nil {
-				return errors.Wrap(err, "marshal channel history failed")
-			}
-			stream.Send(&domain.ChatResponse{
-				Data: string(channelHistoryMessageMarshal) + "TODO: isEnd", // TODO
-			})
-		case domain.GetHistoryMessage:
-			historyMessage, _, err = chat.chatRepo.GetHistoryMessage( // TODO: number offset, page
-				ctx,
-				accountID,
-				req.GetHistoryMessage.CurMaxMessageID,
-				req.GetHistoryMessage.Page,
-			)
-			if err != nil {
-				return errors.Wrap(err, "get history message failed")
-			}
-			historyMessageMarshal, err := json.Marshal(historyMessage)
-			if err != nil {
-				return errors.Wrap(err, "marshal history message failed")
-			}
-			stream.Send(&domain.ChatResponse{
-				Data: string(historyMessageMarshal) + "TODO: isEnd", // TODO
-			})
-
-		}
-	}
-}
-
-func observerManger(ctx context.Context, mqTopic *mqKit.MQTopic) (
-	chan *mqReaderManagerKit.Observer,
-	chan string,
-) { // TODO: name and variable // TODO: think to lib?
-	observerHashTable := make(map[string]*mqReaderManagerKit.Observer)
-	addObserverCh := make(chan *mqReaderManagerKit.Observer)
-	removeObserverCh := make(chan string)
-	go func() {
-		for {
-			select {
-			case accountMessageObserver := <-addObserverCh:
-				observerHashTable[accountMessageObserver.GetKey()] = accountMessageObserver
-			case removeAccountMessageObserverKey := <-removeObserverCh:
-				if observer, ok := observerHashTable[removeAccountMessageObserverKey]; ok {
-					fmt.Println("TODO: should not be")
-					mqTopic.UnSubscribe(observer)
-					delete(observerHashTable, removeAccountMessageObserverKey)
-				}
-			case <-ctx.Done(): // TODO: check return
-				for key, observer := range observerHashTable {
-					mqTopic.UnSubscribe(observer)
-					delete(observerHashTable, key) // TODO: right?
-				}
-				return
-			}
-		}
-	}()
-	return addObserverCh, removeObserverCh
-}
+// func observerManger(ctx context.Context, mqTopic *mqKit.MQTopic) (
+// 	chan *mqReaderManagerKit.Observer,
+// 	chan string,
+// ) { // TODO: name and variable // TODO: think to lib?
+// 	observerHashTable := make(map[string]*mqReaderManagerKit.Observer)
+// 	addObserverCh := make(chan *mqReaderManagerKit.Observer)
+// 	removeObserverCh := make(chan string)
+// 	go func() {
+// 		for {
+// 			select {
+// 			case accountMessageObserver := <-addObserverCh:
+// 				observerHashTable[accountMessageObserver.GetKey()] = accountMessageObserver
+// 			case removeAccountMessageObserverKey := <-removeObserverCh:
+// 				if observer, ok := observerHashTable[removeAccountMessageObserverKey]; ok {
+// 					fmt.Println("TODO: should not be")
+// 					mqTopic.UnSubscribe(observer)
+// 					delete(observerHashTable, removeAccountMessageObserverKey)
+// 				}
+// 			case <-ctx.Done(): // TODO: check return
+// 				for key, observer := range observerHashTable {
+// 					mqTopic.UnSubscribe(observer)
+// 					delete(observerHashTable, key) // TODO: right?
+// 				}
+// 				return
+// 			}
+// 		}
+// 	}()
+// 	return addObserverCh, removeObserverCh
+// }

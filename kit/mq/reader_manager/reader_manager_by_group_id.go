@@ -14,7 +14,7 @@ type groupIDReaderManager struct {
 
 type groupIDReaderManagerOption func(*groupIDReaderManager)
 
-func CreateGroupIDReaderManager(brokers []string, topic, groupID string, startOffset int64, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, groupID string, startOffset int64, options ...readerManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)

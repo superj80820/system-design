@@ -3,20 +3,21 @@ package repository
 import (
 	"context"
 	"strconv"
-	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/chat/domain"
 )
 
-func testGetHistoryMessageByFriend(t *testing.T, ctx context.Context, chatRepo *ChatRepo) {
+func (suite *TestSuite) TestGetHistoryMessageByFriend() {
+	ctx := context.Background()
+
 	for i := 1; i <= 10; i++ {
-		err := chatRepo.InsertFriendMessage(ctx, 1, 1, "content: a"+strconv.Itoa(i))
-		assert.Nil(t, err)
-		err = chatRepo.InsertFriendMessage(ctx, 1, 2, "content: b"+strconv.Itoa(i))
-		assert.Nil(t, err)
-		err = chatRepo.InsertFriendMessage(ctx, 2, 1, "content: c"+strconv.Itoa(i))
-		assert.Nil(t, err)
+		_, err := suite.chatRepo.InsertFriendMessage(ctx, 1, 1, "content: a"+strconv.Itoa(i))
+		assert.Nil(suite.T(), err)
+		_, err = suite.chatRepo.InsertFriendMessage(ctx, 1, 2, "content: b"+strconv.Itoa(i))
+		assert.Nil(suite.T(), err)
+		_, err = suite.chatRepo.InsertFriendMessage(ctx, 2, 1, "content: c"+strconv.Itoa(i))
+		assert.Nil(suite.T(), err)
 	}
 
 	{
@@ -30,22 +31,22 @@ func testGetHistoryMessageByFriend(t *testing.T, ctx context.Context, chatRepo *
 				historyMessage []*domain.FriendMessage
 				err            error
 			)
-			historyMessage, isEnd, err = chatRepo.GetHistoryMessageByFriend(ctx, 1, 1, 0, curPage)
-			assert.Nil(t, err)
+			historyMessage, isEnd, err = suite.chatRepo.GetHistoryMessageByFriend(ctx, 1, 1, 0, curPage)
+			assert.Nil(suite.T(), err)
 			if isEnd {
-				assert.Equal(t, 1, len(historyMessage))
+				assert.Equal(suite.T(), 1, len(historyMessage))
 			} else {
-				assert.Equal(t, 3, len(historyMessage))
+				assert.Equal(suite.T(), 3, len(historyMessage))
 			}
 
 			for _, message := range historyMessage {
 				allHistoryMessage = append(allHistoryMessage, message)
 			}
 		}
-		assert.Equal(t, 5, curPage)
+		assert.Equal(suite.T(), 5, curPage)
 
 		for i := 0; i < 10; i++ {
-			assert.Equal(t, "content: a"+strconv.Itoa(i+1), allHistoryMessage[i].Content)
+			assert.Equal(suite.T(), "content: a"+strconv.Itoa(i+1), allHistoryMessage[i].Content)
 		}
 	}
 
@@ -60,22 +61,22 @@ func testGetHistoryMessageByFriend(t *testing.T, ctx context.Context, chatRepo *
 				historyMessage []*domain.FriendMessage
 				err            error
 			)
-			historyMessage, isEnd, err = chatRepo.GetHistoryMessageByFriend(ctx, 1, 1, 2, curPage)
-			assert.Nil(t, err)
+			historyMessage, isEnd, err = suite.chatRepo.GetHistoryMessageByFriend(ctx, 1, 1, 2, curPage)
+			assert.Nil(suite.T(), err)
 			if isEnd {
-				assert.Equal(t, 2, len(historyMessage))
+				assert.Equal(suite.T(), 2, len(historyMessage))
 			} else {
-				assert.Equal(t, 3, len(historyMessage))
+				assert.Equal(suite.T(), 3, len(historyMessage))
 			}
 
 			for _, message := range historyMessage {
 				allHistoryMessage = append(allHistoryMessage, message)
 			}
 		}
-		assert.Equal(t, 4, curPage)
+		assert.Equal(suite.T(), 4, curPage)
 
 		for i := 0; i < 8; i++ {
-			assert.Equal(t, "content: a"+strconv.Itoa(i+3), allHistoryMessage[i].Content)
+			assert.Equal(suite.T(), "content: a"+strconv.Itoa(i+3), allHistoryMessage[i].Content)
 		}
 	}
 }

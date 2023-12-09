@@ -97,6 +97,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 	switch mqConfig.readerWay {
 	case readerManager.GroupIDReader:
 		reader, err = readerManager.CreateGroupIDReaderManager(
+			ctx,
 			mqConfig.brokers,
 			mqConfig.topic,
 			mqConfig.readerGroupID,
@@ -107,6 +108,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 		}
 	case readerManager.SpecPartitionReader:
 		reader, err = readerManager.CreateSpecPartitionReaderManager(
+			ctx,
 			mqConfig.topic,
 			mqConfig.readerStartOffset,
 			mqConfig.readerPartition,
@@ -117,6 +119,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 		}
 	case readerManager.PartitionsBindObserverReader:
 		reader, err = readerManager.CreatePartitionBindObserverReaderManager(
+			ctx,
 			mqConfig.url,
 			mqConfig.readerStartOffset,
 			mqConfig.brokers,
