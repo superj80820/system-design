@@ -150,7 +150,7 @@ func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, s
 		ticker := time.NewTicker(rm.watchBalanceDuration)
 		for range ticker.C {
 			select {
-			case <-ctx.Done():
+			case <-ctx.Done(): // TODO: think another way
 				return
 			default:
 				func() {
