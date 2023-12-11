@@ -74,3 +74,7 @@ func (g *groupIDReaderManager) StopConsume() bool {
 func (g *groupIDReaderManager) SyncStartConsume(ctx context.Context) bool {
 	return g.reader.SyncStartConsume(ctx)
 }
+
+func (g *groupIDReaderManager) Wait() {
+	// TODO
+}

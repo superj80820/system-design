@@ -115,7 +115,7 @@ func main() {
 		panic(err)
 	}
 
-	chatUseCase := usecase.MakeChatUseCase(
+	chatUseCase := usecase.CreateChatUseCase(
 		chatRepo,
 	)
 

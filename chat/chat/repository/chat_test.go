@@ -25,18 +25,23 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-type TestSuite struct {
+type ChatSuite struct {
 	suite.Suite
 	chatRepo *ChatRepo
 
 	mongoDB *mongo.Client
+
+	channelMessageTopic     *mqKit.MQTopic
+	userMessageTopic        *mqKit.MQTopic
+	userStatusTopic         *mqKit.MQTopic
+	friendOnlineStatusTopic *mqKit.MQTopic
 
 	mongodbContainer *mongodb.MongoDBContainer
 	kafkaContainer   *kafka.KafkaContainer
 	mysqlContainer   *mysql.MySQLContainer
 }
 
-func (suite *TestSuite) SetupTest() {
+func (suite *ChatSuite) SetupTest() {
 	ctx := context.Background()
 
 	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
@@ -121,9 +126,9 @@ func (suite *TestSuite) SetupTest() {
 		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
 		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
 	)
-	if err != nil {
-		panic(err)
-	}
+	assert.Nil(suite.T(), err)
+	suite.channelMessageTopic = channelMessageTopic
+
 	userMessageTopic, err := mqKit.CreateMQTopic(
 		context.TODO(),
 		brokerAddress,
@@ -131,24 +136,25 @@ func (suite *TestSuite) SetupTest() {
 		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
 		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
 	)
-	if err != nil {
-		panic(err)
-	}
+	assert.Nil(suite.T(), err)
+	suite.userMessageTopic = userMessageTopic
+
 	userStatusTopic, err := mqKit.CreateMQTopic(
 		context.TODO(),
 		brokerAddress,
 		userStatusTopicName,
 		mqKit.ConsumeByGroupID(serviceName+":user_status", mqReaderManagerKit.LastOffset),
 	)
-	if err != nil {
-		panic(err)
-	}
+	assert.Nil(suite.T(), err)
+	suite.userStatusTopic = userStatusTopic
+
 	friendOnlineStatusTopic, err := mqKit.CreateMQTopic( // TODO: need?
 		context.TODO(),
 		brokerAddress,
 		userStatusTopicName,
 		mqKit.ConsumeByGroupID(serviceName+":friend_online_status", mqReaderManagerKit.LastOffset),
 	)
+	suite.friendOnlineStatusTopic = friendOnlineStatusTopic
 
 	chatRepo, err := CreateChatRepo(
 		mongoDB,
@@ -164,11 +170,16 @@ func (suite *TestSuite) SetupTest() {
 	suite.chatRepo = chatRepo
 }
 
-func (suite *TestSuite) TearDownTest() {
+func (suite *ChatSuite) TearDownTest() {
 	ctx := context.TODO()
 
 	err := suite.mongoDB.Disconnect(ctx)
 	assert.Nil(suite.T(), err)
+
+	assert.True(suite.T(), suite.channelMessageTopic.Shutdown())
+	assert.True(suite.T(), suite.userMessageTopic.Shutdown())
+	assert.True(suite.T(), suite.userStatusTopic.Shutdown())
+	assert.True(suite.T(), suite.friendOnlineStatusTopic.Shutdown())
 
 	// Clean up the container after
 	if err := suite.kafkaContainer.Terminate(ctx); err != nil {
@@ -187,10 +198,32 @@ func (suite *TestSuite) TearDownTest() {
 }
 
 func TestChat(t *testing.T) {
-	suite.Run(t, new(TestSuite))
+	suite.Run(t, new(ChatSuite))
 }
 
-func (suite *TestSuite) TestUserStatus() {
+func (suite *ChatSuite) TestFriendOnlineStatus() {
+	ctx := context.Background()
+
+	friendID := 101
+	ctx = httpKit.AddRequestID(ctx)
+
+	done := make(chan bool)
+	suite.chatRepo.SubscribeFriendOnlineStatus(ctx, friendID, func(sm *domain.StatusMessage) error {
+		assert.Equal(suite.T(), domain.OnlineStatusType, sm.StatusType)
+		close(done)
+		return nil
+	})
+	time.Sleep(time.Second * 5) // TODO: wait subscribed
+	err := suite.chatRepo.SendUserStatusMessage(ctx, friendID, domain.OnlineStatusType)
+	assert.Nil(suite.T(), err)
+	select {
+	case <-done:
+	case <-time.NewTimer(time.Second * 60).C:
+		assert.Fail(suite.T(), "get friend status message failed")
+	}
+}
+
+func (suite *ChatSuite) TestUserStatus() {
 	ctx := context.Background()
 
 	userID := 100
@@ -212,7 +245,7 @@ func (suite *TestSuite) TestUserStatus() {
 	}
 }
 
-func (suite *TestSuite) TestSendFriendMessage() {
+func (suite *ChatSuite) TestSendFriendMessage() {
 	ctx := context.Background()
 
 	messageContent := "content"
@@ -222,7 +255,7 @@ func (suite *TestSuite) TestSendFriendMessage() {
 	ctx = httpKit.AddRequestID(ctx)
 
 	done := make(chan bool)
-	suite.chatRepo.SubscribeFriendMessage(ctx, friendID, func(fm *domain.FriendMessage) error {
+	suite.chatRepo.SubscribeFriendMessage(ctx, userID, friendID, func(fm *domain.FriendMessage) error {
 		assert.Equal(suite.T(), messageContent, fm.Content)
 		close(done)
 		return nil
@@ -237,7 +270,7 @@ func (suite *TestSuite) TestSendFriendMessage() {
 	}
 }
 
-func (suite *TestSuite) TestSendChannelMessage() {
+func (suite *ChatSuite) TestSendChannelMessage() {
 	ctx := context.Background()
 
 	messageContent := "content"
@@ -264,7 +297,7 @@ func (suite *TestSuite) TestSendChannelMessage() {
 	}
 }
 
-func (suite *TestSuite) TestGetAccountChannels() {
+func (suite *ChatSuite) TestGetAccountChannels() {
 	ctx := context.Background()
 
 	userID := 100
@@ -276,12 +309,6 @@ func (suite *TestSuite) TestGetAccountChannels() {
 
 		channelIDs[i] = channelID
 	}
-
-	channelInformation, err := suite.chatRepo.GetChannel(int(channelIDs[0]))
-	assert.Nil(suite.T(), err)
-
-	assert.Equal(suite.T(), channelIDs[0], channelInformation.ChannelID)
-	assert.Equal(suite.T(), "0", channelInformation.Name)
 
 	channels, err := suite.chatRepo.GetAccountChannels(ctx, userID)
 	assert.Nil(suite.T(), err)
@@ -307,7 +334,7 @@ func (suite *TestSuite) TestGetAccountChannels() {
 	assert.Equal(suite.T(), 1, len(channels))
 }
 
-func (suite *TestSuite) TestUserCanCreateSameNameChannels() {
+func (suite *ChatSuite) TestUserCanCreateSameNameChannels() {
 	ctx := context.Background()
 
 	userID := 103
@@ -319,7 +346,7 @@ func (suite *TestSuite) TestUserCanCreateSameNameChannels() {
 	assert.Nil(suite.T(), err)
 }
 
-func (suite *TestSuite) TestUserCanNotAddDuplicatedChannels() {
+func (suite *ChatSuite) TestUserCanNotAddDuplicatedChannels() {
 	ctx := context.Background()
 
 	userID := 102
@@ -331,7 +358,7 @@ func (suite *TestSuite) TestUserCanNotAddDuplicatedChannels() {
 	assert.ErrorIs(suite.T(), err, mysqlKit.ErrDuplicatedKey)
 }
 
-func (suite *TestSuite) TestGetAccountFriends() {
+func (suite *ChatSuite) TestGetAccountFriends() {
 	ctx := context.Background()
 
 	userID := 100
@@ -351,7 +378,7 @@ func (suite *TestSuite) TestGetAccountFriends() {
 	}
 }
 
-func (suite *TestSuite) TestUserCanNotAddMyselfToFriend() {
+func (suite *ChatSuite) TestUserCanNotAddMyselfToFriend() {
 	ctx := context.Background()
 
 	userID := 101
@@ -360,7 +387,7 @@ func (suite *TestSuite) TestUserCanNotAddMyselfToFriend() {
 	assert.Equal(suite.T(), err.Error(), "can not create same user to friend")
 }
 
-func (suite *TestSuite) TestUserCanNotAddDuplicatedFriends() {
+func (suite *ChatSuite) TestUserCanNotAddDuplicatedFriends() {
 	ctx := context.Background()
 
 	userID := 100
@@ -372,7 +399,7 @@ func (suite *TestSuite) TestUserCanNotAddDuplicatedFriends() {
 	assert.ErrorIs(suite.T(), err, mysqlKit.ErrDuplicatedKey)
 }
 
-func (suite *TestSuite) TestUserOnline() {
+func (suite *ChatSuite) TestUserOnline() {
 	ctx := context.Background()
 
 	userID := 100
@@ -389,7 +416,7 @@ func (suite *TestSuite) TestUserOnline() {
 	assert.Equal(suite.T(), domain.OnlineStatus, userChatInformation.Online)
 }
 
-func (suite *TestSuite) TestGetHistoryMessage() {
+func (suite *ChatSuite) TestGetHistoryMessage() {
 	ctx := context.Background()
 
 	for i := 1; i <= 10; i++ {
@@ -466,7 +493,7 @@ func (suite *TestSuite) TestGetHistoryMessage() {
 	}
 }
 
-func (suite *TestSuite) TestGetHistoryMessageByChannel() {
+func (suite *ChatSuite) TestGetHistoryMessageByChannel() {
 	ctx := context.Background()
 
 	for i := 1; i <= 10; i++ {
@@ -537,7 +564,7 @@ func (suite *TestSuite) TestGetHistoryMessageByChannel() {
 	}
 }
 
-func (suite *TestSuite) TestGetHistoryMessageByFriend() {
+func (suite *ChatSuite) TestGetHistoryMessageByFriend() {
 	ctx := context.Background()
 
 	for i := 1; i <= 10; i++ {

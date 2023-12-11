@@ -25,20 +25,25 @@ type ChatResponse struct {
 	ChannelMessageHistory         *ChannelMessageHistory         `json:"channel_message_history,omitempty"`
 	UserChannels                  []int64                        `json:"user_channels,omitempty"`
 	UserFriends                   []int64                        `json:"user_friends,omitempty"`
-	OnlineStatus                  OnlineStatusEnum               `json:"online_status,omitempty"`
+	FriendOnlineStatus            *FriendOnlineStatus            `json:"friend_online_status,omitempty"`
 }
 
 type ChannelMessageHistory struct {
 	HistoryMessage []*ChannelMessage `json:"history_message"`
-	IsEnd          bool              `json:"is_end,omitempty"`
+	IsEnd          bool              `json:"is_end"`
 }
 
 type FriendMessageHistory struct {
 	HistoryMessage []*FriendMessage `json:"history_message"`
-	IsEnd          bool             `json:"is_end,omitempty"`
+	IsEnd          bool             `json:"is_end"`
 }
 
 type FriendOrChannelMessageHistory struct {
 	HistoryMessage []*FriendOrChannelMessage `json:"history_message"`
-	IsEnd          bool                      `json:"is_end,omitempty"`
+	IsEnd          bool                      `json:"is_end"`
+}
+
+type FriendOnlineStatus struct {
+	OnlineStatus OnlineStatusEnum `json:"online_status"`
+	FriendID     int64            `json:"friend_id"`
 }

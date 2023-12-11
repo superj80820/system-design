@@ -13,6 +13,7 @@ type ReaderManager interface {
 	RemoveObserverWithHook(observer *Observer) bool
 	IfNoObserversThenStopConsume()
 	GetObserversLen() int
+	Wait()
 }
 
 func defaultErrorHandleFn(err error) {

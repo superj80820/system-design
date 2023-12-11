@@ -57,6 +57,7 @@ type partitionBindObserverReaderManager struct {
 	watchBalanceDuration time.Duration
 
 	lock sync.RWMutex
+	wg   *sync.WaitGroup
 }
 
 type partitionBindObserverReaderManagerOption func(*partitionBindObserverReaderManager)
@@ -132,6 +133,8 @@ func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, s
 		watchBalanceDuration: defaultWatchBalanceDuration,
 
 		readers: make(map[int]*Reader),
+
+		wg: new(sync.WaitGroup),
 	}
 
 	for _, option := range config.partitionBindObserverReaderManagerOptions {
@@ -146,7 +149,10 @@ func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, s
 	if _, err := rm.fetchPartitionsInfo(); err != nil {
 		return nil, errors.Wrap(err, "fetch partitions information then set readers failed")
 	}
+	rm.wg.Add(1)
 	go func() {
+		defer rm.wg.Done()
+
 		ticker := time.NewTicker(rm.watchBalanceDuration)
 		for range ticker.C {
 			select {
@@ -300,4 +306,8 @@ func (p *partitionBindObserverReaderManager) balanceObservers() {
 			p.readers[nextIdx].AddObserver(observerInfo.observer)
 		}
 	}
+}
+
+func (p *partitionBindObserverReaderManager) Wait() {
+	p.wg.Wait()
 }

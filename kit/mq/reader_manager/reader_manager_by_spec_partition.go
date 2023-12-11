@@ -74,3 +74,7 @@ func (s *specPartitionReaderManager) StopConsume() bool {
 func (s *specPartitionReaderManager) SyncStartConsume(ctx context.Context) bool {
 	return s.reader.SyncStartConsume(ctx)
 }
+
+func (s *specPartitionReaderManager) Wait() {
+	// TODO
+}

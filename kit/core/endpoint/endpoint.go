@@ -3,6 +3,7 @@ package endpoint
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 )
 
@@ -35,6 +36,7 @@ func (s *ServerStream[IN, OUT]) Send(out *OUT) {
 }
 
 func (s *ServerStream[IN, OUT]) Recv() (*IN, error) {
+	fmt.Println("recv")
 	select {
 	case <-s.doneCh:
 		return nil, errors.New("stream already done")

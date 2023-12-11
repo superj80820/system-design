@@ -92,14 +92,11 @@ func (r *Reader) Run() {
 	go func() {
 		for ctx := range r.startCh {
 			// if err := r.kafkaReader.SetOffset(r.kafkaReader.Config().StartOffset); err != nil {//TODO
-			// 	fmt.Println("damn", err)
 			// 	r.errorHandleFn(err)
 			// 	continue
 			// }
 			for {
-				fmt.Println("aa")
 				m, err := r.kafkaReader.ReadMessage(ctx)
-				fmt.Println("bb", string(m.Value))
 				if err != nil {
 					go r.pauseHookFn()
 					break

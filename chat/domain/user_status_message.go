@@ -12,18 +12,26 @@ const (
 )
 
 type StatusMessage struct {
-	StatusType      StatusType `bson:"status_type" json:"status_type"`
-	UserID          int        `bson:"user_id" json:"user_id"`
-	AddFriendStatus struct {
-		FriendID int `json:"friend_user_id"`
-	} `json:"add_friend_status,omitempty"`
-	RemoveFriendStatus struct {
-		FriendID int `json:"friend_user_id"`
-	} `json:"remove_friend_status,omitempty"`
-	AddChannelStatus struct {
-		ChannelID int `json:"channel_id"`
-	} `json:"add_channel_status,omitempty"`
-	RemoveChannelStatus struct {
-		ChannelID int `json:"channel_id"`
-	} `json:"remove_channel_status,omitempty"`
+	StatusType          StatusType           `bson:"status_type" json:"status_type"`
+	UserID              int                  `bson:"user_id" json:"user_id"`
+	AddFriendStatus     *AddFriendStatus     `json:"add_friend_status,omitempty"`
+	RemoveFriendStatus  *RemoveFriendStatus  `json:"remove_friend_status,omitempty"`
+	AddChannelStatus    *AddChannelStatus    `json:"add_channel_status,omitempty"`
+	RemoveChannelStatus *RemoveChannelStatus `json:"remove_channel_status,omitempty"`
+}
+
+type AddFriendStatus struct {
+	FriendID int `json:"friend_user_id"`
+}
+
+type RemoveFriendStatus struct {
+	FriendID int `json:"friend_user_id"`
+}
+
+type AddChannelStatus struct {
+	ChannelID int `json:"channel_id"`
+}
+
+type RemoveChannelStatus struct {
+	ChannelID int `json:"channel_id"`
 }

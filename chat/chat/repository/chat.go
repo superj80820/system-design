@@ -200,14 +200,14 @@ func (chat *ChatRepo) SubscribeFriendOnlineStatus(ctx context.Context, friendID 
 	chat.friendOnlineStatusObservers.Store(strconv.FormatInt(httpKit.GetRequestID(ctx), 10)+":"+strconv.Itoa(friendID), friendOnlineStatusObserver)
 }
 
-func (chat *ChatRepo) SubscribeFriendMessage(ctx context.Context, friendID int, notify func(*domain.FriendMessage) error) {
-	accountMessageObserver := chat.accountMessageTopic.Subscribe(strconv.Itoa(friendID), func(message []byte) error {
+func (chat *ChatRepo) SubscribeFriendMessage(ctx context.Context, userID, friendID int, notify func(*domain.FriendMessage) error) {
+	accountMessageObserver := chat.accountMessageTopic.Subscribe(strconv.Itoa(userID), func(message []byte) error {
 		var friendMessage domain.FriendMessage
 		if err := json.Unmarshal(message, &friendMessage); err != nil {
 			return errors.Wrap(err, "unmarshal friend message failed")
 		}
 
-		if friendMessage.FriendID != int64(friendID) {
+		if friendMessage.FriendID != int64(userID) {
 			return nil
 		}
 
@@ -388,21 +388,6 @@ func (chat *ChatRepo) CreateChannel(ctx context.Context, userID int, channelName
 	}
 
 	return channelID, nil
-}
-
-func (chat *ChatRepo) GetChannel(channelID int) (*domain.Channel, error) {
-	channelInstance := channel{
-		Channel: &domain.Channel{
-			ChannelID: int64(channelID),
-		},
-	}
-	err := chat.mysqlDB.First(&channelInstance)
-	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(err); ok {
-		return nil, errors.Wrap(mySQLErr, "get mysql error")
-	} else if err != nil {
-		return nil, errors.Wrap(err, "get channel information failed")
-	}
-	return channelInstance.Channel, nil
 }
 
 func (chat *ChatRepo) CreateAccountChannels(ctx context.Context, userID, channelID int) error {

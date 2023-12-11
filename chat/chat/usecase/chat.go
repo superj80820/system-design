@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	"github.com/pkg/errors"
@@ -15,7 +16,7 @@ type ChatUseCase struct {
 	chatRepo domain.ChatRepository
 }
 
-func MakeChatUseCase(chatRepo domain.ChatRepository) *ChatUseCase {
+func CreateChatUseCase(chatRepo domain.ChatRepository) *ChatUseCase {
 	return &ChatUseCase{
 		chatRepo: chatRepo,
 	}
@@ -38,7 +39,6 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 		return errors.Wrap(err, "update user online status failed")
 	}
 	chat.chatRepo.SendUserStatusMessage(ctx, accountID, domain.OnlineStatusType)
-
 	chat.chatRepo.SubscribeUserStatus(ctx, accountID, func(statusMessage *domain.StatusMessage) error {
 		stream.Send(&domain.ChatResponse{
 			MessageType:   domain.StatusMessageResponseMessageType,
@@ -49,35 +49,45 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 		case domain.AddFriendStatusType:
 			chat.chatRepo.SubscribeFriendMessage(
 				ctx,
+				accountID,
 				statusMessage.AddFriendStatus.FriendID,
 				func(fm *domain.FriendMessage) error {
 					stream.Send(&domain.ChatResponse{
 						MessageType: domain.FriendResponseMessageType,
 						FriendMessage: &domain.FriendMessage{
-							UserID:    fm.UserID,
+							UserID:    fm.FriendID,
 							MessageID: fm.MessageID,
 							Content:   fm.Content,
-							FriendID:  fm.FriendID,
+							FriendID:  fm.UserID,
 						},
 					})
 					return nil
 				},
 			)
-			chat.chatRepo.SubscribeFriendOnlineStatus(ctx, statusMessage.AddFriendStatus.FriendID, func(sm *domain.StatusMessage) error {
-				switch sm.StatusType {
-				case domain.OnlineStatusType:
-					stream.Send(&domain.ChatResponse{
-						MessageType:  domain.FriendOnlineStatusResponseMessageType,
-						OnlineStatus: domain.OnlineStatus,
-					})
-				case domain.OfflineStatusType:
-					stream.Send(&domain.ChatResponse{
-						MessageType:  domain.FriendOnlineStatusResponseMessageType,
-						OnlineStatus: domain.OfflineStatus,
-					})
-				}
-				return nil
-			})
+			chat.chatRepo.SubscribeFriendOnlineStatus(
+				ctx,
+				statusMessage.AddFriendStatus.FriendID,
+				func(sm *domain.StatusMessage) error {
+					switch sm.StatusType {
+					case domain.OnlineStatusType:
+						stream.Send(&domain.ChatResponse{
+							MessageType: domain.FriendOnlineStatusResponseMessageType,
+							FriendOnlineStatus: &domain.FriendOnlineStatus{
+								OnlineStatus: domain.OnlineStatus,
+								FriendID:     int64(sm.UserID),
+							},
+						})
+					case domain.OfflineStatusType:
+						stream.Send(&domain.ChatResponse{
+							MessageType: domain.FriendOnlineStatusResponseMessageType,
+							FriendOnlineStatus: &domain.FriendOnlineStatus{
+								OnlineStatus: domain.OfflineStatus,
+								FriendID:     int64(sm.UserID),
+							},
+						})
+					}
+					return nil
+				})
 		case domain.RemoveFriendStatusType:
 			chat.chatRepo.UnSubscribeFriendMessage(ctx, statusMessage.RemoveFriendStatus.FriendID)
 			chat.chatRepo.UnSubscribeFriendOnlineStatus(ctx, statusMessage.RemoveFriendStatus.FriendID)
@@ -117,7 +127,6 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 		MessageType: domain.UserFriendsResponseMessageType,
 		UserFriends: accountFriends,
 	})
-
 	historyMessage, isEnd, err := chat.chatRepo.GetHistoryMessage(ctx, accountID, 0, 1) // TODO: number offset, page
 	if err != nil {
 		return errors.Wrap(err, "get history message failed")
@@ -133,52 +142,65 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 	for _, accountChannel := range accountChannels {
 		accountChannelInt := int(accountChannel) //TODO: think overflow
 
-		chat.chatRepo.SubscribeChannelMessage(ctx, accountChannelInt, func(cm *domain.ChannelMessage) error {
-			stream.Send(&domain.ChatResponse{
-				MessageType: domain.ChannelResponseMessageType,
-				ChannelMessage: &domain.ChannelMessage{
-					MessageID: cm.MessageID,
-					ChannelID: cm.ChannelID,
-					Content:   cm.Content,
-					UserID:    cm.UserID,
-				},
+		chat.chatRepo.SubscribeChannelMessage(
+			ctx,
+			accountChannelInt,
+			func(cm *domain.ChannelMessage) error {
+				stream.Send(&domain.ChatResponse{
+					MessageType: domain.ChannelResponseMessageType,
+					ChannelMessage: &domain.ChannelMessage{
+						MessageID: cm.MessageID,
+						ChannelID: cm.ChannelID,
+						Content:   cm.Content,
+						UserID:    cm.UserID,
+					},
+				})
+				return nil
 			})
-			return nil
-		})
 	}
 	for _, accountFriend := range accountFriends {
 		accountFriendInt := int(accountFriend) //TODO: think overflow
 
 		chat.chatRepo.SubscribeFriendMessage(
 			ctx,
+			accountID,
 			accountFriendInt,
 			func(fm *domain.FriendMessage) error {
 				stream.Send(&domain.ChatResponse{
 					MessageType: domain.FriendResponseMessageType,
 					FriendMessage: &domain.FriendMessage{
-						UserID:    fm.UserID,
+						UserID:    fm.FriendID,
 						MessageID: fm.MessageID,
 						Content:   fm.Content,
-						FriendID:  fm.FriendID,
+						FriendID:  fm.UserID,
 					},
 				})
 				return nil
 			})
-		chat.chatRepo.SubscribeFriendOnlineStatus(ctx, accountFriendInt, func(sm *domain.StatusMessage) error {
-			switch sm.StatusType {
-			case domain.OnlineStatusType:
-				stream.Send(&domain.ChatResponse{
-					MessageType:  domain.FriendOnlineStatusResponseMessageType,
-					OnlineStatus: domain.OnlineStatus,
-				})
-			case domain.OfflineStatusType:
-				stream.Send(&domain.ChatResponse{
-					MessageType:  domain.FriendOnlineStatusResponseMessageType,
-					OnlineStatus: domain.OfflineStatus,
-				})
-			}
-			return nil
-		})
+		chat.chatRepo.SubscribeFriendOnlineStatus(
+			ctx,
+			accountFriendInt,
+			func(sm *domain.StatusMessage) error {
+				switch sm.StatusType {
+				case domain.OnlineStatusType:
+					stream.Send(&domain.ChatResponse{
+						MessageType: domain.FriendOnlineStatusResponseMessageType,
+						FriendOnlineStatus: &domain.FriendOnlineStatus{
+							OnlineStatus: domain.OnlineStatus,
+							FriendID:     int64(sm.UserID),
+						},
+					})
+				case domain.OfflineStatusType:
+					stream.Send(&domain.ChatResponse{
+						MessageType: domain.FriendOnlineStatusResponseMessageType,
+						FriendOnlineStatus: &domain.FriendOnlineStatus{
+							OnlineStatus: domain.OfflineStatus,
+							FriendID:     int64(sm.UserID),
+						},
+					})
+				}
+				return nil
+			})
 	}
 
 	for {
@@ -253,6 +275,7 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 				req.GetHistoryMessageReq.CurMaxMessageID,
 				req.GetHistoryMessageReq.Page,
 			)
+			fmt.Println(historyMessage, "asdifjaisdjfiasdf")
 			if err != nil {
 				return errors.Wrap(err, "get history message failed")
 			}
@@ -287,33 +310,3 @@ func (chat *ChatUseCase) Chat(ctx context.Context, stream endpoint.Stream[domain
 // * -> produce status
 
 // TODO: api to get user channels and friends
-
-// func observerManger(ctx context.Context, mqTopic *mqKit.MQTopic) (
-// 	chan *mqReaderManagerKit.Observer,
-// 	chan string,
-// ) { // TODO: name and variable // TODO: think to lib?
-// 	observerHashTable := make(map[string]*mqReaderManagerKit.Observer)
-// 	addObserverCh := make(chan *mqReaderManagerKit.Observer)
-// 	removeObserverCh := make(chan string)
-// 	go func() {
-// 		for {
-// 			select {
-// 			case accountMessageObserver := <-addObserverCh:
-// 				observerHashTable[accountMessageObserver.GetKey()] = accountMessageObserver
-// 			case removeAccountMessageObserverKey := <-removeObserverCh:
-// 				if observer, ok := observerHashTable[removeAccountMessageObserverKey]; ok {
-// 					fmt.Println("TODO: should not be")
-// 					mqTopic.UnSubscribe(observer)
-// 					delete(observerHashTable, removeAccountMessageObserverKey)
-// 				}
-// 			case <-ctx.Done(): // TODO: check return
-// 				for key, observer := range observerHashTable {
-// 					mqTopic.UnSubscribe(observer)
-// 					delete(observerHashTable, key) // TODO: right?
-// 				}
-// 				return
-// 			}
-// 		}
-// 	}()
-// 	return addObserverCh, removeObserverCh
-// }

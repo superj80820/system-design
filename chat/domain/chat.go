@@ -12,7 +12,6 @@ type ChatRepository interface {
 	UpdateOnlineStatus(ctx context.Context, userID int, onlineStatus OnlineStatusEnum) error
 
 	CreateChannel(ctx context.Context, userID int, channelName string) (int64, error)
-	// GetChannel(channelID int) (*Channel, error) // TODO: no need?
 
 	CreateAccountChannels(ctx context.Context, userID, channelID int) error
 	CreateAccountFriends(ctx context.Context, userID, friendID int) error
@@ -32,7 +31,7 @@ type ChatRepository interface {
 
 	SubscribeUserStatus(ctx context.Context, userID int, notify func(*StatusMessage) error)
 	SubscribeFriendOnlineStatus(ctx context.Context, friend int, notify func(*StatusMessage) error)
-	SubscribeFriendMessage(ctx context.Context, friendID int, notify func(*FriendMessage) error)
+	SubscribeFriendMessage(ctx context.Context, userID, friendID int, notify func(*FriendMessage) error)
 	SubscribeChannelMessage(ctx context.Context, channelID int, notify func(*ChannelMessage) error)
 
 	UnSubscribeFriendOnlineStatus(ctx context.Context, friendID int)

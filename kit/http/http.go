@@ -68,6 +68,10 @@ func GetURL(ctx context.Context) string {
 	return ctx.Value(_CTX_URL_PATH).(string)
 }
 
+func AddToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, _CTX_TOKEN, token)
+}
+
 func GetToken(ctx context.Context) string {
 	return ctx.Value(_CTX_TOKEN).(string)
 }

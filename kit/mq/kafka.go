@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
@@ -66,10 +67,13 @@ type MQTopic struct {
 
 	topicPartitionInfo []kafka.Partition
 
-	lock sync.RWMutex
+	lock   sync.RWMutex
+	cancel context.CancelFunc
 }
 
 func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (*MQTopic, error) {
+	ctx, cancel := context.WithCancel(ctx)
+
 	mqConfig := &MQTopicConfig{
 		topic:   topic,
 		url:     url,
@@ -133,6 +137,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 	mq := &MQTopic{
 		writerManager: writer,
 		readerManager: reader,
+		cancel:        cancel,
 	}
 
 	return mq, nil
@@ -168,4 +173,21 @@ func (m *MQTopic) Produce(ctx context.Context, message Message) error {
 	}
 
 	return nil
+}
+
+func (m *MQTopic) Shutdown() bool {
+	m.cancel()
+
+	done := make(chan bool)
+	go func() {
+		m.readerManager.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return true
+	case <-time.After(10 * time.Second):
+		return false
+	}
 }
