@@ -1,3 +1,3 @@
-module github.com/superj80820/system-design
+module github.com/superj80820/system-designs
 
 go 1.20
