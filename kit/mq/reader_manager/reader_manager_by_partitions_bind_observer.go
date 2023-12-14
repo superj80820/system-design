@@ -251,7 +251,7 @@ func (p *partitionBindObserverReaderManager) GetObserversLen() int {
 	return allObserversLen
 }
 
-func (p *partitionBindObserverReaderManager) fetchPartitionsInfo() (bool, error) {
+func (p *partitionBindObserverReaderManager) fetchPartitionsInfo() (bool, error) { // TODO: get offset
 	partitions, err := p.kafkaControllerConn.ReadPartitions(p.topic)
 	if err != nil {
 		return false, errors.Wrap(err, "read partitions information failed")

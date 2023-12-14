@@ -1,6 +1,8 @@
 package mysql
 
 import (
+	"database/sql"
+
 	goMysql "github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
@@ -47,6 +49,10 @@ func CreateDB(dsn string) (*DB, error) {
 	}, nil
 }
 
+func (db *DB) Transaction(fc func(tx *gorm.DB) error, opts ...*sql.TxOptions) (err error) {
+	return db.gormClient.Transaction(fc, opts...)
+}
+
 func (db *DB) FirstOrCreate(dest interface{}, conds ...interface{}) error {
 	return db.gormClient.FirstOrCreate(dest, conds...).Error
 }
@@ -68,6 +74,7 @@ func (db *DB) Find(dest interface{}, conds ...interface{}) TX {
 }
 
 func (db *DB) Create(value interface{}) TX {
+
 	return db.gormClient.Create(value)
 }
 

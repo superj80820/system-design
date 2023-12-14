@@ -3,7 +3,6 @@ package endpoint
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 )
 
@@ -31,12 +30,12 @@ type ServerStream[IN, OUT any] struct { // TODO: think name
 func (s *ServerStream[IN, OUT]) Send(out *OUT) {
 	select {
 	case <-s.doneCh:
-	case s.outCh <- out:
+	default:
+		s.outCh <- out
 	}
 }
 
 func (s *ServerStream[IN, OUT]) Recv() (*IN, error) {
-	fmt.Println("recv")
 	select {
 	case <-s.doneCh:
 		return nil, errors.New("stream already done")

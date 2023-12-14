@@ -50,14 +50,12 @@ func ConsumeBySpecPartition(partition int, startOffset int64) MQTopicOption {
 	return func(m *MQTopicConfig) {
 		m.readerWay = readerManager.SpecPartitionReader
 		m.readerPartition = partition
-		m.readerStartOffset = startOffset
 	}
 }
 
 func ConsumeByPartitionsBindObserver(startOffset int64) MQTopicOption {
 	return func(m *MQTopicConfig) {
 		m.readerWay = readerManager.PartitionsBindObserverReader
-		m.readerStartOffset = startOffset
 	}
 }
 
@@ -169,6 +167,9 @@ func (m *MQTopic) Produce(ctx context.Context, message Message) error {
 	}
 
 	if err := m.writerManager.WriteMessages(ctx, kafkaMsg); err != nil {
+		if ctx.Err() != nil { // expected. context done
+			return nil
+		}
 		return errors.Wrap(err, "write messages to kafka failed")
 	}
 

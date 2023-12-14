@@ -2,7 +2,6 @@ package readermanager
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -103,12 +102,9 @@ func (r *Reader) Run() {
 				}
 
 				r.RangeAllObservers(func(_ *Observer, observer *Observer) bool {
-					fmt.Println("cc", string(m.Value))
-					go func() {
-						if err := observer.notify(m.Value); err != nil {
-							r.errorHandleFn(err)
-						}
-					}()
+					if err := observer.notify(m.Value); err != nil { // TODO: think async
+						r.errorHandleFn(err)
+					}
 					return true
 				})
 			}

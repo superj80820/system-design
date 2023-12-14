@@ -21,6 +21,7 @@ const ( // TODO check correct
 	_CTX_HTTP_CODE
 	_CTX_TOKEN
 	_CTX_REQUEST_ID
+	_CTX_USER_ID
 )
 
 func ReadUserIP(r *http.Request) string {
@@ -45,7 +46,7 @@ func CustomBeforeCtx(tracer trace.Tracer) func(ctx context.Context, r *http.Requ
 		ctx, span := tracer.Start(ctx, GetURL(ctx))
 		defer span.End()
 
-		ctx = context.WithValue(ctx, _CTX_TRACE_ID, span.SpanContext().TraceID().String())
+		ctx = AddTraceID(ctx, span.SpanContext().TraceID().String())
 
 		return ctx
 	}
@@ -64,8 +65,20 @@ func GetIP(ctx context.Context) string {
 	return ctx.Value(_CTX_IP_KEY).(string)
 }
 
+func AddTraceID(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, _CTX_TRACE_ID, traceID)
+}
+
 func GetURL(ctx context.Context) string {
 	return ctx.Value(_CTX_URL_PATH).(string)
+}
+
+func AddUserID(ctx context.Context, userID int) context.Context {
+	return context.WithValue(ctx, _CTX_USER_ID, userID)
+}
+
+func GetUserID(ctx context.Context) int {
+	return ctx.Value(_CTX_USER_ID).(int)
 }
 
 func AddToken(ctx context.Context, token string) context.Context {
