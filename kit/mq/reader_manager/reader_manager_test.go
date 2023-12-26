@@ -10,11 +10,16 @@ import (
 	"github.com/segmentio/kafka-go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 	"github.com/superj80820/system-design/kit/mq/reader_manager/mocks"
 	"golang.org/x/sync/errgroup"
 )
 
-type testSetupData struct {
+type unitTest struct {
+	suite.Suite
+
+	readerManagerForTestProvider func(...readerManagerConfigOption) (ReaderManager, error)
+
 	readerManager   ReaderManager
 	kafkaReaderMock *mocks.KafkaReader
 	observer        *Observer
@@ -25,85 +30,7 @@ type testSetupData struct {
 	kafkaConnMock   *mocks.KafkaConn
 }
 
-var tests = []struct {
-	scenario string
-	fn       func(testSetupData *testSetupData) func(*testing.T)
-}{
-	{
-		scenario: "read message",
-		fn:       readMessage,
-	},
-	{
-		scenario: "remove observer",
-		fn:       removeObserver,
-	},
-	{
-		scenario: "remove observer with default hook",
-		fn:       removeObserverWithDefaultHook,
-	},
-	{
-		scenario: "stop consume",
-		fn:       stopConsume,
-	},
-	{
-		scenario: "stop consume when no observers",
-		fn:       stopConsumeWhenNoObservers,
-	},
-	{
-		scenario: "can not add same observer",
-		fn:       canNotAddSameObserver,
-	},
-	{
-		scenario: "execute error handle",
-		fn:       execErrorHandle,
-	},
-	{
-		scenario: "start consume no deadlock",
-		fn:       startConsumeNoDeadlock,
-	},
-	{
-		scenario: "stop consume no deadlock",
-		fn:       stopConsumeNoDeadlock,
-	},
-	{
-		scenario: "start and stop consume no deadlock",
-		fn:       startAndStopConsumeNoDeadlock,
-	},
-	{
-		scenario: "add observer no race condition",
-		fn:       addObserverNoRaceCondition,
-	},
-	{
-		scenario: "add observer no race condition with re-balance",
-		fn:       addObserverWithReBalanceNoRaceCondition,
-	},
-}
-
-func TestReaderByPartitionBindObserver(t *testing.T) {
-	for _, test := range tests {
-		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreatePartitionBindObserverReaderManager(context.Background(), "url", LastOffset, []string{}, "topic", options...)
-		})))
-	}
-}
-
-func TestReaderBySpecPartition(t *testing.T) {
-	for _, test := range tests {
-		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreateSpecPartitionReaderManager(context.Background(), "topic", LastOffset, 1, []string{}, options...)
-		})))
-	}
-}
-
-func TestReaderByGroupID(t *testing.T) {
-	for _, test := range tests {
-		t.Run(test.scenario, test.fn(testSetup(t, func(options ...readerManagerConfigOption) (ReaderManager, error) {
-			return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", LastOffset, options...)
-		})))
-	}
-}
-
-func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManagerConfigOption) (ReaderManager, error)) *testSetupData {
+func (u *unitTest) SetupTest() {
 	kafkaReaderMock := new(mocks.KafkaReader)
 	kafkaReaderMock.On("Config").Return(kafka.ReaderConfig{Partition: 1, StartOffset: LastOffset})
 
@@ -114,9 +41,9 @@ func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManager
 
 	pauseHookCh := make(chan bool)
 	errorHandleCh := make(chan bool)
-	rm, err := createReaderManagerFn(
+	rm, err := u.readerManagerForTestProvider(
 		useMockReaderProvider(
-			func(config kafka.ReaderConfig) KafkaReader {
+			func() KafkaReader {
 				return kafkaReaderMock
 			}),
 		AddReaderPauseHookFn(func() {
@@ -130,7 +57,7 @@ func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManager
 		}),
 		setWatchBalanceDuration(100*time.Millisecond),
 	)
-	assert.NoError(t, err)
+	assert.NoError(u.T(), err)
 
 	messageCh := make(chan []byte)
 	hookCh := make(chan bool)
@@ -143,385 +70,398 @@ func testSetup(t *testing.T, createReaderManagerFn func(options ...readerManager
 	}))
 	rm.AddObserver(observer)
 
-	return &testSetupData{
-		readerManager:   rm,
-		kafkaReaderMock: kafkaReaderMock,
-		observer:        observer,
-		messageCh:       messageCh,
-		hookCh:          hookCh,
-		pauseHookCh:     pauseHookCh,
-		errorHandleCh:   errorHandleCh,
-		kafkaConnMock:   kafkaConn,
-	}
+	u.readerManager = rm
+	u.kafkaReaderMock = kafkaReaderMock
+	u.observer = observer
+	u.messageCh = messageCh
+	u.hookCh = hookCh
+	u.pauseHookCh = pauseHookCh
+	u.errorHandleCh = errorHandleCh
+	u.kafkaConnMock = kafkaConn
+
 }
 
-func readMessage(testSetupData *testSetupData) func(*testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		expectMessage := "message"
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh }).
-			Return(kafka.Message{Value: []byte(expectMessage)}, nil)
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestReadMessage() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	expectMessage := "message"
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh }).
+		Return(kafka.Message{Value: []byte(expectMessage)}, nil)
+	u.readerManager.SyncStartConsume(context.Background())
 
-		timeout := time.After(3 * time.Second)
-		for {
-			select {
-			case message := <-testSetupData.messageCh:
-				assert.Equal(t, []byte(expectMessage), []byte(message))
-				return
-			case <-timeout:
-				assert.Fail(t, "get message error")
-				return
-			default:
-				go func() { execReadMessageCh <- true }()
-			}
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case message := <-u.messageCh:
+			assert.Equal(u.T(), []byte(expectMessage), []byte(message))
+			return
+		case <-timeout:
+			assert.Fail(u.T(), "get message error")
+			return
+		default:
+			go func() { execReadMessageCh <- true }()
 		}
 	}
 }
 
-func removeObserver(testSetupData *testSetupData) func(*testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh })
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestRemoveObserver() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh })
+	u.readerManager.SyncStartConsume(context.Background())
 
-		timeout := time.After(3 * time.Second)
-		for {
-			select {
-			case <-testSetupData.hookCh:
-				return
-			case <-timeout:
-				assert.Fail(t, "execute message error")
-				return
-			default:
-				testSetupData.readerManager.RemoveObserverWithHook(testSetupData.observer)
-			}
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case <-u.hookCh:
+			return
+		case <-timeout:
+			assert.Fail(u.T(), "execute message error")
+			return
+		default:
+			u.readerManager.RemoveObserverWithHook(u.observer)
 		}
 	}
 }
 
-func stopConsume(testSetupData *testSetupData) func(*testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) {
-				ctx := args.Get(0).(context.Context)
-				<-ctx.Done()
-			}).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestStopConsume() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done()
+		}).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
 
-		timeout := time.After(3 * time.Second)
-		for {
-			select {
-			case <-testSetupData.pauseHookCh:
-				return
-			case <-timeout:
-				assert.Fail(t, "execute pause hook error")
-				return
-			default:
-				testSetupData.readerManager.StopConsume()
-			}
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case <-u.pauseHookCh:
+			return
+		case <-timeout:
+			assert.Fail(u.T(), "execute pause hook error")
+			return
+		default:
+			u.readerManager.StopConsume()
 		}
 	}
 }
 
-func removeObserverWithDefaultHook(testSetupData *testSetupData) func(*testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh })
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestRemoveObserverWithDefaultHook() {
+	u.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh })
+	u.readerManager.SyncStartConsume(context.Background())
 
-		observerWithDefaultHook := CreateObserver("noHookKey", func(message []byte) error {
-			return nil
-		})
-		testSetupData.readerManager.AddObserver(observerWithDefaultHook)
-		testSetupData.readerManager.RemoveObserverWithHook(observerWithDefaultHook)
-	}
+	observerWithDefaultHook := CreateObserver("noHookKey", func(message []byte) error {
+		return nil
+	})
+	u.readerManager.AddObserver(observerWithDefaultHook)
+	u.readerManager.RemoveObserverWithHook(observerWithDefaultHook)
 }
 
-func stopConsumeWhenNoObservers(testSetupData *testSetupData) func(*testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) {
-				ctx := args.Get(0).(context.Context)
-				<-ctx.Done()
-			}).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestStopConsumeWhenNoObservers() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done()
+		}).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
 
-		observerWithDefaultHook := CreateObserver("noHookKey", func(message []byte) error {
-			return nil
-		})
-		testSetupData.readerManager.AddObserver(observerWithDefaultHook)
+	observerWithDefaultHook := CreateObserver("noHookKey", func(message []byte) error {
+		return nil
+	})
+	u.readerManager.AddObserver(observerWithDefaultHook)
 
-		timeout := time.After(3 * time.Second)
-		for {
-			select {
-			case <-testSetupData.pauseHookCh:
-				return
-			case <-timeout:
-				assert.Fail(t, "execute pause hook error")
-				return
-			default:
-				testSetupData.readerManager.RemoveObserverWithHook(testSetupData.observer)
-				testSetupData.readerManager.RemoveObserverWithHook(observerWithDefaultHook)
-				testSetupData.readerManager.IfNoObserversThenStopConsume()
-			}
-		}
-
-	}
-}
-
-func canNotAddSameObserver(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh }).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
-
-		assert.False(t, testSetupData.readerManager.AddObserver(testSetupData.observer))
-	}
-}
-
-func execErrorHandle(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(errors.New("get error"))
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh })
-
-		timeout := time.After(3 * time.Second)
-		for {
-			select {
-			case <-testSetupData.errorHandleCh:
-				return
-			case <-timeout:
-				assert.Fail(t, "execute error handle failed")
-				return
-			default:
-				testSetupData.readerManager.StartConsume(context.Background())
-			}
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case <-u.pauseHookCh:
+			return
+		case <-timeout:
+			assert.Fail(u.T(), "execute pause hook error")
+			return
+		default:
+			u.readerManager.RemoveObserverWithHook(u.observer)
+			u.readerManager.RemoveObserverWithHook(observerWithDefaultHook)
+			u.readerManager.IfNoObserversThenStopConsume()
 		}
 	}
 }
 
-func startConsumeNoDeadlock(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh })
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestCanNotAddSameObserver() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh }).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
 
-		testSetupData.readerManager.StartConsume(context.Background())
-		testSetupData.readerManager.StartConsume(context.Background())
-		testSetupData.readerManager.StartConsume(context.Background())
-	}
+	assert.False(u.T(), u.readerManager.AddObserver(u.observer))
 }
 
-func stopConsumeNoDeadlock(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		execReadMessageCh := make(chan bool)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) { <-execReadMessageCh })
-		testSetupData.readerManager.SyncStartConsume(context.Background())
+func (u *unitTest) TestExecErrorHandle() {
+	u.kafkaReaderMock.On("Close").Return(errors.New("get error"))
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh }).
+		Return(kafka.Message{}, errors.New("get error"))
 
-		testSetupData.readerManager.StopConsume()
-		testSetupData.readerManager.StopConsume()
-		testSetupData.readerManager.StopConsume()
-	}
-}
-
-func startAndStopConsumeNoDeadlock(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) {
-				ctx := args.Get(0).(context.Context)
-				<-ctx.Done()
-			}).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
-
-		eg := new(errgroup.Group)
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				testSetupData.readerManager.StopConsume()
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				testSetupData.readerManager.StopConsume()
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				testSetupData.readerManager.StartConsume(context.Background())
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				testSetupData.readerManager.StartConsume(context.Background())
-			}
-			return nil
-		})
-		eg.Wait()
-	}
-}
-
-func addObserverNoRaceCondition(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
-			{ID: 0}, {ID: 1}, {ID: 2},
-		}, nil)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) {
-				ctx := args.Get(0).(context.Context)
-				<-ctx.Done()
-			}).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
-
-		eg := new(errgroup.Group)
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				observerWithDefaultHook := CreateObserver("a"+strconv.Itoa(i), func(message []byte) error {
-					return nil
-				})
-				testSetupData.readerManager.AddObserver(observerWithDefaultHook)
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				observerWithDefaultHook := CreateObserver("b"+strconv.Itoa(i), func(message []byte) error {
-					return nil
-				})
-				testSetupData.readerManager.AddObserver(observerWithDefaultHook)
-			}
-			return nil
-		})
-		eg.Wait()
-
-		assert.Equal(t, testSetupData.readerManager.GetObserversLen(), 2000001)
-	}
-}
-func addObserverWithReBalanceNoRaceCondition(testSetupData *testSetupData) func(t *testing.T) {
-	return func(t *testing.T) {
-		testSetupData.kafkaReaderMock.On("SetOffset", LastOffset).Return(nil)
-		for i := 0; i < 8; i++ {
-			partitions := make([]kafka.Partition, i+1)
-			for j := 0; j <= i; j++ {
-				partitions[j] = kafka.Partition{ID: j}
-			}
-			testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return(
-				partitions,
-				nil,
-			).Once()
+	timeout := time.After(3 * time.Second)
+	for {
+		select {
+		case <-u.errorHandleCh:
+			return
+		case <-timeout:
+			assert.Fail(u.T(), "execute error handle failed")
+			return
+		default:
+			u.readerManager.StartConsume(context.Background())
+			go func() { execReadMessageCh <- true }()
 		}
-		partitions := make([]kafka.Partition, 10)
-		for j := 0; j <= 9; j++ {
+	}
+}
+
+func (u *unitTest) TestStartConsumeNoDeadlock() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh })
+	u.readerManager.SyncStartConsume(context.Background())
+
+	u.readerManager.StartConsume(context.Background())
+	u.readerManager.StartConsume(context.Background())
+	u.readerManager.StartConsume(context.Background())
+}
+
+func (u *unitTest) TestStopConsumeNoDeadlock() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	execReadMessageCh := make(chan bool)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) { <-execReadMessageCh })
+	u.readerManager.SyncStartConsume(context.Background())
+
+	u.readerManager.StopConsume()
+	u.readerManager.StopConsume()
+	u.readerManager.StopConsume()
+}
+
+func (u *unitTest) TestStartAndStopConsumeNoDeadlock() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done()
+		}).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
+
+	eg := new(errgroup.Group)
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			u.readerManager.StopConsume()
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			u.readerManager.StopConsume()
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			u.readerManager.StartConsume(context.Background())
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			u.readerManager.StartConsume(context.Background())
+		}
+		return nil
+	})
+	eg.Wait()
+}
+
+func (u *unitTest) TestAddObserverNoRaceCondition() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return([]kafka.Partition{
+		{ID: 0}, {ID: 1}, {ID: 2},
+	}, nil)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done()
+		}).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
+
+	eg := new(errgroup.Group)
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			observerWithDefaultHook := CreateObserver("a"+strconv.Itoa(i), func(message []byte) error {
+				return nil
+			})
+			u.readerManager.AddObserver(observerWithDefaultHook)
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			observerWithDefaultHook := CreateObserver("b"+strconv.Itoa(i), func(message []byte) error {
+				return nil
+			})
+			u.readerManager.AddObserver(observerWithDefaultHook)
+		}
+		return nil
+	})
+	eg.Wait()
+
+	assert.Equal(u.T(), u.readerManager.GetObserversLen(), 2000001)
+}
+
+func (u *unitTest) TestAddObserverWithReBalanceNoRaceCondition() {
+	u.kafkaReaderMock.On("Close").Return(nil)
+	for i := 0; i < 8; i++ {
+		partitions := make([]kafka.Partition, i+1)
+		for j := 0; j <= i; j++ {
 			partitions[j] = kafka.Partition{ID: j}
 		}
-		testSetupData.kafkaConnMock.On("ReadPartitions", mock.Anything).Return(
+		u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return(
 			partitions,
 			nil,
-		)
-		testSetupData.kafkaReaderMock.On("ReadMessage", mock.Anything).
-			Run(func(args mock.Arguments) {
-				ctx := args.Get(0).(context.Context)
-				<-ctx.Done()
-			}).
-			Return(kafka.Message{}, errors.New("stop consume"))
-		testSetupData.readerManager.SyncStartConsume(context.Background())
-
-		eg := new(errgroup.Group)
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				observerWithDefaultHook := CreateObserver("a"+strconv.Itoa(i), func(message []byte) error {
-					return nil
-				})
-				testSetupData.readerManager.AddObserver(observerWithDefaultHook)
-			}
-			return nil
-		})
-		removeCh := make(chan *Observer, 10000)
-		eg.Go(func() error {
-			for i := 0; i < 1000000; i++ {
-				observerWithDefaultHook := CreateObserver("b"+strconv.Itoa(i), func(message []byte) error {
-					return nil
-				})
-				testSetupData.readerManager.AddObserver(observerWithDefaultHook)
-				if i%2 == 0 {
-					removeCh <- observerWithDefaultHook
-				}
-			}
-			close(removeCh)
-			return nil
-		})
-		eg.Go(func() error {
-			for observer := range removeCh {
-				if ok := testSetupData.readerManager.RemoveObserverWithHook(observer); !ok {
-					assert.Fail(t, "remove failed")
-				}
-			}
-			return nil
-		})
-		eg.Go(func() error {
-			for observer := range removeCh {
-				if ok := testSetupData.readerManager.RemoveObserverWithHook(observer); !ok {
-					assert.Fail(t, "remove failed")
-				}
-			}
-			return nil
-		})
-		eg.Wait()
-
-		assert.Equal(t, 1500001, testSetupData.readerManager.GetObserversLen())
+		).Once()
 	}
+	partitions := make([]kafka.Partition, 10)
+	for j := 0; j <= 9; j++ {
+		partitions[j] = kafka.Partition{ID: j}
+	}
+	u.kafkaConnMock.On("ReadPartitions", mock.Anything).Return(
+		partitions,
+		nil,
+	)
+	u.kafkaReaderMock.On("ReadMessage", mock.Anything).
+		Run(func(args mock.Arguments) {
+			ctx := args.Get(0).(context.Context)
+			<-ctx.Done()
+		}).
+		Return(kafka.Message{}, errors.New("stop consume"))
+	u.readerManager.SyncStartConsume(context.Background())
+
+	eg := new(errgroup.Group)
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			observerWithDefaultHook := CreateObserver("a"+strconv.Itoa(i), func(message []byte) error {
+				return nil
+			})
+			u.readerManager.AddObserver(observerWithDefaultHook)
+		}
+		return nil
+	})
+	removeCh := make(chan *Observer, 10000)
+	eg.Go(func() error {
+		for i := 0; i < 1000000; i++ {
+			observerWithDefaultHook := CreateObserver("b"+strconv.Itoa(i), func(message []byte) error {
+				return nil
+			})
+			u.readerManager.AddObserver(observerWithDefaultHook)
+			if i%2 == 0 {
+				removeCh <- observerWithDefaultHook
+			}
+		}
+		close(removeCh)
+		return nil
+	})
+	eg.Go(func() error {
+		for observer := range removeCh {
+			if ok := u.readerManager.RemoveObserverWithHook(observer); !ok {
+				assert.Fail(u.T(), "remove failed")
+			}
+		}
+		return nil
+	})
+	eg.Go(func() error {
+		for observer := range removeCh {
+			if ok := u.readerManager.RemoveObserverWithHook(observer); !ok {
+				assert.Fail(u.T(), "remove failed")
+			}
+		}
+		return nil
+	})
+	eg.Wait()
+
+	assert.Equal(u.T(), 1500001, u.readerManager.GetObserversLen())
+}
+
+type unitTestReaderBySpecPartition struct {
+	unitTest
+}
+
+func (u *unitTestReaderBySpecPartition) SetupSuite() {
+	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
+		return CreateSpecPartitionReaderManager(context.Background(), "topic", LastOffset, 1, []string{}, rmco...)
+	}
+}
+
+type unitTestReaderByGroupID struct {
+	unitTest
+}
+
+func (u *unitTestReaderByGroupID) SetupSuite() {
+	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
+		return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", LastOffset, rmco...)
+	}
+}
+
+type unitTestPartitionBindObserverReaderManager struct {
+	unitTest
+}
+
+func (u *unitTestPartitionBindObserverReaderManager) SetupSuite() {
+	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
+		return CreatePartitionBindObserverReaderManager(context.Background(), "url", LastOffset, []string{}, "topic", rmco...)
+	}
+}
+
+func TestReaderManager(t *testing.T) {
+	suite.Run(t, new(unitTestReaderBySpecPartition))
+	suite.Run(t, new(unitTestReaderByGroupID))
+	suite.Run(t, new(unitTestPartitionBindObserverReaderManager))
 }

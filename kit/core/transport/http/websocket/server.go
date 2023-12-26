@@ -111,7 +111,7 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	inCh, outCh, doneCh := make(chan *IN), make(chan *OUT), make(chan bool)
+	inCh, outCh, doneCh := make(chan IN), make(chan OUT), make(chan bool)
 	stream := endpoint.CreateServerStream[IN, OUT](inCh, outCh, doneCh)
 
 	ctx, cancel := context.WithCancel(ctx)

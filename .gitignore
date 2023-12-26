@@ -23,3 +23,6 @@ go.work.sum
 
 instrumenting/db-data
 instrumenting/cache-data
+
+*.env
+*.log

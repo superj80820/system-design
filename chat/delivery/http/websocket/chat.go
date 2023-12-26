@@ -8,8 +8,8 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 )
 
-func MakeChatEndpoint(svc domain.ChatService) endpoint.BiStream[domain.ChatRequest, domain.ChatResponse] { // TODO: need IN, OUT?
-	return func(ctx context.Context, s endpoint.Stream[domain.ChatRequest, domain.ChatResponse]) error {
+func MakeChatEndpoint(svc domain.ChatService) endpoint.BiStream[*domain.ChatRequest, *domain.ChatResponse] { // TODO: need IN, OUT?
+	return func(ctx context.Context, s endpoint.Stream[*domain.ChatRequest, *domain.ChatResponse]) error {
 		userID := httpKit.GetUserID(ctx)
 		return svc.Chat(ctx, userID, s)
 	}

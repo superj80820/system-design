@@ -21,16 +21,21 @@ func CustomHeaderFromCtx(ctx context.Context) http.Header {
 	}
 }
 
-func JsonDecodeRequest[T any](ctx context.Context, messageType endpoint.MessageType, data []byte) (*T, error) {
-	var req T
-	if err := json.Unmarshal(data, &req); err != nil {
-		return nil, errors.Wrap(err, "json unmarshal failed")
-	}
-	return &req, nil
+func NoRequest(ctx context.Context, messageType endpoint.MessageType, data []byte) (any, error) {
+	return nil, nil
 }
 
-func JsonEncodeResponse[T any](ctx context.Context, resp *T) ([]byte, endpoint.MessageType, error) {
-	data, err := json.Marshal(*resp)
+func JsonDecodeRequest[T any](ctx context.Context, messageType endpoint.MessageType, data []byte) (T, error) {
+	var req T
+	if err := json.Unmarshal(data, req); err != nil {
+		var noop T
+		return noop, errors.Wrap(err, "json unmarshal failed")
+	}
+	return req, nil
+}
+
+func JsonEncodeResponse[T any](ctx context.Context, resp T) ([]byte, endpoint.MessageType, error) {
+	data, err := json.Marshal(resp)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "json marshal failed")
 	}

@@ -1,0 +1,25 @@
+version: "3.5"
+
+services:
+  bot-service:
+    image: superj80820/bot-service:latest
+    restart: always
+    ports:
+      - 8080:8080
+    networks:
+      - intranet
+    env_file:
+      - ./.docker-compose.bot.env
+    depends_on:
+      - ocr-service
+  ocr-service:
+    image: superj80820/ocr-service:latest
+    restart: always
+    ports:
+      - 5001:5001
+    networks:
+      - intranet
+
+networks:
+  intranet:
+    name: intranet

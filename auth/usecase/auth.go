@@ -16,7 +16,7 @@ import (
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/code"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
-	mysqlKit "github.com/superj80820/system-design/kit/mysql"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -26,14 +26,14 @@ const (
 )
 
 type AuthService struct {
-	db     *mysqlKit.DB
-	logger *loggerKit.Logger
+	db     *ormKit.DB
+	logger loggerKit.Logger
 
 	accessTokenKey  *ecdsa.PrivateKey
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthService(db *mysqlKit.DB, logger *loggerKit.Logger) (*AuthService, error) {
+func CreateAuthService(db *ormKit.DB, logger loggerKit.Logger) (*AuthService, error) {
 	if db == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}
@@ -57,7 +57,7 @@ func CreateAuthService(db *mysqlKit.DB, logger *loggerKit.Logger) (*AuthService,
 func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 	var account repository.AccountEntity
 	err := a.db.First(&account, "email = ?", email)
-	if errors.Is(err, mysqlKit.ErrRecordNotFound) {
+	if errors.Is(err, ormKit.ErrRecordNotFound) {
 		return nil, code.CreateErrorCode(http.StatusUnauthorized)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "get db user failed")
@@ -141,7 +141,7 @@ func (a *AuthService) Logout(accessToken string) error {
 
 	refreshToken.Status = domain.REVOKE
 	refreshToken.UpdatedAt = time.Now()
-	if err := a.db.Save(&refreshToken); err != nil {
+	if err := a.db.Save(&refreshToken).Error; err != nil {
 		return errors.Wrap(err, "update refresh token failed")
 	}
 

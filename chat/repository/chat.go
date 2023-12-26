@@ -14,7 +14,7 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	mqKitReader "github.com/superj80820/system-design/kit/mq/reader_manager"
-	mysqlKit "github.com/superj80820/system-design/kit/mysql"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -88,7 +88,7 @@ type ChatRepo struct {
 	accountStatusTopic      *mqKit.MQTopic
 	friendOnlineStatusTopic *mqKit.MQTopic
 
-	mysqlDB *mysqlKit.DB
+	mysqlDB *ormKit.DB
 
 	pageSize int
 
@@ -102,7 +102,7 @@ type ChatRepo struct {
 
 func CreateChatRepo(
 	client *mongo.Client,
-	db *mysqlKit.DB,
+	db *ormKit.DB,
 	channelMessageTopic,
 	accountMessageTopic,
 	accountStatusTopic,
@@ -363,7 +363,7 @@ func (chat *ChatRepo) CreateChannel(ctx context.Context, userID int, channelName
 		result := chat.
 			mysqlDB.
 			Create(&channelInstance)
-		if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		if mySQLErr, ok := ormKit.ConvertMySQLErr(result.Error); ok {
 			return errors.Wrap(mySQLErr, "create mysql error")
 		} else if result.Error != nil {
 			return errors.Wrap(result.Error, "create channel failed")
@@ -381,7 +381,7 @@ func (chat *ChatRepo) CreateChannel(ctx context.Context, userID int, channelName
 		result = chat.
 			mysqlDB.
 			Create(&accountChannelInstance)
-		if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+		if mySQLErr, ok := ormKit.ConvertMySQLErr(result.Error); ok {
 			return errors.Wrap(mySQLErr, "get mysql error")
 		} else if result.Error != nil {
 			return errors.Wrap(result.Error, "create user to channel failed")
@@ -407,7 +407,7 @@ func (chat *ChatRepo) CreateAccountChannels(ctx context.Context, userID, channel
 	result := chat.
 		mysqlDB.
 		Create(&accountChannelInstance)
-	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+	if mySQLErr, ok := ormKit.ConvertMySQLErr(result.Error); ok {
 		return errors.Wrap(mySQLErr, "get mysql error")
 	} else if result.Error != nil {
 		return errors.Wrap(result.Error, "create user to channel failed")
@@ -451,7 +451,7 @@ func (chat *ChatRepo) CreateAccountFriends(ctx context.Context, userID, friendID
 	result := chat.
 		mysqlDB.
 		Create(&accountFriendInstance)
-	if mySQLErr, ok := mysqlKit.ConvertMySQLErr(result.Error); ok {
+	if mySQLErr, ok := ormKit.ConvertMySQLErr(result.Error); ok {
 		return errors.Wrap(mySQLErr, "get mysql error")
 	} else if result.Error != nil {
 		return errors.Wrap(result.Error, "create friend failed")
@@ -559,20 +559,26 @@ func (chat *ChatRepo) SendJoinChannelStatusMessage(ctx context.Context, userID i
 }
 
 func (chat *ChatRepo) UnSubscribeChannelMessage(ctx context.Context, channelID int) {
-	if observer, ok := chat.channelMessageObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(channelID)); ok {
+	key := strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(channelID)
+	if observer, ok := chat.channelMessageObservers.LoadAndDelete(key); ok {
 		chat.channelMessageTopic.UnSubscribe(observer)
+		chat.channelMessageObservers.Delete(key)
 	}
 }
 
 func (chat *ChatRepo) UnSubscribeFriendMessage(ctx context.Context, userID int) {
-	if observer, ok := chat.accountMessageObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(userID)); ok {
+	key := strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(userID)
+	if observer, ok := chat.accountMessageObservers.LoadAndDelete(key); ok {
 		chat.accountMessageTopic.UnSubscribe(observer)
+		chat.accountMessageObservers.Delete(key)
 	}
 }
 
 func (chat *ChatRepo) UnSubscribeFriendOnlineStatus(ctx context.Context, friendID int) {
-	if observer, ok := chat.friendOnlineStatusObservers.LoadAndDelete(strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(friendID)); ok {
-		chat.accountStatusTopic.UnSubscribe(observer)
+	key := strconv.FormatInt(httpKit.GetRequestID(ctx), 10) + ":" + strconv.Itoa(friendID)
+	if observer, ok := chat.friendOnlineStatusObservers.LoadAndDelete(key); ok {
+		chat.friendOnlineStatusTopic.UnSubscribe(observer)
+		chat.friendOnlineStatusObservers.Delete(key)
 	}
 }
 
@@ -583,7 +589,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 			return true
 		}
 		chat.accountMessageTopic.UnSubscribe(observer)
-		chat.accountMessageObservers.Delete(key) // TODO: test
+		chat.accountMessageObservers.Delete(key)
 		return true
 	})
 	chat.channelMessageObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
@@ -591,7 +597,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 			return true
 		}
 		chat.channelMessageTopic.UnSubscribe(observer)
-		chat.channelMessageObservers.Delete(key) // TODO: test
+		chat.channelMessageObservers.Delete(key)
 		return true
 	})
 	chat.accountStatusObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
@@ -599,7 +605,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 			return true
 		}
 		chat.accountStatusTopic.UnSubscribe(observer)
-		chat.accountStatusObservers.Delete(key) // TODO: test
+		chat.accountStatusObservers.Delete(key)
 		return true
 	})
 	chat.friendOnlineStatusObservers.Range(func(key string, observer *mqKitReader.Observer) bool {
@@ -607,7 +613,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 			return true
 		}
 		chat.friendOnlineStatusTopic.UnSubscribe(observer)
-		chat.friendOnlineStatusObservers.Delete(key) // TODO: test
+		chat.friendOnlineStatusObservers.Delete(key)
 		return true
 	})
 }

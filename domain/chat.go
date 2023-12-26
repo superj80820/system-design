@@ -108,7 +108,7 @@ type FriendMessage struct {
 }
 
 type ChatService interface {
-	Chat(ctx context.Context, userID int, stream endpoint.Stream[ChatRequest, ChatResponse]) error
+	Chat(ctx context.Context, userID int, stream endpoint.Stream[*ChatRequest, *ChatResponse]) error
 
 	AddFriend(ctx context.Context, userID, friendID int) error
 	CreateChannel(ctx context.Context, userID int, channelName string) (int64, error)

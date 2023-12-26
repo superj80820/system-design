@@ -2,6 +2,7 @@ package readermanager
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -38,7 +39,7 @@ type KafkaReader interface {
 
 type readerOption func(*Reader)
 
-func useMockReaderProvider(fn func(config kafka.ReaderConfig) KafkaReader) readerManagerConfigOption {
+func useMockReaderProvider(fn func() KafkaReader) readerManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.kafkaReaderProvider = fn })
 	}
@@ -50,10 +51,19 @@ func AddReaderPauseHookFn(fn func()) readerManagerConfigOption {
 	}
 }
 
+func AddKafkaReaderHookFn(fn func(kafkaReader KafkaReader)) readerManagerConfigOption {
+	return func(rmc *readerManagerConfig) {
+		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
+			r.kafkaReaderHookFn = append(r.kafkaReaderHookFn, fn)
+		})
+	}
+}
+
 type Reader struct {
 	kafkaReader KafkaReader
 
-	kafkaReaderProvider func(config kafka.ReaderConfig) KafkaReader
+	kafkaReaderProvider func() KafkaReader
+	kafkaReaderHookFn   []func(kafkaReader KafkaReader)
 
 	observers map[*Observer]*Observer
 
@@ -73,31 +83,39 @@ func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 
 func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption) *Reader {
 	r := &Reader{
-		kafkaReaderProvider: defaultKafkaReaderProvider,
-		observers:           make(map[*Observer]*Observer),
-		pauseCh:             make(chan context.CancelFunc, 1),
-		startCh:             make(chan context.Context),
-		pauseHookFn:         defaultPauseHookFn,
-		errorHandleFn:       defaultErrorHandleFn,
+		observers:     make(map[*Observer]*Observer),
+		pauseCh:       make(chan context.CancelFunc, 1),
+		startCh:       make(chan context.Context),
+		pauseHookFn:   defaultPauseHookFn,
+		errorHandleFn: defaultErrorHandleFn,
 	}
 	for _, option := range options {
 		option(r)
 	}
-	r.kafkaReader = r.kafkaReaderProvider(kafkaReaderConfig)
+	r.kafkaReaderProvider = func() KafkaReader {
+		kafkaReader := defaultKafkaReaderProvider(kafkaReaderConfig)
+		for _, fn := range r.kafkaReaderHookFn {
+			fn(kafkaReader)
+		}
+		return kafkaReader
+	}
+	r.kafkaReader = r.kafkaReaderProvider()
 	return r
 }
 
 func (r *Reader) Run() {
 	go func() {
 		for ctx := range r.startCh {
-			// if err := r.kafkaReader.SetOffset(r.kafkaReader.Config().StartOffset); err != nil {//TODO
-			// 	r.errorHandleFn(err)
-			// 	continue
-			// }
+			r.kafkaReader = r.kafkaReaderProvider()
 			for {
+				fmt.Println("start consume")
 				m, err := r.kafkaReader.ReadMessage(ctx)
 				if err != nil {
+					fmt.Println("stop consume")
 					go r.pauseHookFn()
+					if err := r.kafkaReader.Close(); err != nil {
+						r.errorHandleFn(err)
+					}
 					break
 				}
 

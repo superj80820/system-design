@@ -11,7 +11,7 @@ import (
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 )
 
-func CreateLoggingMiddleware(logger *loggerKit.Logger) endpoint.Middleware {
+func CreateLoggingMiddleware(logger loggerKit.Logger) endpoint.Middleware {
 	return func(e endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 			defer func(begin time.Time) { // TODO: check defer
@@ -46,7 +46,7 @@ func CreateLoggingMiddleware(logger *loggerKit.Logger) endpoint.Middleware {
 
 				msg := url
 				if statusHTTPCode == http.StatusInternalServerError {
-					if loggerWithMetadata.Level == loggerKit.DebugLevel { // development: append error call stack to message(with new line for human read)
+					if loggerWithMetadata.GetLevel() == loggerKit.DebugLevel { // development: append error call stack to message(with new line for human read)
 						msg += "\n" + errorStack
 						loggerWithMetadata.With(
 							loggerKit.String("error-call-stack", "already add to msg field for development"),

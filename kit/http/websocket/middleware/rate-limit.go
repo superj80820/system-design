@@ -41,9 +41,10 @@ type rateLimit[IN, OUT any] struct {
 	check func() error
 }
 
-func (a *rateLimit[IN, OUT]) RecvFromIn() (*IN, error) {
+func (a *rateLimit[IN, OUT]) RecvFromIn() (IN, error) {
 	if err := a.check(); err != nil {
-		return nil, err
+		var noop IN
+		return noop, err
 	}
 	return a.Stream.Recv()
 }

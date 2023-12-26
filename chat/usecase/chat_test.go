@@ -56,7 +56,7 @@ func (chat *ChatSuite) SetupTest() {
 	chat.userID = userIDInt
 	chat.in, chat.out, chat.done = in, out, done
 	chat.runChat = func() {
-		go chatUseCase.Chat(ctx, userIDInt, endpoint.CreateServerStream[domain.ChatRequest, domain.ChatResponse](in, out, done))
+		go chatUseCase.Chat(ctx, userIDInt, endpoint.CreateServerStream[*domain.ChatRequest, *domain.ChatResponse](in, out, done))
 	}
 }
 

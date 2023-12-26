@@ -114,17 +114,20 @@ func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, s
 		option(config)
 	}
 
+	AddKafkaReaderHookFn(func(kafkaReader KafkaReader) {
+		kafkaReader.SetOffset(startOffset)
+	})(config)
+
 	rm := &partitionBindObserverReaderManager{
 		readerManager:               createReaderManager(config.readerManagerOptions...),
 		kafkaControllerConnProvider: defaultKafkaControllerConnProvider(url),
 		readerProvider: func(partitionID int) *Reader {
 			return createReader(kafka.ReaderConfig{
-				Brokers:     brokers,
-				Topic:       topic,
-				MinBytes:    10e3, // 10KB
-				MaxBytes:    10e6, // 10MB
-				Partition:   partitionID,
-				StartOffset: startOffset,
+				Brokers:   brokers,
+				Topic:     topic,
+				MinBytes:  10e3, // 10KB
+				MaxBytes:  10e6, // 10MB
+				Partition: partitionID,
 			}, config.readerOptions...)
 		},
 

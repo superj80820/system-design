@@ -8,6 +8,10 @@ import (
 	"github.com/superj80820/system-design/kit/code"
 )
 
+func DecodeEmptyRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	return nil, nil
+}
+
 func DecodeJsonRequest[T any](ctx context.Context, r *http.Request) (interface{}, error) {
 	var req T
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

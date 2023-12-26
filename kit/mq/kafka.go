@@ -50,12 +50,14 @@ func ConsumeBySpecPartition(partition int, startOffset int64) MQTopicOption {
 	return func(m *MQTopicConfig) {
 		m.readerWay = readerManager.SpecPartitionReader
 		m.readerPartition = partition
+		m.readerStartOffset = startOffset
 	}
 }
 
 func ConsumeByPartitionsBindObserver(startOffset int64) MQTopicOption {
 	return func(m *MQTopicConfig) {
 		m.readerWay = readerManager.PartitionsBindObserverReader
+		m.readerStartOffset = startOffset
 	}
 }
 

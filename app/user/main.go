@@ -26,7 +26,7 @@ import (
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
 	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
-	mysqlKit "github.com/superj80820/system-design/kit/mysql"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	utilKit "github.com/superj80820/system-design/kit/util"
@@ -78,7 +78,7 @@ func main() {
 			panic(err) // TODO
 		}
 	}()
-	singletonDB, err := mysqlKit.CreateDB("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local")
+	singletonDB, err := ormKit.CreateDB(ormKit.UseMySQL("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local"))
 	if err != nil {
 		panic(err)
 	}

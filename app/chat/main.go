@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/gorilla/mux"
 	wsDelivery "github.com/superj80820/system-design/chat/delivery/http/websocket"
 	"github.com/superj80820/system-design/kit/core/endpoint"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
@@ -16,8 +16,9 @@ import (
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
 	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
-	mysqlKit "github.com/superj80820/system-design/kit/mysql"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 
+	"github.com/gorilla/mux"
 	authHttpRepo "github.com/superj80820/system-design/auth/repository/http"
 	"github.com/superj80820/system-design/chat/repository"
 	"github.com/superj80820/system-design/chat/usecase"
@@ -48,7 +49,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mysqlDB, err := mysqlKit.CreateDB("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local")
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local"))
 	if err != nil {
 		panic(err)
 	}
@@ -128,9 +129,9 @@ func main() {
 	r := mux.NewRouter()
 	r.Handle("/ws",
 		wsTransport.NewServer(
-			customMiddleware[domain.ChatRequest, domain.ChatResponse](rateLimit, authRepo)(wsDelivery.MakeChatEndpoint(chatUseCase)),
-			wsKit.JsonDecodeRequest[domain.ChatRequest],
-			wsKit.JsonEncodeResponse[domain.ChatResponse],
+			customMiddleware[*domain.ChatRequest, *domain.ChatResponse](rateLimit, authRepo)(wsDelivery.MakeChatEndpoint(chatUseCase)),
+			wsKit.JsonDecodeRequest[*domain.ChatRequest],
+			wsKit.JsonEncodeResponse[*domain.ChatResponse],
 			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
 			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer)),
 			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),
@@ -142,7 +143,7 @@ func main() {
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-
+			logger.Error(fmt.Sprintf("close service failed, error: %+v", err))
 		}
 	}()
 

@@ -12,11 +12,11 @@ import (
 )
 
 type ChatUseCase struct {
-	logger   *loggerKit.Logger
+	logger   loggerKit.Logger
 	chatRepo domain.ChatRepository
 }
 
-func CreateChatUseCase(chatRepo domain.ChatRepository, logger *loggerKit.Logger) *ChatUseCase {
+func CreateChatUseCase(chatRepo domain.ChatRepository, logger loggerKit.Logger) *ChatUseCase {
 	return &ChatUseCase{
 		logger:   logger,
 		chatRepo: chatRepo,
@@ -25,7 +25,7 @@ func CreateChatUseCase(chatRepo domain.ChatRepository, logger *loggerKit.Logger)
 
 var _ domain.ChatService = (*ChatUseCase)(nil)
 
-func (chat *ChatUseCase) Chat(ctx context.Context, userID int, stream endpoint.Stream[domain.ChatRequest, domain.ChatResponse]) error {
+func (chat *ChatUseCase) Chat(ctx context.Context, userID int, stream endpoint.Stream[*domain.ChatRequest, *domain.ChatResponse]) error {
 	logger := chat.logger.WithMetadata(ctx)
 
 	_, err := chat.chatRepo.GetOrCreateUserChatInformation(ctx, userID)
@@ -192,6 +192,7 @@ func (chat *ChatUseCase) Chat(ctx context.Context, userID int, stream endpoint.S
 			logger.Error(fmt.Sprintf("%+v", errors.Wrap(err, "send user online status message"))) // TODO
 			return
 		}
+		chat.chatRepo.UnSubscribeAll(ctx)
 	}()
 
 	for {
@@ -205,7 +206,6 @@ func (chat *ChatUseCase) Chat(ctx context.Context, userID int, stream endpoint.S
 			if err != nil {
 				return errors.Wrap(err, "insert friend message failed")
 			}
-			fmt.Println("get mee", req.SendFriendReq.Message)
 			if err := chat.chatRepo.SendFriendMessage(ctx, userID, int(req.SendFriendReq.FriendID), int(messageID), req.SendFriendReq.Message); err != nil { // TODO: is int64 to int safe? {
 				return errors.Wrap(err, "send friend message failed")
 			}
@@ -261,7 +261,6 @@ func (chat *ChatUseCase) Chat(ctx context.Context, userID int, stream endpoint.S
 				req.GetHistoryMessageReq.CurMaxMessageID,
 				req.GetHistoryMessageReq.Page,
 			)
-			fmt.Println(historyMessage, "asdifjaisdjfiasdf")
 			if err != nil {
 				return errors.Wrap(err, "get history message failed")
 			}
@@ -304,24 +303,3 @@ func (chat *ChatUseCase) JoinChannel(ctx context.Context, userID int, channelID 
 	}
 	return nil
 }
-
-// api
-// * join channel -> db & status topic
-// * add friend -> db & status topic
-
-// user struct
-// * user in channels <- db & my status
-// * user friends <- db & my status
-
-// channel message topic(partition)
-// * <- channel message
-// * -> send message
-// user message topic(partition)
-// * <- user message
-// * -> send message
-// user status topic(partition)
-// * <- user status
-// * <- my status
-// * -> produce status
-
-// TODO: api to get user channels and friends

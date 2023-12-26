@@ -20,16 +20,20 @@ func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOf
 		option(config)
 	}
 
+	AddKafkaReaderHookFn(func(kafkaReader KafkaReader) {
+		kafkaReader.SetOffset(startOffset)
+	})(config)
+
+	kafkaReader := createReader(kafka.ReaderConfig{
+		Brokers:   brokers,
+		Topic:     topic,
+		MinBytes:  10e3, // 10KB
+		MaxBytes:  10e6, // 10MB
+		Partition: partition,
+	}, config.readerOptions...)
 	rm := &specPartitionReaderManager{
 		readerManager: createReaderManager(config.readerManagerOptions...),
-		reader: createReader(kafka.ReaderConfig{
-			Brokers:     brokers,
-			Topic:       topic,
-			MinBytes:    10e3, // 10KB
-			MaxBytes:    10e6, // 10MB
-			Partition:   partition,
-			StartOffset: startOffset,
-		}, config.readerOptions...),
+		reader:        kafkaReader,
 	}
 
 	for _, option := range config.specPartitionReaderManagers {

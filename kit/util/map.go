@@ -12,8 +12,6 @@ func (s *GenericSyncMap[K, V]) Range(f func(key K, value V) bool) {
 	})
 }
 
-type A struct{}
-
 func (s *GenericSyncMap[K, V]) Store(key K, value V) {
 	s.Map.Store(key, value)
 }
@@ -22,12 +20,18 @@ func (s *GenericSyncMap[K, V]) Delete(key K) {
 	s.Map.Delete(key)
 }
 
-func (s *GenericSyncMap[K, V]) LoadAndDelete(key K) (V, bool) {
-	value, ok := s.Map.LoadAndDelete(key)
-	return value.(V), ok
+func (s *GenericSyncMap[K, V]) LoadAndDelete(key K) (value V, loaded bool) {
+	v, loaded := s.Map.LoadAndDelete(key)
+	if !loaded {
+		return value, loaded
+	}
+	return v.(V), loaded
 }
 
-func (s *GenericSyncMap[K, V]) Load(key K) (V, bool) {
-	value, ok := s.Map.Load(key)
-	return value.(V), ok
+func (s *GenericSyncMap[K, V]) Load(key K) (value V, ok bool) {
+	v, ok := s.Map.Load(key)
+	if !ok {
+		return value, ok
+	}
+	return v.(V), ok
 }
