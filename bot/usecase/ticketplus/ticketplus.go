@@ -39,6 +39,35 @@ type ticketPlus struct {
 	tokenBucketCh chan struct{}
 }
 
+func createTokenBucket(ctx context.Context, tokenBucketCount int, tokenBucketDuration time.Duration) chan struct{} {
+	ticker := time.NewTicker(tokenBucketDuration)
+
+	tokenBucketCh := make(chan struct{}, tokenBucketCount)
+
+	for i := 0; i < tokenBucketCount; i++ {
+		tokenBucketCh <- struct{}{}
+	}
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				for i := 0; i < tokenBucketCount; i++ {
+					select {
+					case tokenBucketCh <- struct{}{}:
+					default:
+					}
+				}
+			case <-ctx.Done():
+			}
+		}
+	}()
+
+	return tokenBucketCh
+}
+
 type reservesSchedule struct {
 	ticketPlusReserveSchedule *domain.TicketPlusReserveSchedule
 	cancelFunc                context.CancelFunc
@@ -58,26 +87,6 @@ func CreateTicketPlus(
 	tokenBucketDuration time.Duration,
 	tokenBucketCount int,
 ) (domain.TicketPlusService, error) {
-	tokenBucketCh := make(chan struct{}, tokenBucketCount)
-
-	go func() {
-		ticker := time.NewTicker(tokenBucketDuration)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C: // TODO: check
-				for i := 0; i < tokenBucketCount; i++ {
-					select {
-					case tokenBucketCh <- struct{}{}:
-					default:
-					}
-				}
-			case <-ctx.Done():
-			}
-		}
-	}()
-
 	t := &ticketPlus{
 		ticketPlusOrderListURL: ticketPlusOrderListURL,
 
@@ -90,7 +99,7 @@ func CreateTicketPlus(
 
 		tokenExpireDuration: tokenExpireDuration,
 
-		tokenBucketCh: tokenBucketCh,
+		tokenBucketCh: createTokenBucket(ctx, tokenBucketCount, tokenBucketDuration),
 	}
 
 	t.formatReserveRequests(ticketPlusReserveRequests)
@@ -283,16 +292,6 @@ func (t *ticketPlus) Reserve(
 		fn := func() error {
 			for {
 				err = func() error {
-					defer func() {
-						timer := time.NewTimer(time.Duration(ticketPlusReserveRequest.ReserveDuration) * time.Millisecond)
-						defer timer.Stop()
-
-						select {
-						case <-errGroupCtx.Done():
-						case <-timer.C:
-						}
-					}()
-
 					select {
 					case <-errGroupCtx.Done():
 						return ctxDoneErr

@@ -1,6 +1,8 @@
 package util
 
-import "sync"
+import (
+	"sync"
+)
 
 type GenericSyncMap[K comparable, V any] struct {
 	sync.Map

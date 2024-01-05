@@ -1,0 +1,88 @@
+package usecase
+
+import "github.com/superj80820/system-design/domain"
+
+// class Book<Side> {
+//     private Side side;
+//     private Map<Price, PriceLevel> limitMap;
+// }
+
+type PriceLevel struct {
+	// private Price limitPrice; // TODO: check?
+	// private long totalVolume; // TODO: check?
+	orders []*Order
+}
+
+type Order struct {
+	price           int
+	quantity        int
+	matchedQuantity int // TODO: check ?
+}
+
+type bookSide int
+
+const (
+	bookBuySide bookSide = iota + 1
+	bookSellSide
+)
+
+type Book struct {
+	side     bookSide
+	limitMap map[int]*PriceLevel
+}
+
+type OrderBook struct {
+	buyBook  *book
+	sellBook *book
+	//  bestBid
+	//  bestOffer
+	//  orderMap
+}
+
+type matchingUseCase struct{}
+
+func CreateOrderUseCase() domain.MatchingUseCase {
+	return &matchingUseCase{}
+}
+
+func (m *matchingUseCase) NewOrder() {
+	if BUY.equals(order.side) {
+		return match(orderBook.sellBook, order)
+	} else {
+		return match(orderBook.buyBook, order)
+	}
+}
+
+func (m *matchingUseCase) CancelOrder() {
+	panic("unimplemented")
+}
+
+func match(book Book, order Order) {
+	leavesQuantity := order.quantity - order.matchedQuantity
+	limitIter := book.limitMap[order.price].orders
+	for _, val := range limitIter {
+		if leavesQuantity <= 0 {
+			break
+		}
+		matched := min(val.quantity, order.quantity)
+		order.matchedQuantity += matched
+		leavesQuantity = order.quantity - order.matchedQuantity
+		val.quantity -= matched // TODO: check?
+		// generateMatchedFill() // TODO: check?
+	}
+	// while (limitIter.hasNext() && leavesQuantity > 0) {
+	//     Quantity matched = min(limitIter.next.quantity, order.quantity);
+	//     order.matchedQuantity += matched;
+	//     leavesQuantity = order.quantity - order.matchedQuantity;
+	//     remove(limitIter.next);
+	//     generateMatchedFill();
+	// }
+	// return SUCCESS(MATCH_SUCCESS, order);
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

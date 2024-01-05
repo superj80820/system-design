@@ -14,7 +14,6 @@ type TicketPlusReserveSchedule struct {
 	Password                    string         `json:"password"`
 	EventID                     string         `json:"event_id"`
 	Priority                    map[string]int `json:"priority"`
-	ReserveDuration             time.Duration  `json:"reserve_duration"`
 	CaptchaDuration             time.Duration  `json:"captcha_duration"`
 	CaptchaCount                int            `json:"captcha_count"`
 	ReserveExecTime             int64          `json:"reserve_exec_time"`
