@@ -36,6 +36,15 @@ func (g *GenericTreeMap[K, V]) Put(key K, value V) {
 	g.Map.Put(key, value)
 }
 
+func (g *GenericTreeMap[K, V]) Get(key K) (V, bool) {
+	value, found := g.Map.Get(key)
+	if !found {
+		var noop V
+		return noop, found
+	}
+	return value.(V), found
+}
+
 func (g *GenericTreeMap[K, V]) Each(f func(key K, value V)) {
 	g.Map.Each(func(key, value interface{}) {
 		f(key.(K), value.(V))

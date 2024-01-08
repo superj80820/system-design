@@ -37,11 +37,12 @@ func main() {
 	priorityString := utilKit.GetEnvString("PRIORITY", "{}")
 	addr := utilKit.GetEnvString("ADDR", "0.0.0.0:8080")
 	serviceName := utilKit.GetEnvString("BOT_SERVICE", "bot-service")
-	tokenBucketDuration := utilKit.GetEnvInt("TOKEN_BUCKET_DURATION", 5)
-	tokenBucketCount := utilKit.GetEnvInt("TOKEN_BUCKET_COUNT", 20)
+	tokenBucketDuration := utilKit.GetEnvInt("TOKEN_BUCKET_DURATION", 1)
+	tokenBucketCount := utilKit.GetEnvInt("TOKEN_BUCKET_COUNT", 3)
 	ocrServiceURL := utilKit.GetEnvString("OCR_SERVICE_URL", "http://ocr-service:5001")
 	lineAPIURL := utilKit.GetEnvString("LINE_API_URL", "https://notify-api.line.me")
 	lineAPIToken := utilKit.GetRequireEnvString("LINE_API_TOKEN")
+	lineMonitorAPIToken := utilKit.GetRequireEnvString("LINE_MONITOR_API_TOKEN")
 	tokenExpireDuration := utilKit.GetEnvInt("TOKEN_EXPIRE_DURATION", 3600)
 	reserveSchedulesString := utilKit.GetEnvString("RESERVE_SCHEDULES", "[]")
 	var reserveSchedules []*domain.TicketPlusReserveSchedule
@@ -87,6 +88,7 @@ func main() {
 		ocrRepo,
 		eventSourceRepo,
 		lineRepo.CreateLineRepo(lineAPIURL, lineAPIToken),
+		lineRepo.CreateLineRepo(lineAPIURL, lineMonitorAPIToken),
 		logger,
 		time.Duration(tokenExpireDuration)*time.Second,
 		reserveSchedules,
@@ -133,6 +135,14 @@ func main() {
 			ticketPlusHTTPDelivery.EncodeReservesScheduleResponse,
 			options...,
 		))
+	r.Methods("PUT").Path("/api/v1/reserve/frequency").Handler(
+		httptransport.NewServer(
+			ticketPlusHTTPDelivery.MakeUpdateReserveFrequencyEndpoint(ticketPlusUseCaseInstance),
+			ticketPlusHTTPDelivery.DecodeUpdateReserveFrequencyRequest,
+			ticketPlusHTTPDelivery.EncodeUpdateReserveFrequencyResponse,
+			options...,
+		),
+	)
 
 	srv := http.Server{
 		Addr:    addr,

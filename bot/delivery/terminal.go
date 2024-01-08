@@ -39,7 +39,6 @@ func Reserve(
 		Password:                    password,
 		EventID:                     eventID,
 		Priority:                    priority,
-		ReserveDuration:             reserveDuration,
 		CaptchaDuration:             captchaDuration,
 		CaptchaCount:                captchaCount,
 		ReserveExecTime:             ReserveExecTime,

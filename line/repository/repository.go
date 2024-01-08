@@ -24,6 +24,14 @@ func CreateLineRepo(url, token string) domain.LineRepo {
 }
 
 func (l *lineRepo) Notify(message string) error {
+	return l.notifyWithToken(l.token, message)
+}
+
+func (l *lineRepo) NotifyWithToken(token, message string) error {
+	return l.notifyWithToken(token, message)
+}
+
+func (l *lineRepo) notifyWithToken(token, message string) error {
 	url := l.url + "/api/notify"
 	method := "POST"
 

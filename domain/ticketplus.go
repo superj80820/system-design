@@ -8,17 +8,24 @@ import (
 )
 
 type TicketPlusReserveSchedule struct {
-	Done                        bool           `json:"done"`
-	CountryCode                 string         `json:"country_code"`
-	Mobile                      string         `json:"mobile"`
-	Password                    string         `json:"password"`
-	EventID                     string         `json:"event_id"`
-	Priority                    map[string]int `json:"priority"`
-	CaptchaDuration             time.Duration  `json:"captcha_duration"`
-	CaptchaCount                int            `json:"captcha_count"`
-	ReserveExecTime             int64          `json:"reserve_exec_time"`
-	ReserveGetErrorThenContinue bool           `json:"reserve_get_error_then_continue"`
-	ReserveCount                int            `json:"reserve_count"`
+	Done                        bool                                       `json:"done"`
+	CountryCode                 string                                     `json:"country_code"`
+	Mobile                      string                                     `json:"mobile"`
+	Password                    string                                     `json:"password"`
+	EventID                     string                                     `json:"event_id"`
+	Priority                    map[string]int                             `json:"priority"`
+	CaptchaDuration             time.Duration                              `json:"captcha_duration"`
+	CaptchaCount                int                                        `json:"captcha_count"`
+	ReserveExecTime             int64                                      `json:"reserve_exec_time"`
+	ReserveGetErrorThenContinue bool                                       `json:"reserve_get_error_then_continue"`
+	ReserveFrequency            *TicketPlusReserveScheduleReserveFrequency `json:"reserve_frequency"`
+	ReserveCount                int                                        `json:"reserve_count"`
+	LineNotifyToken             string                                     `json:"line_notify_token"`
+}
+
+type TicketPlusReserveScheduleReserveFrequency struct {
+	MaxCount int `json:"max_count"`
+	Duration int `json:"duration"`
 }
 
 type ProcessReserveStatusResultEnum int
@@ -50,6 +57,7 @@ type TicketPlusService interface {
 	Reserves(ctx context.Context, ticketPlusReserveRequests []*TicketPlusReserveSchedule) ([]string, error)
 	GetReservesSchedule() map[string]*TicketPlusReserveSchedule
 	DeleteReservesSchedule(scheduleID string) error
+	UpdateGlobalReserveFrequency(maxCount int, duration time.Duration)
 }
 
 type TicketPlusRepo interface {

@@ -172,6 +172,10 @@ func (t *TicketPlus) GetTicketInformation(eventID string) (*domain.TicketInforma
 		return nil, errors.Wrap(err, "unmarshal response failed")
 	}
 
+	if len(ticketInformation.Products) == 0 {
+		return nil, errors.Wrap(err, "products is 0 error, raw data: "+string(body))
+	}
+
 	return &ticketInformation, nil
 }
 
@@ -417,7 +421,6 @@ func (t *TicketPlus) SaveOrUpdateToken(countryCode, mobile, ticketPlusUserID str
 				RefreshToken:         refreshToken,
 			},
 		}
-		fmt.Println(countryCode, mobile)
 		if err := t.orm.Where("country_code = ? AND mobile = ?", countryCode, mobile).Save(&userToken).Error; err != nil {
 			return 0, errors.Wrap(err, "save user token failed")
 		}

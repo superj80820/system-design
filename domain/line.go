@@ -6,6 +6,7 @@ var (
 
 type LineRepo interface {
 	Notify(message string) error
+	NotifyWithToken(token, message string) error
 }
 
 type LineResponseOK struct {

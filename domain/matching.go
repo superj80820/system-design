@@ -22,13 +22,18 @@ const (
 	OrderStatusFullyFilled
 	OrderStatusPartialFilled
 	OrderStatusPending
+	OrderStatusFullyCanceled
+	OrderStatusPartialCanceled
 )
 
-var ErrNoOrder = errors.New("no order error")
+var (
+	ErrEmptyOrderBook = errors.New("empty order book error")
+	ErrNoOrder        = errors.New("order not found error")
+)
 
 type MatchingUseCase interface {
-	NewOrder(order *Order) (*MatchResult, error)
-	CancelOrder()
+	NewOrder(o *Order) (*MatchResult, error)
+	CancelOrder(ts time.Time, o *Order) error
 }
 
 type Order struct {

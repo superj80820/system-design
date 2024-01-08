@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -10,6 +11,11 @@ import (
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
 )
+
+type UpdateGlobalReserveFrequencyRequest struct {
+	MaxCount int `json:"max_count"`
+	Duration int `json:"duration"`
+}
 
 type DeleteReservesScheduleRequest struct {
 	Key string `json:"key"`
@@ -28,6 +34,9 @@ type GetReservesScheduleResponse struct {
 }
 
 var (
+	DecodeUpdateReserveFrequencyRequest  = httpTransportKit.DecodeJsonRequest[UpdateGlobalReserveFrequencyRequest]
+	EncodeUpdateReserveFrequencyResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
+
 	DecodeDeleteReservesScheduleRequest  = httpTransportKit.DecodeJsonRequest[DeleteReservesScheduleRequest]
 	EncodeDeleteReservesScheduleResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
 
@@ -76,6 +85,14 @@ func MakeDeleteReservesScheduleEndpoint(svc domain.TicketPlusService) endpoint.E
 		if err != nil {
 			return nil, errors.Wrap(err, "not exist")
 		}
+		return nil, nil
+	}
+}
+
+func MakeUpdateReserveFrequencyEndpoint(svc domain.TicketPlusService) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		req := request.(UpdateGlobalReserveFrequencyRequest)
+		svc.UpdateGlobalReserveFrequency(req.MaxCount, time.Duration(req.Duration)*time.Second)
 		return nil, nil
 	}
 }

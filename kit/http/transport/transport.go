@@ -25,6 +25,6 @@ func EncodeJsonResponse(ctx context.Context, w http.ResponseWriter, response int
 	return json.NewEncoder(w).Encode(response)
 }
 
-func EncodeEmptyResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+func EncodeEmptyResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error { // TODO: json ok
 	return nil
 }

@@ -1,6 +1,7 @@
 package ticketplus
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -101,7 +102,6 @@ func TestGetCaptcha(t *testing.T) {
 func TestReserve(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Regexp(t, `^/ticket/api/v1/reserve\?_=\d{13}$`, r.URL.String())
-		// TODO: 137
 		w.Write([]byte(`
         {
             "errCode": "137",
@@ -121,7 +121,7 @@ func TestReserve(t *testing.T) {
 
 	ticketPlus, err := CreateTicketPlus(server.URL, ormDB)
 	assert.Nil(t, err)
-	ticketReserve, err := ticketPlus.Reserve("token", []*domain.TicketReserveRequestProduct{
+	ticketReserve, err := ticketPlus.Reserve(context.Background(), "token", []*domain.TicketReserveRequestProduct{
 		{
 			ProductID: "123",
 			Count:     10,
@@ -135,8 +135,7 @@ func TestReserve(t *testing.T) {
 		"captchaAns",
 	)
 	assert.ErrorIs(t, err, domain.ErrCodePending)
-	assert.Equal(t, "p000002754", ticketReserve.Products[0].ProductID)
-	assert.Equal(t, 6343068, ticketReserve.OrderID)
+	assert.Nil(t, ticketReserve)
 }
 
 func TestGetAndSaveToken(t *testing.T) {

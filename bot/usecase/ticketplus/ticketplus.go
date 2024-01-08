@@ -15,7 +15,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const eventKeyFormat = "%s-%s:%s" // CountryCode-Mobile:EventID
+const (
+	eventKeyFormat       = "%s-%s:%s" // CountryCode-Mobile:EventID
+	tokenBucketGlobalKey = "global"
+)
 
 var (
 	ctxDoneErr = errors.New("done by context")
@@ -26,50 +29,23 @@ var (
 type ticketPlus struct {
 	ticketPlusOrderListURL string
 
-	repoTicketPlus domain.TicketPlusRepo
-	repoCaptcha    domain.OCRService
-	repoEvenSource domain.EventSourceRepo[*domain.TicketPlusEvent]
-	lineRepo       domain.LineRepo
+	repoTicketPlus  domain.TicketPlusRepo
+	repoCaptcha     domain.OCRService
+	repoEvenSource  domain.EventSourceRepo[*domain.TicketPlusEvent]
+	lineRepo        domain.LineRepo
+	lineMonitorRepo domain.LineRepo
 
 	logger loggerKit.Logger
 
 	tokenExpireDuration time.Duration
 	reservesScheduleMap utilKit.GenericSyncMap[string, *reservesSchedule]
 
-	tokenBucketCh chan struct{}
-}
-
-func createTokenBucket(ctx context.Context, tokenBucketCount int, tokenBucketDuration time.Duration) chan struct{} {
-	ticker := time.NewTicker(tokenBucketDuration)
-
-	tokenBucketCh := make(chan struct{}, tokenBucketCount)
-
-	for i := 0; i < tokenBucketCount; i++ {
-		tokenBucketCh <- struct{}{}
-	}
-
-	go func() {
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				for i := 0; i < tokenBucketCount; i++ {
-					select {
-					case tokenBucketCh <- struct{}{}:
-					default:
-					}
-				}
-			case <-ctx.Done():
-			}
-		}
-	}()
-
-	return tokenBucketCh
+	globalTokenBucket utilKit.RateLimitTokenBucket
 }
 
 type reservesSchedule struct {
 	ticketPlusReserveSchedule *domain.TicketPlusReserveSchedule
+	tokenBucket               utilKit.RateLimitTokenBucket
 	cancelFunc                context.CancelFunc
 	done                      chan struct{}
 }
@@ -81,6 +57,7 @@ func CreateTicketPlus(
 	captchaRepo domain.OCRService,
 	evenSourceRepo domain.EventSourceRepo[*domain.TicketPlusEvent],
 	lineRepo domain.LineRepo,
+	lineMonitorRepo domain.LineRepo,
 	logger loggerKit.Logger,
 	tokenExpireDuration time.Duration,
 	ticketPlusReserveRequests []*domain.TicketPlusReserveSchedule,
@@ -90,16 +67,17 @@ func CreateTicketPlus(
 	t := &ticketPlus{
 		ticketPlusOrderListURL: ticketPlusOrderListURL,
 
-		repoTicketPlus: ticketPlusRepo,
-		repoCaptcha:    captchaRepo,
-		repoEvenSource: evenSourceRepo,
-		lineRepo:       lineRepo,
+		repoTicketPlus:  ticketPlusRepo,
+		repoCaptcha:     captchaRepo,
+		repoEvenSource:  evenSourceRepo,
+		lineRepo:        lineRepo,
+		lineMonitorRepo: lineMonitorRepo,
 
 		logger: logger,
 
 		tokenExpireDuration: tokenExpireDuration,
 
-		tokenBucketCh: createTokenBucket(ctx, tokenBucketCount, tokenBucketDuration),
+		globalTokenBucket: utilKit.CreateRateLimitTokenBucket(ctx, tokenBucketCount, tokenBucketDuration),
 	}
 
 	t.formatReserveRequests(ticketPlusReserveRequests)
@@ -242,10 +220,17 @@ func (t *ticketPlus) createEventReporter(countryCode, mobile, eventID string) fu
 		})
 	}
 }
-
 func (t *ticketPlus) Reserve(
 	ctx context.Context,
 	ticketPlusReserveRequest *domain.TicketPlusReserveSchedule,
+) (*domain.TicketReserve, error) {
+	return t.reserve(ctx, ticketPlusReserveRequest, t.globalTokenBucket)
+}
+
+func (t *ticketPlus) reserve(
+	ctx context.Context,
+	ticketPlusReserveRequest *domain.TicketPlusReserveSchedule,
+	tokenBucket utilKit.RateLimitTokenBucket,
 ) (*domain.TicketReserve, error) {
 	singletonUserInformation, singletonCaptcha, err := t.getSingleton(ctx, ticketPlusReserveRequest.CountryCode, ticketPlusReserveRequest.Mobile, ticketPlusReserveRequest.Password, t.tokenExpireDuration, ticketPlusReserveRequest.CaptchaDuration, ticketPlusReserveRequest.CaptchaCount)
 	if err != nil {
@@ -255,6 +240,9 @@ func (t *ticketPlus) Reserve(
 
 	t.logger.Info("step: get ticket information, mobile: " + ticketPlusReserveRequest.Mobile + " event id: " + ticketPlusReserveRequest.EventID)
 	ticketInformation, err := t.repoTicketPlus.GetTicketInformation(ticketPlusReserveRequest.EventID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get ticket information failed")
+	}
 	ticketAreaIDs := make([]string, len(ticketInformation.Products))
 	productIDs := make([]string, len(ticketInformation.Products))
 	for idx, product := range ticketInformation.Products {
@@ -295,8 +283,7 @@ func (t *ticketPlus) Reserve(
 					select {
 					case <-errGroupCtx.Done():
 						return ctxDoneErr
-					default:
-						<-t.tokenBucketCh
+					case <-tokenBucket.Get():
 						timeNow := time.Now()
 						if singletonCaptcha.IsEmpty() {
 							if err := singletonCaptcha.Set(sessionIDMap[status.ID]); err != nil {
@@ -380,12 +367,19 @@ func (t *ticketPlus) Reserve(
 							timeNow,
 						)
 						reserveCh <- reserveInformation
-						notifyMessage := make([]string, len(reserveInformation.Products))
+						notifyMessageSlice := make([]string, len(reserveInformation.Products))
 						for idx, val := range reserveInformation.Products {
-							notifyMessage[idx] = val.TicketAreaName + " count: " + strconv.Itoa(val.Count)
+							notifyMessageSlice[idx] = val.TicketAreaName + " count: " + strconv.Itoa(val.Count)
 						}
-						if err := t.lineRepo.Notify("get ticket, user: " + maskMobile(ticketPlusReserveRequest.Mobile) + ", information: " + strings.Join(notifyMessage, ", ") + "\n url: " + t.ticketPlusOrderListURL); err != nil {
-							return errors.Wrap(err, "send line notify failed")
+						notifyMessage := "get ticket, user: " + maskMobile(ticketPlusReserveRequest.Mobile) + ", information: " + strings.Join(notifyMessageSlice, ", ") + "\n url: " + t.ticketPlusOrderListURL
+						if ticketPlusReserveRequest.LineNotifyToken == "" {
+							if err := t.lineRepo.Notify(notifyMessage); err != nil {
+								return errors.Wrap(err, "send line notify failed")
+							}
+						} else {
+							if err := t.lineRepo.NotifyWithToken(ticketPlusReserveRequest.LineNotifyToken, notifyMessage); err != nil {
+								return errors.Wrap(err, "send line notify failed")
+							}
 						}
 						return nil
 					}
@@ -439,6 +433,16 @@ func (t *ticketPlus) Reserves(ctx context.Context, ticketPlusReserveRequests []*
 
 		reservesScheduleKey := t.toReservesScheduleKey(ticketPlusReserveRequest.CountryCode, ticketPlusReserveRequest.Mobile, ticketPlusReserveRequest.EventID)
 
+		var reservesSchedule reservesSchedule
+
+		ctx, cancel := context.WithCancel(context.Background())
+
+		tokenBucket := t.globalTokenBucket
+		if val.ReserveFrequency != nil && val.ReserveFrequency.MaxCount != 0 && val.ReserveFrequency.Duration != 0 {
+			tokenBucket = utilKit.CreateRateLimitTokenBucket(ctx, val.ReserveFrequency.MaxCount, time.Duration(val.ReserveFrequency.Duration)*time.Second)
+			reservesSchedule.tokenBucket = tokenBucket
+		}
+
 		if reservesScheduleInstance, ok := t.reservesScheduleMap.Load(reservesScheduleKey); ok {
 			reservesScheduleInstance.cancelFunc()
 			timer.Reset(timeoutDuration)
@@ -452,7 +456,6 @@ func (t *ticketPlus) Reserves(ctx context.Context, ticketPlusReserveRequests []*
 			processReservesStatusResult[idx] = domain.ProcessReserveStatusAdd.String()
 		}
 
-		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func(ctx context.Context, ticketPlusReserveRequest *domain.TicketPlusReserveSchedule) {
 			defer close(done)
@@ -466,15 +469,17 @@ func (t *ticketPlus) Reserves(ctx context.Context, ticketPlusReserveRequests []*
 				if time.Now().Before(time.Unix(ticketPlusReserveRequest.ReserveExecTime, 0)) {
 					continue
 				}
-				ticketReserveInformation, err := t.Reserve(
+				ticketReserveInformation, err := t.reserve(
 					ctx,
 					ticketPlusReserveRequest,
+					tokenBucket,
 				)
 				if errors.Is(err, ctxDoneErr) {
 					t.logger.Info(err.Error())
 					return
 				} else if err != nil {
 					t.logger.Info(fmt.Sprintf("reserve error, mobile: %s, event id: %s, reserve result: %+v", ticketPlusReserveRequest.Mobile, ticketPlusReserveRequest.EventID, err))
+					t.lineMonitorRepo.Notify(fmt.Sprintf("reserve error, please check, mobile: %s, event id: %s", ticketPlusReserveRequest.Mobile, ticketPlusReserveRequest.EventID))
 					if ticketPlusReserveRequest.ReserveGetErrorThenContinue {
 						continue
 					}
@@ -495,11 +500,11 @@ func (t *ticketPlus) Reserves(ctx context.Context, ticketPlusReserveRequests []*
 			}
 		}(ctx, ticketPlusReserveRequest)
 
-		t.reservesScheduleMap.Store(reservesScheduleKey, &reservesSchedule{
-			ticketPlusReserveSchedule: ticketPlusReserveRequest,
-			cancelFunc:                cancel,
-			done:                      done,
-		})
+		reservesSchedule.ticketPlusReserveSchedule = ticketPlusReserveRequest
+		reservesSchedule.cancelFunc = cancel
+		reservesSchedule.done = done
+
+		t.reservesScheduleMap.Store(reservesScheduleKey, &reservesSchedule)
 
 	}
 
@@ -539,4 +544,8 @@ func maskMobile(mobile string) string {
 	center := len(mobile) / 2
 
 	return mobile[:center-2] + "****" + mobile[center+2:]
+}
+
+func (t *ticketPlus) UpdateGlobalReserveFrequency(maxCount int, duration time.Duration) {
+	t.globalTokenBucket.Reset(maxCount, duration)
 }
