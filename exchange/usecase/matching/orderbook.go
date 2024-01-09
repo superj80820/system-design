@@ -27,7 +27,7 @@ func (ob *orderBook) getFirst() (*order, error) {
 }
 
 func (ob *orderBook) remove(o *order) bool {
-	key := &orderKey{sequenceId: o.SequenceId, price: o.Price}
+	key := &orderKey{sequenceId: o.SequenceID, price: o.Price}
 	_, found := ob.book.Get(key) // TODO: about performance
 	if !found {
 		return false
@@ -37,6 +37,6 @@ func (ob *orderBook) remove(o *order) bool {
 }
 
 func (ob *orderBook) add(o *order) bool {
-	ob.book.Put(&orderKey{sequenceId: o.SequenceId, price: o.Price}, o)
+	ob.book.Put(&orderKey{sequenceId: o.SequenceID, price: o.Price}, o)
 	return true // TODO: need check? about performance
 }

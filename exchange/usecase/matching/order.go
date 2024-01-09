@@ -13,13 +13,13 @@ type orderKey struct {
 }
 
 type order struct {
-	*domain.Order
+	*domain.OrderEntity
 }
 
 func createOrder(sequenceId int, price decimal.Decimal, direction domain.DirectionEnum, quantity decimal.Decimal) *order {
 	return &order{
-		&domain.Order{
-			SequenceId:       sequenceId,
+		&domain.OrderEntity{
+			SequenceID:       sequenceId,
 			Price:            price,
 			Direction:        direction,
 			Quantity:         quantity,

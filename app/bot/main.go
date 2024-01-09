@@ -37,7 +37,7 @@ func main() {
 	priorityString := utilKit.GetEnvString("PRIORITY", "{}")
 	addr := utilKit.GetEnvString("ADDR", "0.0.0.0:8080")
 	serviceName := utilKit.GetEnvString("BOT_SERVICE", "bot-service")
-	tokenBucketDuration := utilKit.GetEnvInt("TOKEN_BUCKET_DURATION", 1)
+	tokenBucketDuration := utilKit.GetEnvInt("TOKEN_BUCKET_DURATION", 2)
 	tokenBucketCount := utilKit.GetEnvInt("TOKEN_BUCKET_COUNT", 3)
 	ocrServiceURL := utilKit.GetEnvString("OCR_SERVICE_URL", "http://ocr-service:5001")
 	lineAPIURL := utilKit.GetEnvString("LINE_API_URL", "https://notify-api.line.me")

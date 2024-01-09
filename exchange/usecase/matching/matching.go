@@ -14,28 +14,28 @@ type matchResult struct {
 
 func createMatchResult(o *order) *matchResult {
 	return &matchResult{domain.MatchResult{
-		TakerOrder: o.Order,
+		TakerOrder: o.OrderEntity,
 	}}
 }
 
 func (m *matchResult) add() {} // TODO
 
-type matchEngine struct {
+type matchingUseCase struct {
 	buyBook     *orderBook
 	sellBook    *orderBook
 	marketPrice decimal.Decimal
 	sequenceId  int // TODO: use long
 }
 
-func CreateMatchEngine() domain.MatchingUseCase {
-	return &matchEngine{
+func CreateMatchingUseCase() domain.MatchingUseCase {
+	return &matchingUseCase{
 		buyBook:     CreateOrderBook(domain.DirectionBuy),
 		sellBook:    CreateOrderBook(domain.DirectionSell),
 		marketPrice: decimal.Zero, // TODO: check correct?
 	}
 }
 
-func (m *matchEngine) NewOrder(o *domain.Order) (*domain.MatchResult, error) {
+func (m *matchingUseCase) NewOrder(o *domain.OrderEntity) (*domain.MatchResult, error) {
 	switch o.Direction {
 	case domain.DirectionBuy:
 		matchResult, err := m.processOrder(&order{o}, m.sellBook, m.buyBook)
@@ -54,7 +54,7 @@ func (m *matchEngine) NewOrder(o *domain.Order) (*domain.MatchResult, error) {
 	}
 }
 
-func (m *matchEngine) CancelOrder(ts time.Time, o *domain.Order) error {
+func (m *matchingUseCase) CancelOrder(ts time.Time, o *domain.OrderEntity) error {
 	orderInstance := &order{o}
 	book := m.buyBook
 	if o.Direction == domain.DirectionSell {
@@ -71,8 +71,8 @@ func (m *matchEngine) CancelOrder(ts time.Time, o *domain.Order) error {
 	return nil
 }
 
-func (m *matchEngine) processOrder(takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
-	m.sequenceId = takerOrder.SequenceId
+func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
+	m.sequenceId = takerOrder.SequenceID
 	ts := takerOrder.CreatedAt // TODO: name?
 	matchResult := createMatchResult(takerOrder)
 	takerUnfilledQuantity := takerOrder.Quantity

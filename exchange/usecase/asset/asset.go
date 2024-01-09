@@ -1,0 +1,80 @@
+package asset
+
+import (
+	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
+	"github.com/superj80820/system-design/domain"
+)
+
+type userAsset struct {
+	assetRepo domain.UserAssetRepo
+}
+
+func CreateUserAssetUseCase() domain.UserAssetUseCase {
+	return &userAsset{}
+}
+
+func (u *userAsset) LiabilityUserTransfer(toUserID, assetID int, amount decimal.Decimal) error {
+	return u.tryTransfer(domain.AssetTransferAvailableToFrozen, domain.LiabilityUserID, toUserID, assetID, amount, false)
+}
+
+func (u *userAsset) Freeze(userID, assetID int, amount decimal.Decimal) error {
+	return u.tryTransfer(domain.AssetTransferAvailableToFrozen, userID, userID, assetID, amount, true)
+}
+
+func (u *userAsset) Transfer(transferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal) error {
+	return u.tryTransfer(transferType, fromUserID, toUserID, assetID, amount, true)
+}
+
+func (u *userAsset) Unfreeze(userID, assetID int, amount decimal.Decimal) error {
+	return u.tryTransfer(domain.AssetTransferFrozenToAvailable, userID, userID, assetID, amount, true)
+}
+
+func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal, checkBalance bool) error {
+	if amount.IsZero() {
+		return nil
+	}
+	if amount.LessThan(decimal.Zero) {
+		return errors.New("can not operate less zero amount")
+	}
+
+	fromUserAsset, err := u.assetRepo.GetAsset(fromUserID, assetID)
+	if errors.Is(err, domain.NotFoundUserAssetErr) {
+		fromUserAsset = u.assetRepo.InitAssets(fromUserID, assetID)
+	} else if err != nil {
+		return errors.Wrap(err, "get from user asset failed")
+	}
+	toUserAsset, err := u.assetRepo.GetAsset(toUserID, assetID)
+	if errors.Is(err, domain.NotFoundUserAssetErr) {
+		toUserAsset = u.assetRepo.InitAssets(toUserID, assetID)
+	} else if err != nil {
+		return errors.Wrap(err, "get to user asset failed")
+	}
+
+	switch assetTransferType {
+	case domain.AssetTransferAvailableToAvailable:
+		if checkBalance && fromUserAsset.Available.Cmp(decimal.Zero) < 0 {
+			return errors.New("available is less zero")
+		}
+		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
+		toUserAsset.Available = toUserAsset.Available.Add(amount)
+		return nil
+	case domain.AssetTransferAvailableToFrozen:
+		if checkBalance && fromUserAsset.Available.Cmp(decimal.Zero) < 0 {
+			return errors.New("available is less zero")
+		}
+		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
+		toUserAsset.Frozen = toUserAsset.Frozen.Add(amount)
+		return nil
+	case domain.AssetTransferFrozenToAvailable:
+		if checkBalance && fromUserAsset.Frozen.Cmp(decimal.Zero) < 0 {
+			return errors.New("frozen is less zero")
+		}
+		fromUserAsset.Frozen = fromUserAsset.Frozen.Sub(amount)
+		toUserAsset.Available = toUserAsset.Available.Add(amount)
+		return nil
+	default:
+		return errors.New("unknown transfer type")
+	}
+
+}
