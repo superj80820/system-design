@@ -13,7 +13,6 @@ func CreateAuthMiddleware(authFunc func(ctx context.Context, token string) (user
 	return func(e endpoint.Endpoint) endpoint.Endpoint {
 		return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 			token := httpKit.GetToken(ctx)
-			fmt.Println("asdfasdf", token)
 			userID, err := authFunc(ctx, token)
 			if err != nil {
 				return nil, errors.Wrap(err, fmt.Sprint("auth failed"))

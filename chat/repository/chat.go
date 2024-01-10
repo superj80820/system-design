@@ -83,10 +83,10 @@ type ChatRepo struct {
 	channelMessageCollection  *mongo.Collection
 	friendMessageCollection   *mongo.Collection
 
-	channelMessageTopic     *mqKit.MQTopic // TODO: to domain
-	accountMessageTopic     *mqKit.MQTopic
-	accountStatusTopic      *mqKit.MQTopic
-	friendOnlineStatusTopic *mqKit.MQTopic
+	channelMessageTopic     mqKit.MQTopic // TODO: to domain
+	accountMessageTopic     mqKit.MQTopic
+	accountStatusTopic      mqKit.MQTopic
+	friendOnlineStatusTopic mqKit.MQTopic
 
 	mysqlDB *ormKit.DB
 
@@ -106,7 +106,7 @@ func CreateChatRepo(
 	channelMessageTopic,
 	accountMessageTopic,
 	accountStatusTopic,
-	friendOnlineStatusTopic *mqKit.MQTopic,
+	friendOnlineStatusTopic mqKit.MQTopic,
 	options ...ChatRepoOption) (*ChatRepo, error) {
 	messageMetadataCollection := client.Database("chat").Collection("message_metadata")
 	channelMessageCollection := client.Database("chat").Collection("channel_message")

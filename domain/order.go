@@ -42,6 +42,18 @@ func (o OrderStatusEnum) IsFinalStatus() bool {
 	}
 }
 
+type OrderBookEntity struct {
+	SequenceID int
+	Price      decimal.Decimal
+	Sell       []*OrderBookItemEntity
+	Buy        []*OrderBookItemEntity
+}
+
+type OrderBookItemEntity struct {
+	Price    decimal.Decimal
+	Quantity decimal.Decimal
+}
+
 type OrderEntity struct {
 	ID         int
 	SequenceID int

@@ -32,9 +32,6 @@ func (s *GenericSyncMap[K, V]) LoadAndDelete(key K) (value V, loaded bool) {
 
 func (s *GenericSyncMap[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
 	v, loaded := s.Map.LoadOrStore(key, value)
-	if !loaded {
-		return actual, loaded
-	}
 	return v.(V), loaded
 }
 

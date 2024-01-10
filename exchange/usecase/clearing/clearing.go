@@ -1,6 +1,8 @@
 package clearing
 
 import (
+	"strconv"
+
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 )
@@ -28,9 +30,6 @@ func CreateClearingUseCase(
 
 func (c *clearingUseCase) ClearMatchResult(matchResult *domain.MatchResult) error {
 	taker := matchResult.TakerOrder
-	if len(matchResult.MatchDetails) == 0 {
-		return errors.New("match details length is 0")
-	}
 	switch matchResult.TakerOrder.Direction {
 	case domain.DirectionSell:
 		for _, matchDetail := range matchResult.MatchDetails {
@@ -61,7 +60,7 @@ func (c *clearingUseCase) ClearMatchResult(matchResult *domain.MatchResult) erro
 			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, maker.ID, taker.ID, c.baseCurrencyID, matched)
 			if maker.UnfilledQuantity.IsZero() {
 				if err := c.orderUseCase.RemoveOrder(maker.ID); err != nil {
-					return errors.Wrap(err, "remove maker order failed")
+					return errors.Wrap(err, "remove maker order failed, maker order id: "+strconv.Itoa(maker.ID))
 				}
 			}
 		}

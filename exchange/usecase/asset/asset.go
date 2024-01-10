@@ -10,12 +10,14 @@ type userAsset struct {
 	assetRepo domain.UserAssetRepo
 }
 
-func CreateUserAssetUseCase() domain.UserAssetUseCase {
-	return &userAsset{}
+func CreateUserAssetUseCase(assetRepo domain.UserAssetRepo) domain.UserAssetUseCase {
+	return &userAsset{
+		assetRepo: assetRepo,
+	}
 }
 
 func (u *userAsset) LiabilityUserTransfer(toUserID, assetID int, amount decimal.Decimal) error {
-	return u.tryTransfer(domain.AssetTransferAvailableToFrozen, domain.LiabilityUserID, toUserID, assetID, amount, false)
+	return u.tryTransfer(domain.AssetTransferAvailableToAvailable, domain.LiabilityUserID, toUserID, assetID, amount, false)
 }
 
 func (u *userAsset) Freeze(userID, assetID int, amount decimal.Decimal) error {

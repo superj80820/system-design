@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -51,11 +52,26 @@ type TransferEvent struct {
 	Sufficient bool // TODO: what this?
 }
 
+type TradingRepo interface {
+	SubscribeTradeMessage(ctx context.Context, notify func([]*TradingEvent))
+	Done() <-chan struct{}
+	Err() error
+	Shutdown() error
+}
+
+type TradingAsyncUseCase interface {
+	AsyncEventProcess(ctx context.Context) error
+	AsyncDBProcess(ctx context.Context) error
+	AsyncTickProcess(ctx context.Context) error
+	AsyncNotifyProcess(ctx context.Context) error
+	AsyncOrderBookProcess(ctx context.Context) error
+	AsyncAPIResultProcess(ctx context.Context) error
+	Shutdown() error
+}
+
 type TradingUseCase interface {
 	ProcessMessages(messages []*TradingEvent) error
-	CreateOrder(tradingEvent *TradingEvent) error
-	CancelOrder(tradingEvent *TradingEvent) error
-	Transfer(tradingEvent *TradingEvent) error
+	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)
 	// CancelOrder(ts time.Time, order *OrderEntity) error

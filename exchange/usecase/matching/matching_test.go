@@ -74,7 +74,7 @@ func TestMatching(t *testing.T) {
 		{
 			scenario: "test order book",
 			fn: func(t *testing.T) {
-				orderBook := CreateOrderBook(domain.DirectionBuy)
+				orderBook := createOrderBook(domain.DirectionBuy)
 				orderBook.add(&order{&domain.OrderEntity{
 					SequenceID: 1,
 					Price:      decimal.NewFromInt(100),
@@ -119,8 +119,8 @@ func TestMatching(t *testing.T) {
 				// 2082.34 1
 				// 2081.11 7
 				matchEngine := &matchingUseCase{
-					buyBook:     CreateOrderBook(domain.DirectionBuy),
-					sellBook:    CreateOrderBook(domain.DirectionSell),
+					buyBook:     createOrderBook(domain.DirectionBuy),
+					sellBook:    createOrderBook(domain.DirectionSell),
 					marketPrice: decimal.Zero, // TODO: check correct?
 				}
 				matchEngine.NewOrder(createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
@@ -197,8 +197,8 @@ func TestMatching(t *testing.T) {
 			scenario: "test cancel order",
 			fn: func(t *testing.T) {
 				matchEngine := &matchingUseCase{
-					buyBook:     CreateOrderBook(domain.DirectionBuy),
-					sellBook:    CreateOrderBook(domain.DirectionSell),
+					buyBook:     createOrderBook(domain.DirectionBuy),
+					sellBook:    createOrderBook(domain.DirectionSell),
 					marketPrice: decimal.Zero, // TODO: check correct?
 				}
 				matchEngine.NewOrder(createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)

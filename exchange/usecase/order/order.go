@@ -48,7 +48,9 @@ func (o *orderUseCase) CreateOrder(sequenceID int, orderID int, userID int, dire
 	o.activeOrders.Store(orderID, &order)
 	var userOrders util.GenericSyncMap[int, *domain.OrderEntity]
 	userOrders.Store(orderID, &order)
-	o.userOrdersMap.LoadOrStore(userID, &userOrders)
+	if userOrders, loaded := o.userOrdersMap.LoadOrStore(userID, &userOrders); loaded {
+		userOrders.Store(orderID, &order)
+	}
 
 	return &order, nil
 }

@@ -58,5 +58,5 @@ func (a *assetRepo) GetAsset(userID int, assetID int) (*domain.UserAsset, error)
 		}
 		return nil, domain.NotFoundUserAssetErr
 	}
-	return nil, domain.NotFoundUserAssetsErr
+	return nil, domain.NotFoundUserAssetErr
 }

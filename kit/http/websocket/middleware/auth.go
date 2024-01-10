@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/core/endpoint"
@@ -17,7 +16,6 @@ func CreateAuth[IN, OUT any](authServiceRepo domain.AuthServiceRepository) endpo
 			if err != nil {
 				return err // TODO
 			}
-			fmt.Println("ajajajjja", userID, err)
 			ctx = httpKit.AddUserID(ctx, int(userID)) // TODO: safe covert
 			return next(ctx, s)
 		}

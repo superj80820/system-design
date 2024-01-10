@@ -18,7 +18,14 @@ func createMatchResult(o *order) *matchResult {
 	}}
 }
 
-func (m *matchResult) add() {} // TODO
+func (m *matchResult) add(price decimal.Decimal, matchedQuantity decimal.Decimal, makerOrder *domain.OrderEntity) {
+	m.MatchDetails = append(m.MatchDetails, &domain.MatchDetail{
+		Price:      price,
+		Quantity:   matchedQuantity,
+		TakerOrder: m.TakerOrder,
+		MakerOrder: makerOrder,
+	})
+}
 
 type matchingUseCase struct {
 	buyBook     *orderBook
@@ -29,8 +36,8 @@ type matchingUseCase struct {
 
 func CreateMatchingUseCase() domain.MatchingUseCase {
 	return &matchingUseCase{
-		buyBook:     CreateOrderBook(domain.DirectionBuy),
-		sellBook:    CreateOrderBook(domain.DirectionSell),
+		buyBook:     createOrderBook(domain.DirectionBuy),
+		sellBook:    createOrderBook(domain.DirectionSell),
 		marketPrice: decimal.Zero, // TODO: check correct?
 	}
 }
@@ -71,6 +78,15 @@ func (m *matchingUseCase) CancelOrder(ts time.Time, o *domain.OrderEntity) error
 	return nil
 }
 
+func (m *matchingUseCase) GetOrderBook(maxDepth int) *domain.OrderBookEntity {
+	return &domain.OrderBookEntity{
+		SequenceID: m.sequenceId,
+		Price:      m.marketPrice,
+		Sell:       m.sellBook.getOrderBook(maxDepth),
+		Buy:        m.buyBook.getOrderBook(maxDepth),
+	}
+}
+
 func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
 	m.sequenceId = takerOrder.SequenceID
 	ts := takerOrder.CreatedAt // TODO: name?
@@ -90,7 +106,7 @@ func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBoo
 		}
 		m.marketPrice = makerOrder.Price
 		matchedQuantity := min(takerUnfilledQuantity, makerOrder.UnfilledQuantity) // TODO: think logic // TODO: test quantity or unfilledQuantity
-		matchResult.add()                                                          // TODO
+		matchResult.add(makerOrder.Price, matchedQuantity, makerOrder.OrderEntity)
 		takerUnfilledQuantity = takerUnfilledQuantity.Sub(matchedQuantity)
 		makerUnfilledQuantity := makerOrder.UnfilledQuantity.Sub(matchedQuantity)
 		if makerUnfilledQuantity.Equal(decimal.Zero) { // TODO: check correct

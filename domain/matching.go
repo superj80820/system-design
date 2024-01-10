@@ -15,6 +15,7 @@ var (
 type MatchingUseCase interface {
 	NewOrder(o *OrderEntity) (*MatchResult, error)
 	CancelOrder(ts time.Time, o *OrderEntity) error
+	GetOrderBook(maxDepth int) *OrderBookEntity
 }
 
 type MatchResult struct {

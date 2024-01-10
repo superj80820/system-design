@@ -61,7 +61,16 @@ func ConsumeByPartitionsBindObserver(startOffset int64) MQTopicOption {
 	}
 }
 
-type MQTopic struct {
+type MQTopic interface {
+	Subscribe(key string, notify readerManager.Notify, options ...readerManager.ObserverOption) *readerManager.Observer
+	UnSubscribe(observer *readerManager.Observer)
+	Produce(ctx context.Context, message Message) error
+	Done() <-chan struct{}
+	Err() error
+	Shutdown() bool
+}
+
+type mqTopic struct {
 	readerManager readerManager.ReaderManager
 	writerManager writerManager.WriterManager
 
@@ -69,9 +78,12 @@ type MQTopic struct {
 
 	lock   sync.RWMutex
 	cancel context.CancelFunc
+	doneCh chan struct{}
+	errCh  chan error
+	err    error
 }
 
-func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (*MQTopic, error) {
+func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (MQTopic, error) {
 	ctx, cancel := context.WithCancel(ctx)
 
 	mqConfig := &MQTopicConfig{
@@ -98,52 +110,79 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 		reader readerManager.ReaderManager
 		err    error
 	)
-	switch mqConfig.readerWay {
-	case readerManager.GroupIDReader:
-		reader, err = readerManager.CreateGroupIDReaderManager(
-			ctx,
-			mqConfig.brokers,
-			mqConfig.topic,
-			mqConfig.readerGroupID,
-			mqConfig.readerStartOffset,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "create reader manager failed")
-		}
-	case readerManager.SpecPartitionReader:
-		reader, err = readerManager.CreateSpecPartitionReaderManager(
-			ctx,
-			mqConfig.topic,
-			mqConfig.readerStartOffset,
-			mqConfig.readerPartition,
-			mqConfig.brokers,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "create reader manager failed")
-		}
-	case readerManager.PartitionsBindObserverReader:
-		reader, err = readerManager.CreatePartitionBindObserverReaderManager(
-			ctx,
-			mqConfig.url,
-			mqConfig.readerStartOffset,
-			mqConfig.brokers,
-			mqConfig.topic,
-		)
-		if err != nil {
-			return nil, errors.Wrap(err, "create reader manager failed")
+	errCh := make(chan error)
+	doneCh := make(chan struct{})
+	readerErrorHandlerFn := func(err error) {
+		select {
+		case errCh <- err:
+		case <-ctx.Done():
 		}
 	}
+	if err := func() error {
+		defer cancel()
 
-	mq := &MQTopic{
+		switch mqConfig.readerWay {
+		case readerManager.GroupIDReader:
+			reader, err = readerManager.CreateGroupIDReaderManager(
+				ctx,
+				mqConfig.brokers,
+				mqConfig.topic,
+				mqConfig.readerGroupID,
+				mqConfig.readerStartOffset,
+				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+			)
+			if err != nil {
+				return errors.Wrap(err, "create reader manager failed")
+			}
+		case readerManager.SpecPartitionReader:
+			reader, err = readerManager.CreateSpecPartitionReaderManager(
+				ctx,
+				mqConfig.topic,
+				mqConfig.readerStartOffset,
+				mqConfig.readerPartition,
+				mqConfig.brokers,
+				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+			)
+			if err != nil {
+				return errors.Wrap(err, "create reader manager failed")
+			}
+		case readerManager.PartitionsBindObserverReader:
+			reader, err = readerManager.CreatePartitionBindObserverReaderManager(
+				ctx,
+				mqConfig.url,
+				mqConfig.readerStartOffset,
+				mqConfig.brokers,
+				mqConfig.topic,
+				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+			)
+			if err != nil {
+				return errors.Wrap(err, "create reader manager failed")
+			}
+		}
+		return nil
+	}(); err != nil {
+		return nil, err
+	}
+
+	mq := &mqTopic{
 		writerManager: writer,
 		readerManager: reader,
 		cancel:        cancel,
+		doneCh:        doneCh,
+		errCh:         errCh,
 	}
+
+	go func() {
+		err := <-errCh
+		mq.err = err
+		cancel()
+		close(doneCh)
+	}()
 
 	return mq, nil
 }
 
-func (m *MQTopic) Subscribe(key string, notify readerManager.Notify, options ...readerManager.ObserverOption) *readerManager.Observer {
+func (m *mqTopic) Subscribe(key string, notify readerManager.Notify, options ...readerManager.ObserverOption) *readerManager.Observer {
 	observer := readerManager.CreateObserver(key, notify, options...)
 
 	m.readerManager.AddObserver(observer)
@@ -152,12 +191,12 @@ func (m *MQTopic) Subscribe(key string, notify readerManager.Notify, options ...
 	return observer
 }
 
-func (m *MQTopic) UnSubscribe(observer *readerManager.Observer) {
+func (m *mqTopic) UnSubscribe(observer *readerManager.Observer) {
 	m.readerManager.RemoveObserverWithHook(observer)
 	m.readerManager.IfNoObserversThenStopConsume()
 }
 
-func (m *MQTopic) Produce(ctx context.Context, message Message) error {
+func (m *mqTopic) Produce(ctx context.Context, message Message) error {
 	marshalMessage, err := message.Marshal()
 	if err != nil {
 		return errors.Wrap(err, "marshal message failed")
@@ -178,7 +217,7 @@ func (m *MQTopic) Produce(ctx context.Context, message Message) error {
 	return nil
 }
 
-func (m *MQTopic) Shutdown() bool {
+func (m *mqTopic) Shutdown() bool {
 	m.cancel()
 
 	done := make(chan bool)
@@ -193,4 +232,12 @@ func (m *MQTopic) Shutdown() bool {
 	case <-time.After(10 * time.Second):
 		return false
 	}
+}
+
+func (m *mqTopic) Done() <-chan struct{} {
+	return m.doneCh
+}
+
+func (m *mqTopic) Err() error {
+	return m.err
 }

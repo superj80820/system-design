@@ -31,10 +31,10 @@ type ChatSuite struct {
 
 	mongoDB *mongo.Client
 
-	channelMessageTopic     *mqKit.MQTopic
-	userMessageTopic        *mqKit.MQTopic
-	userStatusTopic         *mqKit.MQTopic
-	friendOnlineStatusTopic *mqKit.MQTopic
+	channelMessageTopic     mqKit.MQTopic
+	userMessageTopic        mqKit.MQTopic
+	userStatusTopic         mqKit.MQTopic
+	friendOnlineStatusTopic mqKit.MQTopic
 
 	mongodbContainer *mongodb.MongoDBContainer
 	kafkaContainer   *kafka.KafkaContainer
