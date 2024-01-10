@@ -18,10 +18,6 @@ import (
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
-func TestPrevious(t *testing.T) { // TODO: test
-
-}
-
 func TestTrading(t *testing.T) {
 	testCases := []struct {
 		scenario string
