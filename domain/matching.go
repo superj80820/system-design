@@ -8,8 +8,11 @@ import (
 )
 
 var (
-	ErrEmptyOrderBook = errors.New("empty order book error")
-	ErrNoOrder        = errors.New("order not found error")
+	ErrEmptyOrderBook       = errors.New("empty order book error")
+	ErrNoOrder              = errors.New("order not found error")
+	ErrGetDuplicateEvent    = errors.New("get duplicate event error")
+	ErrMissEvent            = errors.New("miss event error")
+	ErrPreviousIDNotCorrect = errors.New("message previous id not correct")
 )
 
 type MatchingUseCase interface {

@@ -142,6 +142,78 @@ func TestTrading(t *testing.T) {
 				}
 			},
 		},
+		{
+			scenario: "test get duplicate event",
+			fn: func(t *testing.T) {
+
+				userID := 2
+				currencyMap := map[string]int{
+					"BTC":  1,
+					"USDT": 2,
+				}
+				tradingRepo := new(mocks.TradingRepo)
+				assetRepo := assetMemoryRepo.CreateAssetRepo()
+				matchingUseCase := matching.CreateMatchingUseCase()
+				userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
+				orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+				clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
+
+				uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
+				assert.Nil(t, err)
+
+				tradingUseCase := CreateTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100)
+				createTradingEvent := func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent {
+					return &domain.TradingEvent{
+						EventType:  domain.TradingEventCreateOrderType,
+						SequenceID: sequenceID,
+						PreviousID: previousID,
+						UniqueID:   int(uniqueIDGenerate.Generate().GetInt64()),
+
+						OrderRequestEvent: &domain.OrderRequestEvent{
+							UserID:    userID,
+							Direction: direction,
+							Price:     price,
+							Quantity:  quantity,
+						},
+
+						CreatedAt: time.Now(),
+					}
+				}
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
+					createTradingEvent(userID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
+					createTradingEvent(userID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)),
+				})
+				assert.Nil(t, err)
+
+				// test get duplicate event
+				{
+					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+						createTradingEvent(userID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
+					})
+					assert.ErrorIs(t, err, domain.ErrGetDuplicateEvent)
+				}
+
+				// test miss event
+				{
+					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+						createTradingEvent(userID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
+					})
+					assert.ErrorIs(t, err, domain.ErrMissEvent)
+				}
+
+				// TODO: test think maybe no need previous
+				// test previous id not correct
+				{
+					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+						createTradingEvent(userID, 1, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
+					})
+					assert.ErrorIs(t, err, domain.ErrPreviousIDNotCorrect)
+				}
+			},
+		},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.scenario, testCase.fn)

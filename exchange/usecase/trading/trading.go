@@ -65,14 +65,14 @@ func (t *tradingUseCase) ProcessMessages(messages []*domain.TradingEvent) error 
 
 func (t *tradingUseCase) processMessage(message *domain.TradingEvent) error {
 	if message.SequenceID <= t.lastSequenceID {
-		return errors.New("skip duplicate event: " + strconv.Itoa(message.SequenceID))
+		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event sequence id: "+strconv.Itoa(message.SequenceID))
 	}
-	if message.PreviousID > t.lastSequenceID { // TODO: think
+	if message.PreviousID > t.lastSequenceID {
 		// TODO: load from db
-		return errors.New("miss message")
+		return errors.Wrap(domain.ErrMissEvent, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(message.PreviousID))
 	}
-	if message.PreviousID != t.lastSequenceID {
-		return errors.New("previous message not correct")
+	if message.PreviousID != t.lastSequenceID { // TODO: test think maybe no need previous
+		return errors.Wrap(domain.ErrPreviousIDNotCorrect, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(message.PreviousID))
 	}
 	switch message.EventType {
 	case domain.TradingEventCreateOrderType:
