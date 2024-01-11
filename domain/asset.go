@@ -39,4 +39,7 @@ type UserAssetUseCase interface {
 	Transfer(transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) error
 	Freeze(userID, assetID int, amount decimal.Decimal) error
 	Unfreeze(userID, assetID int, amount decimal.Decimal) error
+
+	GetAssets(userID int) (map[int]*UserAsset, error)
+	GetAsset(userID, assetID int) (*UserAsset, error)
 }

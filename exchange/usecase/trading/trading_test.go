@@ -19,19 +19,21 @@ import (
 )
 
 func TestTrading(t *testing.T) {
+	liabilityUser := 1
+	userAID := 2
+	userBID := 3
+	currencyMap := map[string]int{
+		"BTC":  1,
+		"USDT": 2,
+	}
+
 	testCases := []struct {
 		scenario string
 		fn       func(t *testing.T)
 	}{
 		{
-			scenario: "test order book",
+			scenario: "test buy",
 			fn: func(t *testing.T) {
-
-				userID := 2
-				currencyMap := map[string]int{
-					"BTC":  1,
-					"USDT": 2,
-				}
 				tradingRepo := new(mocks.TradingRepo)
 				assetRepo := assetMemoryRepo.CreateAssetRepo()
 				matchingUseCase := matching.CreateMatchingUseCase()
@@ -60,8 +62,260 @@ func TestTrading(t *testing.T) {
 						CreatedAt: time.Now(),
 					}
 				}
-				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
-				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userBID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userBID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+
+				asset, err := userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "997917.66", asset.Available.String())
+				assert.Equal(t, "2082.34", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userAID, 1, 2, domain.DirectionBuy, decimal.NewFromFloat(2087.6), decimal.NewFromInt(5)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "987479.66", asset.Available.String())
+				assert.Equal(t, "12520.34", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userBID, 2, 3, domain.DirectionSell, decimal.NewFromFloat(2080.9), decimal.NewFromInt(10)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1012520.34", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "999990", asset.Available.String())
+				assert.Equal(t, "4", asset.Frozen.String())
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "987479.66", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000006", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+			},
+		},
+		{
+			scenario: "test sell",
+			fn: func(t *testing.T) {
+				tradingRepo := new(mocks.TradingRepo)
+				assetRepo := assetMemoryRepo.CreateAssetRepo()
+				matchingUseCase := matching.CreateMatchingUseCase()
+				userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
+				orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+				clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
+
+				uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
+				assert.Nil(t, err)
+
+				tradingUseCase := CreateTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100)
+				createTradingEvent := func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent {
+					return &domain.TradingEvent{
+						EventType:  domain.TradingEventCreateOrderType,
+						SequenceID: sequenceID,
+						PreviousID: previousID,
+						UniqueID:   int(uniqueIDGenerate.Generate().GetInt64()),
+
+						OrderRequestEvent: &domain.OrderRequestEvent{
+							UserID:    userID,
+							Direction: direction,
+							Price:     price,
+							Quantity:  quantity,
+						},
+
+						CreatedAt: time.Now(),
+					}
+				}
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userBID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userBID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+
+				asset, err := userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userAID, 0, 1, domain.DirectionSell, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "999999", asset.Available.String())
+				assert.Equal(t, "1", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2085.34), decimal.NewFromInt(3)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000000", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "999996", asset.Available.String())
+				assert.Equal(t, "4", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+
+				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
+					createTradingEvent(userBID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2090.34), decimal.NewFromInt(5)),
+				})
+				assert.Nil(t, err)
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "989571.3", asset.Available.String())
+				assert.Equal(t, "2090.34", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userBID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1000004", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "1008338.36", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(userAID, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "999996", asset.Available.String())
+				assert.Equal(t, "0", asset.Frozen.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["BTC"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+				asset, err = userAssetUseCase.GetAsset(liabilityUser, currencyMap["USDT"])
+				assert.Nil(t, err)
+				assert.Equal(t, "-2000000", asset.Available.String())
+			},
+		},
+		{
+			scenario: "test order book",
+			fn: func(t *testing.T) {
+				tradingRepo := new(mocks.TradingRepo)
+				assetRepo := assetMemoryRepo.CreateAssetRepo()
+				matchingUseCase := matching.CreateMatchingUseCase()
+				userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
+				orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+				clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
+
+				uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
+				assert.Nil(t, err)
+
+				tradingUseCase := CreateTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100)
+				createTradingEvent := func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent {
+					return &domain.TradingEvent{
+						EventType:  domain.TradingEventCreateOrderType,
+						SequenceID: sequenceID,
+						PreviousID: previousID,
+						UniqueID:   int(uniqueIDGenerate.Generate().GetInt64()),
+
+						OrderRequestEvent: &domain.OrderRequestEvent{
+							UserID:    userID,
+							Direction: direction,
+							Price:     price,
+							Quantity:  quantity,
+						},
+
+						CreatedAt: time.Now(),
+					}
+				}
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+
 				// buy  2082.34 1
 				// sell 2087.6  2
 				// buy  2087.8  1
@@ -86,18 +340,18 @@ func TestTrading(t *testing.T) {
 				// 2082.34 1
 				// 2081.11 7
 				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
-					createTradingEvent(userID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
-					createTradingEvent(userID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
-					createTradingEvent(userID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)),
-					createTradingEvent(userID, 3, 4, domain.DirectionBuy, decimal.NewFromFloat(2085.01), decimal.NewFromInt(5)),
-					createTradingEvent(userID, 4, 5, domain.DirectionSell, decimal.NewFromFloat(2088.02), decimal.NewFromInt(3)),
-					createTradingEvent(userID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
-					createTradingEvent(userID, 6, 7, domain.DirectionBuy, decimal.NewFromFloat(2081.11), decimal.NewFromInt(7)),
-					createTradingEvent(userID, 7, 8, domain.DirectionBuy, decimal.NewFromFloat(2086.0), decimal.NewFromInt(3)),
-					createTradingEvent(userID, 8, 9, domain.DirectionBuy, decimal.NewFromFloat(2088.33), decimal.NewFromInt(1)),
-					createTradingEvent(userID, 9, 10, domain.DirectionSell, decimal.NewFromFloat(2086.54), decimal.NewFromInt(2)),
-					createTradingEvent(userID, 10, 11, domain.DirectionSell, decimal.NewFromFloat(2086.55), decimal.NewFromInt(5)),
-					createTradingEvent(userID, 11, 12, domain.DirectionBuy, decimal.NewFromFloat(2086.55), decimal.NewFromInt(3)),
+					createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
+					createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
+					createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)),
+					createTradingEvent(userAID, 3, 4, domain.DirectionBuy, decimal.NewFromFloat(2085.01), decimal.NewFromInt(5)),
+					createTradingEvent(userAID, 4, 5, domain.DirectionSell, decimal.NewFromFloat(2088.02), decimal.NewFromInt(3)),
+					createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
+					createTradingEvent(userAID, 6, 7, domain.DirectionBuy, decimal.NewFromFloat(2081.11), decimal.NewFromInt(7)),
+					createTradingEvent(userAID, 7, 8, domain.DirectionBuy, decimal.NewFromFloat(2086.0), decimal.NewFromInt(3)),
+					createTradingEvent(userAID, 8, 9, domain.DirectionBuy, decimal.NewFromFloat(2088.33), decimal.NewFromInt(1)),
+					createTradingEvent(userAID, 9, 10, domain.DirectionSell, decimal.NewFromFloat(2086.54), decimal.NewFromInt(2)),
+					createTradingEvent(userAID, 10, 11, domain.DirectionSell, decimal.NewFromFloat(2086.55), decimal.NewFromInt(5)),
+					createTradingEvent(userAID, 11, 12, domain.DirectionBuy, decimal.NewFromFloat(2086.55), decimal.NewFromInt(3)),
 				})
 				assert.Nil(t, err)
 
@@ -141,12 +395,6 @@ func TestTrading(t *testing.T) {
 		{
 			scenario: "test get duplicate event",
 			fn: func(t *testing.T) {
-
-				userID := 2
-				currencyMap := map[string]int{
-					"BTC":  1,
-					"USDT": 2,
-				}
 				tradingRepo := new(mocks.TradingRepo)
 				assetRepo := assetMemoryRepo.CreateAssetRepo()
 				matchingUseCase := matching.CreateMatchingUseCase()
@@ -175,19 +423,19 @@ func TestTrading(t *testing.T) {
 						CreatedAt: time.Now(),
 					}
 				}
-				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
-				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
+				assert.Nil(t, userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
 				err = tradingUseCase.ProcessMessages([]*domain.TradingEvent{
-					createTradingEvent(userID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
-					createTradingEvent(userID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
-					createTradingEvent(userID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)),
+					createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)),
+					createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
+					createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)),
 				})
 				assert.Nil(t, err)
 
 				// test get duplicate event
 				{
 					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
-						createTradingEvent(userID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
+						createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)),
 					})
 					assert.ErrorIs(t, err, domain.ErrGetDuplicateEvent)
 				}
@@ -195,7 +443,7 @@ func TestTrading(t *testing.T) {
 				// test miss event
 				{
 					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
-						createTradingEvent(userID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
+						createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
 					})
 					assert.ErrorIs(t, err, domain.ErrMissEvent)
 				}
@@ -204,7 +452,7 @@ func TestTrading(t *testing.T) {
 				// test previous id not correct
 				{
 					err := tradingUseCase.ProcessMessages([]*domain.TradingEvent{
-						createTradingEvent(userID, 1, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
+						createTradingEvent(userAID, 1, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)),
 					})
 					assert.ErrorIs(t, err, domain.ErrPreviousIDNotCorrect)
 				}

@@ -35,8 +35,9 @@ func (c *clearingUseCase) ClearMatchResult(matchResult *domain.MatchResult) erro
 		for _, matchDetail := range matchResult.MatchDetails {
 			maker := matchDetail.MakerOrder
 			matched := matchDetail.Quantity
-			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, taker.ID, maker.ID, c.baseCurrencyID, matched)
-			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, maker.ID, taker.ID, c.quoteCurrencyID, maker.Price.Mul(matched))
+
+			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.baseCurrencyID, matched)
+			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
 			if maker.UnfilledQuantity.IsZero() {
 				c.orderUseCase.RemoveOrder(maker.ID)
 			}
@@ -50,14 +51,13 @@ func (c *clearingUseCase) ClearMatchResult(matchResult *domain.MatchResult) erro
 			maker := matchDetail.MakerOrder
 			matched := matchDetail.Quantity
 			if taker.Price.Cmp(maker.Price) > 0 {
-				// TODO: test un freeze quote
 				unfreezeQuote := taker.Price.Sub(maker.Price).Mul(matched)
-				if err := c.userAssetUseCase.Unfreeze(taker.ID, c.quoteCurrencyID, unfreezeQuote); err != nil {
+				if err := c.userAssetUseCase.Unfreeze(taker.UserID, c.quoteCurrencyID, unfreezeQuote); err != nil {
 					return errors.Wrap(err, "unfreeze taker failed")
 				}
 			}
-			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, taker.ID, maker.ID, c.quoteCurrencyID, maker.Price.Mul(matched))
-			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, maker.ID, taker.ID, c.baseCurrencyID, matched)
+			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
+			c.userAssetUseCase.Transfer(domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.baseCurrencyID, matched)
 			if maker.UnfilledQuantity.IsZero() {
 				if err := c.orderUseCase.RemoveOrder(maker.ID); err != nil {
 					return errors.Wrap(err, "remove maker order failed, maker order id: "+strconv.Itoa(maker.ID))

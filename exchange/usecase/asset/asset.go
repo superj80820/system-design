@@ -32,6 +32,14 @@ func (u *userAsset) Unfreeze(userID, assetID int, amount decimal.Decimal) error 
 	return u.tryTransfer(domain.AssetTransferFrozenToAvailable, userID, userID, assetID, amount, true)
 }
 
+func (u *userAsset) GetAsset(userID int, assetID int) (*domain.UserAsset, error) {
+	return u.assetRepo.GetAsset(userID, assetID)
+}
+
+func (u *userAsset) GetAssets(userID int) (map[int]*domain.UserAsset, error) {
+	return u.assetRepo.GetAssets(userID)
+}
+
 func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal, checkBalance bool) error {
 	if amount.IsZero() {
 		return nil
@@ -78,5 +86,4 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 	default:
 		return errors.New("unknown transfer type")
 	}
-
 }
