@@ -29,7 +29,6 @@ func CreateAsyncTradingUseCase(
 	tradingUseCase domain.TradingUseCase,
 	tradingRepo domain.TradingRepo,
 	logger loggerKit.Logger,
-	orderBookDepth int,
 ) domain.AsyncTradingUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 

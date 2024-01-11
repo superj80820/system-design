@@ -1,4 +1,4 @@
-package sequencer
+package memory
 
 import "github.com/superj80820/system-design/domain"
 
@@ -8,12 +8,21 @@ func CreateTradingSequencerRepo() domain.TradingSequencerRepo {
 	return &tradingSequencerRepo{}
 }
 
-// GetMaxSequenceID implements domain.TradingSequencerRepo.
 func (*tradingSequencerRepo) GetMaxSequenceID() uint64 {
-	panic("unimplemented")
+	return 0
 }
 
 // SaveEvent implements domain.TradingSequencerRepo.
 func (*tradingSequencerRepo) SaveEvent(tradingEvent *domain.TradingEvent) {
+	panic("unimplemented")
+}
+
+// SendTradeSequenceMessages implements domain.TradingSequencerRepo.
+func (*tradingSequencerRepo) SendTradeSequenceMessages(*domain.TradingEvent) {
+	panic("unimplemented")
+}
+
+// SubscribeTradeSequenceMessage implements domain.TradingSequencerRepo.
+func (*tradingSequencerRepo) SubscribeTradeSequenceMessage(notify func(*domain.TradingEvent)) {
 	panic("unimplemented")
 }

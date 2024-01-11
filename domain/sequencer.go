@@ -5,7 +5,7 @@ import "context"
 type TradingSequencerUseCase interface {
 	ProcessMessages(tradingEvent *TradingEvent)
 	SequenceMessages(tradingEvent *TradingEvent)
-	SendMessages(tradingEvent *TradingEvent)
+	SendTradeSequenceMessages(*TradingEvent)
 }
 
 type AsyncTradingSequencerUseCase interface {
@@ -15,4 +15,6 @@ type AsyncTradingSequencerUseCase interface {
 type TradingSequencerRepo interface {
 	GetMaxSequenceID() uint64
 	SaveEvent(tradingEvent *TradingEvent)
+	SubscribeTradeSequenceMessage(notify func(*TradingEvent))
+	SendTradeSequenceMessages(*TradingEvent)
 }

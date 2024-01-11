@@ -14,7 +14,7 @@ type tradingSequencerUseCase struct {
 	lastTimestamp        time.Time
 }
 
-func CreateTradingUseCase(tradingSequencerRepo domain.TradingSequencerRepo, tradingRepo domain.TradingRepo) domain.TradingSequencerUseCase {
+func CreateTradingSequencerUseCase(tradingSequencerRepo domain.TradingSequencerRepo, tradingRepo domain.TradingRepo) domain.TradingSequencerUseCase {
 	var sequence atomic.Uint64
 	sequence.Add(tradingSequencerRepo.GetMaxSequenceID())
 
@@ -28,11 +28,6 @@ func CreateTradingUseCase(tradingSequencerRepo domain.TradingSequencerRepo, trad
 func (t *tradingSequencerUseCase) ProcessMessages(tradingEvent *domain.TradingEvent) {
 	t.SequenceMessages(tradingEvent)
 	t.tradingSequencerRepo.SaveEvent(tradingEvent)
-	t.SendMessages(tradingEvent)
-}
-
-// SendMessages implements domain.TradingSequencerUseCase.
-func (t *tradingSequencerUseCase) SendMessages(tradingEvent *domain.TradingEvent) {
 	t.tradingRepo.SendTradeMessages(tradingEvent)
 }
 
@@ -49,4 +44,8 @@ func (t *tradingSequencerUseCase) SequenceMessages(tradingEvent *domain.TradingE
 	tradingEvent.PreviousID = int(previousID) // TODO: test type save
 	tradingEvent.SequenceID = int(currentID)  // TODO: test type save
 	tradingEvent.CreatedAt = t.lastTimestamp
+}
+
+func (t *tradingSequencerUseCase) SendTradeSequenceMessages(tradingEvent *domain.TradingEvent) {
+	t.tradingSequencerRepo.SendTradeSequenceMessages(tradingEvent)
 }
