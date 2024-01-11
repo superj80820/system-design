@@ -9,17 +9,19 @@ import (
 type asyncTradingSequencerUseCase struct {
 	tradingSequencerUseCase domain.TradingSequencerUseCase
 	tradingRepo             domain.TradingRepo
+	tradingSequencerRepo    domain.TradingSequencerRepo
 }
 
-func CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase domain.TradingSequencerUseCase, tradingRepo domain.TradingRepo) domain.AsyncTradingSequencerUseCase {
+func CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase domain.TradingSequencerUseCase, tradingRepo domain.TradingRepo, tradingSequencerRepo domain.TradingSequencerRepo) domain.AsyncTradingSequencerUseCase {
 	return &asyncTradingSequencerUseCase{
 		tradingSequencerUseCase: tradingSequencerUseCase,
 		tradingRepo:             tradingRepo,
+		tradingSequencerRepo:    tradingSequencerRepo,
 	}
 }
 
 func (a *asyncTradingSequencerUseCase) AsyncEventProcess(ctx context.Context) {
-	a.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
+	a.tradingSequencerRepo.SubscribeTradeSequenceMessage(func(te *domain.TradingEvent) {
 		a.tradingSequencerUseCase.ProcessMessages(te)
 	})
 }

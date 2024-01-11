@@ -17,4 +17,5 @@ type TradingSequencerRepo interface {
 	SaveEvent(tradingEvent *TradingEvent)
 	SubscribeTradeSequenceMessage(notify func(*TradingEvent))
 	SendTradeSequenceMessages(*TradingEvent)
+	Shutdown()
 }

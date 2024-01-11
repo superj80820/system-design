@@ -32,6 +32,42 @@ func TestTrading(t *testing.T) {
 		fn       func(t *testing.T)
 	}{
 		{
+			scenario: "test no money should not create order",
+			fn: func(t *testing.T) {
+				tradingRepo := new(mocks.TradingRepo)
+				assetRepo := assetMemoryRepo.CreateAssetRepo()
+				matchingUseCase := matching.CreateMatchingUseCase()
+				userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
+				orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+				clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
+
+				uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
+				assert.Nil(t, err)
+
+				tradingUseCase := CreateTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100)
+				createTradingEvent := func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent {
+					return &domain.TradingEvent{
+						EventType:  domain.TradingEventCreateOrderType,
+						SequenceID: sequenceID,
+						PreviousID: previousID,
+						UniqueID:   int(uniqueIDGenerate.Generate().GetInt64()),
+
+						OrderRequestEvent: &domain.OrderRequestEvent{
+							UserID:    userID,
+							Direction: direction,
+							Price:     price,
+							Quantity:  quantity,
+						},
+
+						CreatedAt: time.Now(),
+					}
+				}
+
+				err = tradingUseCase.ProcessMessages(createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				assert.ErrorIs(t, err, domain.LessAmountErr)
+			},
+		},
+		{
 			scenario: "test buy",
 			fn: func(t *testing.T) {
 				tradingRepo := new(mocks.TradingRepo)

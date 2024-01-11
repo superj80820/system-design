@@ -29,7 +29,7 @@ func main() {
 	ctx := context.Background()
 	tradingRepo := tradingMemoryRepo.CreateTradingRepo(ctx)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
-	sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo()
+	sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel, loggerKit.NoStdout)
 	if err != nil {
@@ -43,12 +43,19 @@ func main() {
 	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100) // TODO: orderBookDepth use function?
 	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, logger)
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
-	asyncTradingSequencerUseCase := sequencer.CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase, tradingRepo)
+	asyncTradingSequencerUseCase := sequencer.CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase, tradingRepo, sequencerRepo)
 
 	go background.RunAsyncTradingSequencer(ctx, asyncTradingSequencerUseCase)
 	go background.RunAsyncTrading(ctx, tradingAsyncUseCase)
 
 	r := mux.NewRouter()
+	r.Methods("GET").Path("/api/v1/orderBook").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetOrderBookEndpoint(matchingUseCase),
+			httpDelivery.DecodeGetOrderBookRequest,
+			httpDelivery.EncodeGetOrderBookResponse,
+		),
+	)
 	r.Methods("POST").Path("/api/v1/order").Handler(
 		httptransport.NewServer(
 			httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase),

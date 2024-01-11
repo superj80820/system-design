@@ -73,7 +73,12 @@ func CreateAsyncTradingUseCase(
 
 func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
-		t.tradingUseCase.ProcessMessages(te)
+		err := t.tradingUseCase.ProcessMessages(te)
+		if errors.Is(err, domain.LessAmountErr) {
+			// do nothing
+		} else if err != nil {
+			panic(fmt.Sprintf("process message get error: %+v", err))
+		}
 	})
 	select {
 	case <-t.tradingRepo.Done():
@@ -140,6 +145,10 @@ func (t *tradingAsyncUseCase) AsyncOrderBookProcess(ctx context.Context) error {
 
 func (t *tradingAsyncUseCase) AsyncAPIResultProcess(ctx context.Context) error { //TODO: for what?
 	return nil
+}
+
+func (t *tradingAsyncUseCase) Done() <-chan struct{} {
+	return t.doneCh
 }
 
 func (t *tradingAsyncUseCase) Shutdown() error {

@@ -1,28 +1,65 @@
 package memory
 
-import "github.com/superj80820/system-design/domain"
+import (
+	"context"
 
-type tradingSequencerRepo struct{}
+	"github.com/superj80820/system-design/domain"
+	"github.com/superj80820/system-design/kit/util"
+)
 
-func CreateTradingSequencerRepo() domain.TradingSequencerRepo {
-	return &tradingSequencerRepo{}
+type tradingSequencerRepo struct {
+	tradingEventCh chan *domain.TradingEvent
+	observers      util.GenericSyncMap[*func(*domain.TradingEvent), func(*domain.TradingEvent)] // TODO: test key safe?
+	cancel         context.CancelFunc
+	done           chan struct{}
+}
+
+func CreateTradingSequencerRepo(ctx context.Context) domain.TradingSequencerRepo {
+	ctx, cancel := context.WithCancel(ctx)
+
+	tradingEventCh := make(chan *domain.TradingEvent)
+	done := make(chan struct{})
+
+	t := &tradingSequencerRepo{
+		tradingEventCh: tradingEventCh,
+		cancel:         cancel,
+		done:           done,
+	}
+
+	go func() {
+		for {
+			select {
+			case tradingEvent := <-t.tradingEventCh:
+				t.observers.Range(func(key *func(*domain.TradingEvent), value func(*domain.TradingEvent)) bool {
+					value(tradingEvent)
+					return true
+				})
+			case <-ctx.Done():
+				close(done)
+			}
+		}
+	}()
+
+	return t
 }
 
 func (*tradingSequencerRepo) GetMaxSequenceID() uint64 {
 	return 0
 }
 
-// SaveEvent implements domain.TradingSequencerRepo.
+func (t *tradingSequencerRepo) Shutdown() {
+	t.cancel()
+	<-t.done
+}
+
 func (*tradingSequencerRepo) SaveEvent(tradingEvent *domain.TradingEvent) {
-	panic("unimplemented")
+	// noop
 }
 
-// SendTradeSequenceMessages implements domain.TradingSequencerRepo.
-func (*tradingSequencerRepo) SendTradeSequenceMessages(*domain.TradingEvent) {
-	panic("unimplemented")
+func (t *tradingSequencerRepo) SendTradeSequenceMessages(tradingEvent *domain.TradingEvent) {
+	t.tradingEventCh <- tradingEvent
 }
 
-// SubscribeTradeSequenceMessage implements domain.TradingSequencerRepo.
-func (*tradingSequencerRepo) SubscribeTradeSequenceMessage(notify func(*domain.TradingEvent)) {
-	panic("unimplemented")
+func (t *tradingSequencerRepo) SubscribeTradeSequenceMessage(notify func(*domain.TradingEvent)) {
+	t.observers.Store(&notify, notify)
 }
