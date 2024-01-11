@@ -50,12 +50,10 @@ func CreateTradingUseCase(
 	return t
 }
 
-func (t *tradingUseCase) ProcessMessages(messages []*domain.TradingEvent) error {
+func (t *tradingUseCase) ProcessMessages(message *domain.TradingEvent) error {
 	t.isOrderBookChanged = false
-	for _, message := range messages {
-		if err := t.processMessage(message); err != nil {
-			return errors.Wrap(err, "process event failed")
-		}
+	if err := t.processMessage(message); err != nil {
+		return errors.Wrap(err, "process event failed")
 	}
 	if t.isOrderBookChanged {
 		t.latestOrderBook = t.matchingUseCase.GetOrderBook(t.orderBookDepth)

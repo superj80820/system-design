@@ -3,8 +3,6 @@
 package mocks
 
 import (
-	context "context"
-
 	mock "github.com/stretchr/testify/mock"
 	domain "github.com/superj80820/system-design/domain"
 )
@@ -52,27 +50,19 @@ func (_m *TradingRepo) Err() error {
 	return r0
 }
 
-// Shutdown provides a mock function with given fields:
-func (_m *TradingRepo) Shutdown() error {
-	ret := _m.Called()
-
-	if len(ret) == 0 {
-		panic("no return value specified for Shutdown")
-	}
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func() error); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
+// SendTradeMessages provides a mock function with given fields: _a0
+func (_m *TradingRepo) SendTradeMessages(_a0 *domain.TradingEvent) {
+	_m.Called(_a0)
 }
 
-// SubscribeTradeMessage provides a mock function with given fields: ctx, notify
-func (_m *TradingRepo) SubscribeTradeMessage(ctx context.Context, notify func([]*domain.TradingEvent)) {
-	_m.Called(ctx, notify)
+// Shutdown provides a mock function with given fields:
+func (_m *TradingRepo) Shutdown() {
+	_m.Called()
+}
+
+// SubscribeTradeMessage provides a mock function with given fields: notify
+func (_m *TradingRepo) SubscribeTradeMessage(notify func(*domain.TradingEvent)) {
+	_m.Called(notify)
 }
 
 // NewTradingRepo creates a new instance of TradingRepo. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.

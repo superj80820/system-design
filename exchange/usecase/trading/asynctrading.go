@@ -24,13 +24,13 @@ type tradingAsyncUseCase struct {
 	err    error
 }
 
-func CreateTradingAsyncUseCase(
+func CreateAsyncTradingUseCase(
 	ctx context.Context,
 	tradingUseCase domain.TradingUseCase,
 	tradingRepo domain.TradingRepo,
 	logger loggerKit.Logger,
 	orderBookDepth int,
-) domain.TradingAsyncUseCase {
+) domain.AsyncTradingUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 
 	t := &tradingAsyncUseCase{
@@ -73,7 +73,7 @@ func CreateTradingAsyncUseCase(
 }
 
 func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
-	t.tradingRepo.SubscribeTradeMessage(ctx, func(te []*domain.TradingEvent) {
+	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
 		t.tradingUseCase.ProcessMessages(te)
 	})
 	select {
@@ -82,9 +82,7 @@ func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 			return errors.Wrap(err, "trade subscriber get error")
 		}
 	case <-ctx.Done():
-		if err := t.tradingRepo.Shutdown(); err != nil {
-			return errors.Wrap(err, "shutdown trade subscriber failed")
-		}
+		t.tradingRepo.Shutdown()
 	}
 	return nil
 }
@@ -150,3 +148,19 @@ func (t *tradingAsyncUseCase) Shutdown() error {
 	<-t.doneCh
 	return t.err
 }
+
+// if len(matchResult.MatchDetails) != 0 {
+//     var closedOrders []*domain.OrderEntity
+//     if matchResult.TakerOrder.Status.IsFinalStatus() {
+//         closedOrders = append(closedOrders, matchResult.TakerOrder)
+//     }
+//     for _, matchDetail := range matchResult.MatchDetails {
+//         maker := matchDetail.MakerOrder
+//         if maker.Status.IsFinalStatus() {
+//             closedOrders = append(closedOrders, maker)
+//         }
+//     }
+//     for _, closedOrder := range closedOrders {
+//         t.orderBookCh <- closedOrder
+//     }
+// }

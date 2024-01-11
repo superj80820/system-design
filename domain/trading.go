@@ -53,13 +53,14 @@ type TransferEvent struct {
 }
 
 type TradingRepo interface {
-	SubscribeTradeMessage(ctx context.Context, notify func([]*TradingEvent))
+	SubscribeTradeMessage(notify func(*TradingEvent))
+	SendTradeMessages(*TradingEvent)
 	Done() <-chan struct{}
 	Err() error
-	Shutdown() error
+	Shutdown()
 }
 
-type TradingAsyncUseCase interface {
+type AsyncTradingUseCase interface {
 	AsyncEventProcess(ctx context.Context) error
 	AsyncDBProcess(ctx context.Context) error
 	AsyncTickProcess(ctx context.Context) error
@@ -70,7 +71,7 @@ type TradingAsyncUseCase interface {
 }
 
 type TradingUseCase interface {
-	ProcessMessages(messages []*TradingEvent) error
+	ProcessMessages(messages *TradingEvent) error
 	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)
