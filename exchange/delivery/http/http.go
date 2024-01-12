@@ -2,30 +2,49 @@ package http
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/go-kit/kit/endpoint"
+	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/code"
+	httpKit "github.com/superj80820/system-design/kit/http"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
 )
 
 type createOrderRequest struct {
-	UserID    int                  `json:"user_id"` // TODO
 	Direction domain.DirectionEnum `json:"direction"`
 	Price     decimal.Decimal      `json:"price"`    // TODO: is safe?
 	Quantity  decimal.Decimal      `json:"quantity"` // TODO: is safe?
+}
+
+type cancelOrderRequest struct {
+	OrderID int
 }
 
 type getOrderBookRequest struct {
 	MaxDepth int
 }
 
+type getUserOrderRequest struct {
+	OrderID int
+}
+
 var (
+	EncodeGetUserOrderResponse = httpTransportKit.EncodeJsonResponse
+
+	DecodeGetUserAssetsRequests = httpTransportKit.DecodeEmptyRequest
+	EncodeGetUserAssetsResponse = httpTransportKit.EncodeJsonResponse
+
+	DecodeGetUserOrdersRequest  = httpTransportKit.DecodeEmptyRequest
+	EncodeGetUserOrdersResponse = httpTransportKit.EncodeJsonResponse
+
+	EncodeCancelOrderResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeJsonResponse)
+
 	DecodeCreateOrderRequest  = httpTransportKit.DecodeJsonRequest[createOrderRequest]
 	EncodeCreateOrderResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
 
@@ -34,14 +53,65 @@ var (
 
 func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
 		req := request.(createOrderRequest)
 		svc.SendTradeSequenceMessages(&domain.TradingEvent{
 			EventType: domain.TradingEventCreateOrderType,
 			OrderRequestEvent: &domain.OrderRequestEvent{
-				UserID:    req.UserID,
+				UserID:    userID,
 				Direction: req.Direction,
 				Price:     req.Price,
 				Quantity:  req.Quantity,
+			},
+		})
+		return nil, nil
+	}
+}
+
+func MakeGetUserAssetsEndpoint(svc domain.UserAssetUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		userAssets, err := svc.GetAssets(userID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get user assets failed")
+		}
+		return userAssets, nil
+	}
+}
+
+func MakeGetUserOrderEndpoint(svc domain.OrderUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		req := request.(getUserOrderRequest)
+		order, err := svc.GetOrder(req.OrderID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get order failed")
+		}
+		return order, nil
+	}
+}
+
+func MakeCancelOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		req := request.(cancelOrderRequest)
+		svc.SendTradeSequenceMessages(&domain.TradingEvent{
+			EventType: domain.TradingEventCancelOrderType,
+			OrderCancelEvent: &domain.OrderCancelEvent{
+				UserID:  userID,
+				OrderId: req.OrderID,
 			},
 		})
 		return nil, nil
@@ -54,6 +124,51 @@ func MakeGetOrderBookEndpoint(svc domain.MatchingUseCase) endpoint.Endpoint {
 		orderBook := svc.GetOrderBook(req.MaxDepth)
 		return orderBook, nil
 	}
+}
+
+func MakeGetUserOrdersEndpoint(svc domain.OrderUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		userOrders, err := svc.GetUserOrders(userID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get user order failed")
+		}
+		userOrdersSlice := make([]*domain.OrderEntity, 0, len(userOrders))
+		for _, val := range userOrders {
+			userOrder := val
+			userOrdersSlice = append(userOrdersSlice, userOrder)
+		}
+		return userOrdersSlice, nil
+	}
+}
+
+func DecodeCancelOrderRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	vars := mux.Vars(r)
+	orderIDString, ok := vars["orderID"]
+	if !ok {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	orderID, err := strconv.Atoi(orderIDString)
+	if err != nil {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	return cancelOrderRequest{OrderID: orderID}, nil
+}
+
+func DecodeGetUserOrderRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	vars := mux.Vars(r)
+	orderIDString, ok := vars["orderID"]
+	if !ok {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	orderID, err := strconv.Atoi(orderIDString)
+	if err != nil {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	return getUserOrderRequest{OrderID: orderID}, nil
 }
 
 func DecodeGetOrderBookRequest(ctx context.Context, r *http.Request) (interface{}, error) {

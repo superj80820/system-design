@@ -69,7 +69,7 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 	if !ok {
 		return nil, errors.New("get user orders failed")
 	}
-	var userOrdersClone map[int]*domain.OrderEntity
+	userOrdersClone := make(map[int]*domain.OrderEntity)
 	userOrders.Range(func(key int, value *domain.OrderEntity) bool {
 		userOrdersClone[key] = value
 		return true

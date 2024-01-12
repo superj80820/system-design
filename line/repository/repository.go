@@ -49,7 +49,7 @@ func (l *lineRepo) notifyWithToken(token, message string) error {
 	if err != nil {
 		return errors.Wrap(err, "create request failed")
 	}
-	req.Header.Add("Authorization", "Bearer "+l.token)
+	req.Header.Add("Authorization", "Bearer "+token)
 
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	res, err := client.Do(req)

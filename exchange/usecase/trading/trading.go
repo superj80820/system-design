@@ -62,6 +62,10 @@ func (t *tradingUseCase) ProcessMessages(message *domain.TradingEvent) error {
 }
 
 func (t *tradingUseCase) processMessage(message *domain.TradingEvent) error {
+	defer func() { // TODO: test: should update when get error
+		t.lastSequenceID = message.SequenceID
+	}()
+
 	if message.SequenceID <= t.lastSequenceID {
 		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event sequence id: "+strconv.Itoa(message.SequenceID))
 	}
@@ -88,7 +92,6 @@ func (t *tradingUseCase) processMessage(message *domain.TradingEvent) error {
 	default:
 		return errors.New("unknown event type")
 	}
-	t.lastSequenceID = message.SequenceID
 	return nil
 }
 
@@ -127,7 +130,7 @@ func (t *tradingUseCase) cancelOrder(tradingEvent *domain.TradingEvent) error {
 	if err != nil {
 		return errors.Wrap(err, "get order failed")
 	}
-	if order.UserID != tradingEvent.OrderCancelEvent.OrderId {
+	if order.UserID != tradingEvent.OrderCancelEvent.UserID {
 		return errors.New("order does not belong to this user")
 	}
 	if err := t.matchingUseCase.CancelOrder(tradingEvent.CreatedAt, order); err != nil {

@@ -75,7 +75,7 @@ func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
 		err := t.tradingUseCase.ProcessMessages(te)
 		if errors.Is(err, domain.LessAmountErr) {
-			// do nothing
+			t.logger.Info(fmt.Sprintf("%+v", err))
 		} else if err != nil {
 			panic(fmt.Sprintf("process message get error: %+v", err))
 		}

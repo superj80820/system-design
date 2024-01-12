@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	httptransport "github.com/go-kit/kit/transport/http"
 	"github.com/gorilla/mux"
+	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
@@ -17,6 +19,7 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/order"
 	"github.com/superj80820/system-design/exchange/usecase/sequencer"
 	"github.com/superj80820/system-design/exchange/usecase/trading"
+	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 )
 
@@ -31,7 +34,7 @@ func main() {
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
 	sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
 
-	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel, loggerKit.NoStdout)
+	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	if err != nil {
 		panic(err)
 	}
@@ -48,19 +51,77 @@ func main() {
 	go background.RunAsyncTradingSequencer(ctx, asyncTradingSequencerUseCase)
 	go background.RunAsyncTrading(ctx, tradingAsyncUseCase)
 
+	// TODO: workaround
+	serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
+		var userID int
+		userIDString := r.Header.Get("user-id")
+		if userIDString != "" {
+			userID, _ = strconv.Atoi(userIDString)
+		}
+		ctx = httpKit.AddUserID(ctx, userID)
+		return ctx
+	})
+
+	// TODO: workaround
+	for userID := 2; userID <= 1000; userID++ {
+		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(10000000000))
+		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(10000000000))
+	}
+
 	r := mux.NewRouter()
+	r.Methods("GET").Path("/api/v1/assets").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetUserAssetsEndpoint(userAssetUseCase),
+			httpDelivery.DecodeGetUserAssetsRequests,
+			httpDelivery.EncodeGetUserAssetsResponse,
+			serverBeforeAddUserID,
+		),
+	)
+	r.Methods("GET").Path("/api/v1/orders/{orderID}").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetUserOrderEndpoint(orderUserCase),
+			httpDelivery.DecodeGetUserOrderRequest,
+			httpDelivery.EncodeGetUserOrderResponse,
+			serverBeforeAddUserID,
+		),
+	)
+	r.Methods("GET").Path("/api/v1/orders").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase),
+			httpDelivery.DecodeGetUserOrdersRequest,
+			httpDelivery.EncodeGetUserOrdersResponse,
+			serverBeforeAddUserID,
+		),
+	)
 	r.Methods("GET").Path("/api/v1/orderBook").Handler(
 		httptransport.NewServer(
 			httpDelivery.MakeGetOrderBookEndpoint(matchingUseCase),
 			httpDelivery.DecodeGetOrderBookRequest,
 			httpDelivery.EncodeGetOrderBookResponse,
+			serverBeforeAddUserID,
 		),
 	)
-	r.Methods("POST").Path("/api/v1/order").Handler(
+	// r.Methods("GET").Path("/api/v1/ticks").Handler()
+	// r.Methods("GET").Path("/api/v1/bars/day").Handler()
+	// r.Methods("GET").Path("/api/v1/bars/hour").Handler()
+	// r.Methods("GET").Path("/api/v1/bars/min").Handler()
+	// r.Methods("GET").Path("/api/v1/bars/sec").Handler()
+	// r.Methods("GET").Path("/api/v1/history/orders").Handler()
+	// r.Methods("GET").Path("/api/v1/history/orders/{orderID}/matches").Handler()
+	r.Methods("POST").Path("/api/v1/orders/{orderID}/cancel").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase),
+			httpDelivery.DecodeCancelOrderRequest,
+			httpDelivery.EncodeCancelOrderResponse,
+			serverBeforeAddUserID,
+		),
+	)
+	r.Methods("POST").Path("/api/v1/orders").Handler(
 		httptransport.NewServer(
 			httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase),
 			httpDelivery.DecodeCreateOrderRequest,
 			httpDelivery.EncodeCreateOrderResponse,
+			serverBeforeAddUserID,
 		),
 	)
 

@@ -81,13 +81,13 @@ func (c *clearingUseCase) ClearCancelOrder(order *domain.OrderEntity) error {
 		if err := c.userAssetUseCase.Unfreeze(order.UserID, c.baseCurrencyID, order.UnfilledQuantity); err != nil {
 			return errors.Wrap(err, "unfreeze sell order failed")
 		}
-		return nil
 	case domain.DirectionBuy:
 		if err := c.userAssetUseCase.Unfreeze(order.UserID, c.quoteCurrencyID, order.Price.Mul(order.UnfilledQuantity)); err != nil {
 			return errors.Wrap(err, "unfreeze buy order failed")
 		}
-		return nil
 	default:
 		return errors.New("unknown direction")
 	}
+	c.orderUseCase.RemoveOrder(order.ID)
+	return nil
 }

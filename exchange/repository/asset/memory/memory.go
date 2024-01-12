@@ -39,7 +39,7 @@ func (a *assetRepo) InitAssets(userID int, assetID int) *domain.UserAsset {
 
 // TODO: is best way?
 func (a *assetRepo) GetAssets(userID int) (map[int]*domain.UserAsset, error) {
-	var userAssetsClone map[int]*domain.UserAsset
+	userAssetsClone := make(map[int]*domain.UserAsset)
 	if userAssets, ok := a.userAssetsMap.Load(userID); ok {
 		userAssets.Range(func(key int, value *domain.UserAsset) bool {
 			userAssetsClone[key] = value
