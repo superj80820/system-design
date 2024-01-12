@@ -56,19 +56,34 @@ export const options = {
 // about authoring k6 scripts.
 //
 export default function() {
-  for (let id = 1; id <= 100; id++) {
-    const url = 'http://localhost:9090/api/v1/orders';
-    const randomVal = Math.floor(Math.random() * 100)
-    const direction = Math.floor(Math.random() * 2)+1
-    const payload = JSON.stringify({ "direction": direction, "price": 2.34+randomVal, "quantity": randomVal });
+  const url = 'http://localhost:9090/api/v1/orders';
+  const randomVal = Math.floor(Math.random() * 100)
+  const direction = Math.floor(Math.random() * 2)+1
+  const payload = JSON.stringify({ "direction": direction, "price": 2.34+randomVal, "quantity": randomVal });
 
-    const params = {
-      headers: {
-        'Content-Type': 'application/json',
-        'user-id': '2'
-      },
-    };
+  const params = {
+    headers: {
+      'Content-Type': 'application/json',
+      'user-id': '2'
+    },
+  };
 
-    http.post(url, payload, params);
-  }
+  http.post(url, payload, params);
 }
+
+// export default function() {
+//   const url = 'http://127.0.0.1/api/orders';
+//   const randomVal = Math.floor(Math.random() * 100)
+//   const direction = Math.floor(Math.random() * 2)
+//   const directionMap = ["buy","sell"]
+//   const payload = JSON.stringify({"productId":"BTC-USDT","side":directionMap[direction],"type":"limit","price":10+randomVal,"size":1+randomVal,"funds":(10+randomVal)*(1+randomVal)});
+
+//   const params = {
+//     headers: {
+//       "Content-Type": "application/json;charset=UTF-8",
+//       "Cookie": "JSESSIONID=9BBD64B1B3DED2880AF139FB82ECCB8A; accessToken=ff009c63-efb2-4c54-9b5f-9b88105522f4:9BBD64B1B3DED2880AF139FB82ECCB8A:35e8d276a558b1d6f96295fe01eb2381",
+//     },
+//   };
+
+//   http.post(url, payload, params);
+// }

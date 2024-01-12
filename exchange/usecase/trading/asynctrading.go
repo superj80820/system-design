@@ -57,7 +57,7 @@ func CreateAsyncTradingUseCase(
 		return t.AsyncDBProcess(ctx)
 	})
 	eg.Go(func() error {
-		return t.AsyncAPIResultProcess(ctx)
+		return t.AsyncTradingLogResultProcess(ctx)
 	})
 	eg.Go(func() error {
 		return t.AsyncNotifyProcess(ctx)
@@ -92,11 +92,10 @@ func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
 		switch te.EventType {
 		case domain.TradingEventCreateOrderType:
-			matchResult, err := t.tradingUseCase.CreateOrder(te)
+			_, err := t.tradingUseCase.CreateOrder(te)
 			subscribeErrHandleFn(err)
 
 			t.tradingLogResultCh <- &domain.TradingLogResult{StatusType: domain.TradingLogResultStatusOKType}
-
 		case domain.TradingEventCancelOrderType:
 			err := t.tradingUseCase.CancelOrder(te)
 			subscribeErrHandleFn(err)

@@ -77,7 +77,7 @@ type AsyncTradingUseCase interface {
 	AsyncTickProcess(ctx context.Context) error
 	AsyncNotifyProcess(ctx context.Context) error
 	AsyncOrderBookProcess(ctx context.Context) error
-	AsyncAPIResultProcess(ctx context.Context) error
+	AsyncTradingLogResultProcess(ctx context.Context) error
 	Done() <-chan struct{}
 	Shutdown() error
 }
