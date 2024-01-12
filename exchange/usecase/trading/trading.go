@@ -17,7 +17,6 @@ type tradingUseCase struct {
 	clearingUseCase  domain.ClearingUseCase
 	logger           loggerKit.Logger
 
-	orderBookDepth     int
 	isOrderBookChanged bool
 	latestOrderBook    *domain.OrderBookEntity
 	lastSequenceID     int
@@ -33,7 +32,6 @@ func CreateTradingUseCase(
 	orderUseCase domain.OrderUseCase,
 	clearingUseCase domain.ClearingUseCase,
 	tradingRepo domain.TradingRepo,
-	orderBookDepth int,
 ) domain.TradingUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -42,7 +40,6 @@ func CreateTradingUseCase(
 		userAssetUseCase: userAssetUseCase,
 		orderUseCase:     orderUseCase,
 		clearingUseCase:  clearingUseCase,
-		orderBookDepth:   orderBookDepth,
 		cancel:           cancel,
 		doneCh:           make(chan struct{}),
 	}
@@ -50,52 +47,28 @@ func CreateTradingUseCase(
 	return t
 }
 
-func (t *tradingUseCase) ProcessMessages(message *domain.TradingEvent) error {
-	t.isOrderBookChanged = false
-	if err := t.processMessage(message); err != nil {
-		return errors.Wrap(err, "process event failed")
+func (t *tradingUseCase) checkEventSequence(tradingEvent *domain.TradingEvent) error {
+	if tradingEvent.SequenceID <= t.lastSequenceID {
+		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event sequence id: "+strconv.Itoa(tradingEvent.SequenceID))
 	}
-	if t.isOrderBookChanged {
-		t.latestOrderBook = t.matchingUseCase.GetOrderBook(t.orderBookDepth)
-	}
-	return nil
-}
-
-func (t *tradingUseCase) processMessage(message *domain.TradingEvent) error {
-	defer func() { // TODO: test: should update when get error
-		t.lastSequenceID = message.SequenceID
-	}()
-
-	if message.SequenceID <= t.lastSequenceID {
-		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event sequence id: "+strconv.Itoa(message.SequenceID))
-	}
-	if message.PreviousID > t.lastSequenceID {
+	if tradingEvent.PreviousID > t.lastSequenceID {
 		// TODO: load from db
-		return errors.Wrap(domain.ErrMissEvent, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(message.PreviousID))
+		return errors.Wrap(domain.ErrMissEvent, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(tradingEvent.PreviousID))
 	}
-	if message.PreviousID != t.lastSequenceID { // TODO: test think maybe no need previous
-		return errors.Wrap(domain.ErrPreviousIDNotCorrect, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(message.PreviousID))
+	if tradingEvent.PreviousID != t.lastSequenceID { // TODO: test think maybe no need previous
+		return errors.Wrap(domain.ErrPreviousIDNotCorrect, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(tradingEvent.PreviousID))
 	}
-	switch message.EventType {
-	case domain.TradingEventCreateOrderType:
-		if err := t.createOrder(message); err != nil {
-			return errors.Wrap(err, "create order failed")
-		}
-	case domain.TradingEventCancelOrderType:
-		if err := t.cancelOrder(message); err != nil {
-			return errors.Wrap(err, "cancel order failed")
-		}
-	case domain.TradingEventTransferType:
-		if err := t.transfer(message); err != nil {
-			return errors.Wrap(err, "transfer failed")
-		}
-	default:
-		return errors.New("unknown event type")
-	}
+
+	t.lastSequenceID = tradingEvent.SequenceID
+
 	return nil
 }
 
-func (t *tradingUseCase) createOrder(tradingEvent *domain.TradingEvent) error {
+func (t *tradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
+	if err := t.checkEventSequence(tradingEvent); err != nil {
+		return nil, errors.Wrap(err, "check event sequence failed")
+	}
+
 	timeNow := time.Now()
 	year := timeNow.Year()
 	month := int(timeNow.Month())
@@ -111,21 +84,25 @@ func (t *tradingUseCase) createOrder(tradingEvent *domain.TradingEvent) error {
 		tradingEvent.CreatedAt,
 	)
 	if err != nil {
-		return errors.Wrap(err, "create order failed")
+		return nil, errors.Wrap(err, "create order failed")
 	}
 	matchResult, err := t.matchingUseCase.NewOrder(order)
 	if err != nil {
-		return errors.Wrap(err, "matching order failed")
+		return nil, errors.Wrap(err, "matching order failed")
 	}
 	if err := t.clearingUseCase.ClearMatchResult(matchResult); err != nil {
-		return errors.Wrap(err, "clear match order failed")
+		return nil, errors.Wrap(err, "clear match order failed")
 	}
 	t.isOrderBookChanged = true
 
-	return nil
+	return matchResult, nil
 }
 
-func (t *tradingUseCase) cancelOrder(tradingEvent *domain.TradingEvent) error {
+func (t *tradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
+	if err := t.checkEventSequence(tradingEvent); err != nil {
+		return errors.Wrap(err, "check event sequence failed")
+	}
+
 	order, err := t.orderUseCase.GetOrder(tradingEvent.OrderCancelEvent.OrderId)
 	if err != nil {
 		return errors.Wrap(err, "get order failed")
@@ -140,10 +117,15 @@ func (t *tradingUseCase) cancelOrder(tradingEvent *domain.TradingEvent) error {
 		return errors.Wrap(err, "clear cancel order failed")
 	}
 	t.isOrderBookChanged = true
+
 	return nil
 }
 
-func (t *tradingUseCase) transfer(tradingEvent *domain.TradingEvent) error {
+func (t *tradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
+	if err := t.checkEventSequence(tradingEvent); err != nil {
+		return errors.Wrap(err, "check event sequence failed")
+	}
+
 	if err := t.userAssetUseCase.Transfer(
 		domain.AssetTransferAvailableToAvailable,
 		tradingEvent.TransferEvent.FromUserID,
@@ -154,6 +136,10 @@ func (t *tradingUseCase) transfer(tradingEvent *domain.TradingEvent) error {
 		return errors.Wrap(err, "transfer error")
 	}
 	return nil
+}
+
+func (t *tradingUseCase) IsOrderBookChanged() bool {
+	return t.isOrderBookChanged
 }
 
 func (t *tradingUseCase) Shutdown() error {

@@ -43,8 +43,8 @@ func main() {
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100) // TODO: orderBookDepth use function?
-	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, logger)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
+	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, matchingUseCase, 100, logger)            //TODO:100?
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
 	asyncTradingSequencerUseCase := sequencer.CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase, tradingRepo, sequencerRepo)
 

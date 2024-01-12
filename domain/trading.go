@@ -44,6 +44,17 @@ type OrderCancelEvent struct {
 	OrderId int
 }
 
+type TradingLogResultStatusTypeEnum int
+
+const (
+	TradingLogResultStatusUnknownType TradingLogResultStatusTypeEnum = iota
+	TradingLogResultStatusOKType
+)
+
+type TradingLogResult struct {
+	StatusType TradingLogResultStatusTypeEnum
+}
+
 type TransferEvent struct {
 	FromUserID int
 	ToUserID   int
@@ -72,7 +83,10 @@ type AsyncTradingUseCase interface {
 }
 
 type TradingUseCase interface {
-	ProcessMessages(messages *TradingEvent) error
+	CreateOrder(messages *TradingEvent) (*MatchResult, error)
+	CancelOrder(tradingEvent *TradingEvent) error
+	Transfer(tradingEvent *TradingEvent) error
+	IsOrderBookChanged() bool
 	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)

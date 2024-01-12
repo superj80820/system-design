@@ -63,8 +63,8 @@ func TestServer(t *testing.T) {
 		userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 		orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
 		clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-		tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo, 100) // TODO: orderBookDepth use function?
-		tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, logger)
+		tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
+		tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, matchingUseCase, 100, logger)            //TODO:100?
 		tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
 		asyncTradingSequencerUseCase := sequencer.CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase, tradingRepo, sequencerRepo)
 
@@ -288,8 +288,8 @@ func TestServer(t *testing.T) {
 
 				userAssets := make(map[int]*domain.UserAsset)
 				assert.Nil(t, json.Unmarshal(w.Body.Bytes(), &userAssets))
-				assert.Equal(t, "1000000", userAssets[currencyMap["USDT"]].Available.String())
-				assert.Equal(t, "1000000", userAssets[currencyMap["BTC"]].Available.String())
+				assert.Equal(t, "10000000000", userAssets[currencyMap["USDT"]].Available.String())
+				assert.Equal(t, "10000000000", userAssets[currencyMap["BTC"]].Available.String())
 			},
 		},
 		{

@@ -12,33 +12,41 @@ import (
 )
 
 type tradingAsyncUseCase struct {
-	tradingUseCase domain.TradingUseCase
-	tradingRepo    domain.TradingRepo
-	logger         loggerKit.Logger
+	tradingUseCase  domain.TradingUseCase
+	tradingRepo     domain.TradingRepo
+	matchingUseCase domain.MatchingUseCase
+	logger          loggerKit.Logger
 
-	orderBookCh chan *domain.OrderEntity
-	saveOrderCh chan *domain.OrderEntity
+	tradingLogResultCh chan *domain.TradingLogResult
+	orderBookCh        chan *domain.OrderEntity
+	saveOrderCh        chan *domain.OrderEntity
 
-	cancel context.CancelFunc
-	doneCh chan struct{}
-	err    error
+	latestOrderBook *domain.OrderBookEntity
+	orderBookDepth  int
+	cancel          context.CancelFunc
+	doneCh          chan struct{}
+	err             error
 }
 
 func CreateAsyncTradingUseCase(
 	ctx context.Context,
 	tradingUseCase domain.TradingUseCase,
 	tradingRepo domain.TradingRepo,
+	matchingUseCase domain.MatchingUseCase,
+	orderBookDepth int,
 	logger loggerKit.Logger,
 ) domain.AsyncTradingUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 
 	t := &tradingAsyncUseCase{
-		tradingUseCase: tradingUseCase,
-		tradingRepo:    tradingRepo,
-		saveOrderCh:    make(chan *domain.OrderEntity),
-		cancel:         cancel,
-		doneCh:         make(chan struct{}),
-		logger:         logger,
+		tradingUseCase:  tradingUseCase,
+		matchingUseCase: matchingUseCase,
+		tradingRepo:     tradingRepo,
+		saveOrderCh:     make(chan *domain.OrderEntity),
+		orderBookDepth:  orderBookDepth,
+		cancel:          cancel,
+		doneCh:          make(chan struct{}),
+		logger:          logger,
 	}
 
 	eg, ctx := errgroup.WithContext(ctx)
@@ -72,12 +80,35 @@ func CreateAsyncTradingUseCase(
 }
 
 func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
-	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
-		err := t.tradingUseCase.ProcessMessages(te)
+	subscribeErrHandleFn := func(err error) error {
 		if errors.Is(err, domain.LessAmountErr) {
 			t.logger.Info(fmt.Sprintf("%+v", err))
 		} else if err != nil {
 			panic(fmt.Sprintf("process message get error: %+v", err))
+		}
+		return nil
+	}
+
+	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
+		switch te.EventType {
+		case domain.TradingEventCreateOrderType:
+			matchResult, err := t.tradingUseCase.CreateOrder(te)
+			subscribeErrHandleFn(err)
+
+			t.tradingLogResultCh <- &domain.TradingLogResult{StatusType: domain.TradingLogResultStatusOKType}
+
+		case domain.TradingEventCancelOrderType:
+			err := t.tradingUseCase.CancelOrder(te)
+			subscribeErrHandleFn(err)
+		case domain.TradingEventTransferType:
+			err := t.tradingUseCase.Transfer(te)
+			subscribeErrHandleFn(err)
+		default:
+			subscribeErrHandleFn(errors.New("unknown event type"))
+		}
+
+		if t.tradingUseCase.IsOrderBookChanged() {
+			t.latestOrderBook = t.matchingUseCase.GetOrderBook(t.orderBookDepth)
 		}
 	})
 	select {
@@ -143,8 +174,26 @@ func (t *tradingAsyncUseCase) AsyncOrderBookProcess(ctx context.Context) error {
 	}
 }
 
-func (t *tradingAsyncUseCase) AsyncAPIResultProcess(ctx context.Context) error { //TODO: for what?
-	return nil
+func (t *tradingAsyncUseCase) AsyncTradingLogResultProcess(ctx context.Context) error {
+	tradingLogResults := make([]*domain.TradingLogResult, 0, 1000) // TODO: performance?
+	ticker := time.NewTicker(100 * time.Millisecond)               // TODO: is best way?
+	defer ticker.Stop()
+
+	go func() {
+		for {
+			<-ticker.C
+			// TODO
+		}
+	}()
+
+	for {
+		select {
+		case tradingLogResult := <-t.tradingLogResultCh:
+			tradingLogResults = append(tradingLogResults, tradingLogResult)
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 func (t *tradingAsyncUseCase) Done() <-chan struct{} {
