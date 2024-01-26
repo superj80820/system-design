@@ -14,7 +14,7 @@ type groupIDReaderManager struct {
 
 type groupIDReaderManagerOption func(*groupIDReaderManager)
 
-func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, groupID string, startOffset int64, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, groupID string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -23,12 +23,10 @@ func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, gr
 	rm := &groupIDReaderManager{
 		readerManager: createReaderManager(config.readerManagerOptions...),
 		reader: createReader(kafka.ReaderConfig{
-			Brokers:     brokers,
-			Topic:       topic,
-			MinBytes:    10e3, // 10KB
-			MaxBytes:    10e6, // 10MB
-			GroupID:     groupID,
-			StartOffset: startOffset,
+			Brokers:  brokers,
+			Topic:    topic,
+			MaxBytes: 10e6, // 10MB
+			GroupID:  groupID,
 		}, config.readerOptions...),
 	}
 

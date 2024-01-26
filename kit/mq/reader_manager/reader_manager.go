@@ -21,7 +21,8 @@ func defaultErrorHandleFn(err error) {
 }
 
 type readerManagerConfig struct {
-	readerManagerOptions                      []readerManagerOption
+	readerManagerOptions []readerManagerOption
+
 	partitionBindObserverReaderManagerOptions []partitionBindObserverReaderManagerOption
 	groupIDReaderManagerOptions               []groupIDReaderManagerOption
 	specPartitionReaderManagers               []specPartitionReaderManagerOption
@@ -31,7 +32,7 @@ type readerManagerConfig struct {
 
 type readerManagerOption func(*readerManager)
 
-func AddErrorHandleFn(fn func(err error)) readerManagerConfigOption {
+func AddErrorHandleFn(fn func(err error)) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerManagerOptions = append(rmc.readerManagerOptions, func(rm *readerManager) {
 			rm.errorHandleFn = fn
@@ -42,7 +43,7 @@ func AddErrorHandleFn(fn func(err error)) readerManagerConfigOption {
 	}
 }
 
-type readerManagerConfigOption func(*readerManagerConfig)
+type ReaderManagerConfigOption func(*readerManagerConfig)
 
 type readerManager struct {
 	errorHandleFn func(err error)

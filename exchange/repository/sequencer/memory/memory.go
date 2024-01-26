@@ -2,25 +2,28 @@ package memory
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/util"
 )
 
 type tradingSequencerRepo struct {
+	sequence       *atomic.Uint64
 	tradingEventCh chan *domain.TradingEvent
 	observers      util.GenericSyncMap[*func(*domain.TradingEvent), func(*domain.TradingEvent)] // TODO: test key safe?
 	cancel         context.CancelFunc
 	done           chan struct{}
 }
 
-func CreateTradingSequencerRepo(ctx context.Context) domain.TradingSequencerRepo {
+func CreateTradingSequencerRepo(ctx context.Context) domain.SequencerRepo[domain.TradingEvent] {
 	ctx, cancel := context.WithCancel(ctx)
 
+	var sequence atomic.Uint64
 	tradingEventCh := make(chan *domain.TradingEvent)
 	done := make(chan struct{})
-
 	t := &tradingSequencerRepo{
+		sequence:       &sequence,
 		tradingEventCh: tradingEventCh,
 		cancel:         cancel,
 		done:           done,
@@ -43,8 +46,16 @@ func CreateTradingSequencerRepo(ctx context.Context) domain.TradingSequencerRepo
 	return t
 }
 
-func (*tradingSequencerRepo) GetMaxSequenceID() uint64 {
-	return 0
+func (t *tradingSequencerRepo) GenerateNextSequenceID() uint64 {
+	return t.sequence.Add(1)
+}
+
+func (t *tradingSequencerRepo) GetCurrentSequenceID() uint64 {
+	return t.sequence.Load()
+}
+
+func (t *tradingSequencerRepo) GetMaxSequenceID() (uint64, error) {
+	return t.sequence.Load(), nil
 }
 
 func (t *tradingSequencerRepo) Shutdown() {
@@ -52,14 +63,29 @@ func (t *tradingSequencerRepo) Shutdown() {
 	<-t.done
 }
 
-func (*tradingSequencerRepo) SaveEvent(tradingEvent *domain.TradingEvent) {
-	// noop
+// noop
+func (*tradingSequencerRepo) SaveEvent(sequencerEvent *domain.SequencerEvent) error {
+	return nil
 }
 
-func (t *tradingSequencerRepo) SendTradeSequenceMessages(tradingEvent *domain.TradingEvent) {
+// noop
+func (*tradingSequencerRepo) SaveEvents(sequencerEvents []*domain.SequencerEvent) error {
+	return nil
+}
+
+func (t *tradingSequencerRepo) SendTradeSequenceMessages(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	t.tradingEventCh <- tradingEvent
+	return nil
 }
 
 func (t *tradingSequencerRepo) SubscribeTradeSequenceMessage(notify func(*domain.TradingEvent)) {
 	t.observers.Store(&notify, notify)
+}
+
+func (t *tradingSequencerRepo) GetFilterEventsMap([]*domain.SequencerEvent) (map[int64]bool, error) {
+	panic("need implement")
+}
+
+func (t *tradingSequencerRepo) ResetSequence() error {
+	panic("need implement")
 }

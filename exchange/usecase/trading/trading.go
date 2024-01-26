@@ -17,12 +17,11 @@ type tradingUseCase struct {
 	clearingUseCase  domain.ClearingUseCase
 	logger           loggerKit.Logger
 
-	isOrderBookChanged bool
-	latestOrderBook    *domain.OrderBookEntity
-	lastSequenceID     int
-	cancel             context.CancelFunc
-	doneCh             chan struct{}
-	err                error
+	latestOrderBook *domain.OrderBookEntity
+	lastSequenceID  int
+	cancel          context.CancelFunc
+	doneCh          chan struct{}
+	err             error
 }
 
 func CreateTradingUseCase(
@@ -93,7 +92,6 @@ func (t *tradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*domain
 	if err := t.clearingUseCase.ClearMatchResult(matchResult); err != nil {
 		return nil, errors.Wrap(err, "clear match order failed")
 	}
-	t.isOrderBookChanged = true
 
 	return matchResult, nil
 }
@@ -116,7 +114,6 @@ func (t *tradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
 	if err := t.clearingUseCase.ClearCancelOrder(order); err != nil {
 		return errors.Wrap(err, "clear cancel order failed")
 	}
-	t.isOrderBookChanged = true
 
 	return nil
 }
@@ -136,10 +133,6 @@ func (t *tradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
 		return errors.Wrap(err, "transfer error")
 	}
 	return nil
-}
-
-func (t *tradingUseCase) IsOrderBookChanged() bool {
-	return t.isOrderBookChanged
 }
 
 func (t *tradingUseCase) Shutdown() error {

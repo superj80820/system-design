@@ -14,7 +14,7 @@ type specPartitionReaderManager struct {
 
 type specPartitionReaderManagerOption func(*specPartitionReaderManager)
 
-func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOffset int64, partition int, brokers []string, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOffset int64, partition int, brokers []string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -27,7 +27,6 @@ func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOf
 	kafkaReader := createReader(kafka.ReaderConfig{
 		Brokers:   brokers,
 		Topic:     topic,
-		MinBytes:  10e3, // 10KB
 		MaxBytes:  10e6, // 10MB
 		Partition: partition,
 	}, config.readerOptions...)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -20,16 +21,22 @@ import (
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
+	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	sequencerMemoryRepo "github.com/superj80820/system-design/exchange/repository/sequencer/memory"
 	tradingMemoryRepo "github.com/superj80820/system-design/exchange/repository/trading/memory"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
+	candleUseCaseLib "github.com/superj80820/system-design/exchange/usecase/candle"
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
 	"github.com/superj80820/system-design/exchange/usecase/matching"
 	"github.com/superj80820/system-design/exchange/usecase/order"
+	"github.com/superj80820/system-design/exchange/usecase/quotation"
 	"github.com/superj80820/system-design/exchange/usecase/sequencer"
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	redisKit "github.com/superj80820/system-design/kit/redis"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/redis"
 )
 
 type testSetup struct {
@@ -41,100 +48,121 @@ type testSetup struct {
 	getUserOrder  *httptransport.Server
 }
 
-func TestServer(t *testing.T) {
-	userAID := 2
-	userAIDString := strconv.Itoa(userAID)
-	currencyMap := map[string]int{
+var (
+	userAID       = 2
+	userAIDString = strconv.Itoa(userAID)
+	currencyMap   = map[string]int{
 		"BTC":  1,
 		"USDT": 2,
 	}
-	testSetupFn := func() *testSetup {
-		ctx := context.Background()
-		tradingRepo := tradingMemoryRepo.CreateTradingRepo(ctx)
-		assetRepo := assetMemoryRepo.CreateAssetRepo()
-		sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
+)
 
-		logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
-		if err != nil {
-			panic(err)
-		}
+func testSetupFn() *testSetup {
+	ctx := context.Background()
+	tradingRepo := tradingMemoryRepo.CreateTradingRepo(ctx)
+	assetRepo := assetMemoryRepo.CreateAssetRepo()
+	sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
 
-		matchingUseCase := matching.CreateMatchingUseCase()
-		userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-		orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
-		clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-		tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
-		tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingUseCase, tradingRepo, matchingUseCase, 100, logger)            //TODO:100?
-		tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
-		asyncTradingSequencerUseCase := sequencer.CreateAsyncTradingSequencerUseCase(tradingSequencerUseCase, tradingRepo, sequencerRepo)
-
-		go background.RunAsyncTradingSequencer(ctx, asyncTradingSequencerUseCase)
-		go background.RunAsyncTrading(ctx, tradingAsyncUseCase)
-
-		// TODO: workaround
-		serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
-			var userID int
-			userIDString := r.Header.Get("user-id")
-			if userIDString != "" {
-				userID, _ = strconv.Atoi(userIDString)
-			}
-			ctx = httpKit.AddUserID(ctx, userID)
-			return ctx
-		})
-
-		// TODO: workaround
-		for userID := 2; userID <= 1000; userID++ {
-			userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(10000000000))
-			userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(10000000000))
-		}
-
-		gerUserOrders := httptransport.NewServer(
-			httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase),
-			httpDelivery.DecodeGetUserOrdersRequest,
-			httpDelivery.EncodeGetUserOrdersResponse,
-			serverBeforeAddUserID,
-		)
-		getOrderBook := httptransport.NewServer(
-			httpDelivery.MakeGetOrderBookEndpoint(matchingUseCase),
-			httpDelivery.DecodeGetOrderBookRequest,
-			httpDelivery.EncodeGetOrderBookResponse,
-			serverBeforeAddUserID,
-		)
-		cancelOrder := httptransport.NewServer(
-			httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase),
-			httpDelivery.DecodeCancelOrderRequest,
-			httpDelivery.EncodeCancelOrderResponse,
-			serverBeforeAddUserID,
-		)
-		createOrder := httptransport.NewServer(
-			httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase),
-			httpDelivery.DecodeCreateOrderRequest,
-			httpDelivery.EncodeCreateOrderResponse,
-			serverBeforeAddUserID,
-		)
-		getUserAssets := httptransport.NewServer(
-			httpDelivery.MakeGetUserAssetsEndpoint(userAssetUseCase),
-			httpDelivery.DecodeGetUserAssetsRequests,
-			httpDelivery.EncodeGetUserAssetsResponse,
-			serverBeforeAddUserID,
-		)
-		getUserOrder := httptransport.NewServer(
-			httpDelivery.MakeGetUserOrderEndpoint(orderUserCase),
-			httpDelivery.DecodeGetUserOrderRequest,
-			httpDelivery.EncodeGetUserOrderResponse,
-			serverBeforeAddUserID,
-		)
-
-		return &testSetup{
-			gerUserOrders: gerUserOrders,
-			getOrderBook:  getOrderBook,
-			cancelOrder:   cancelOrder,
-			createOrder:   createOrder,
-			getUserAssets: getUserAssets,
-			getUserOrder:  getUserOrder,
-		}
+	redisContainer, err := redis.RunContainer(ctx,
+		testcontainers.WithImage("docker.io/redis:7"),
+		redis.WithLogLevel(redis.LogLevelVerbose),
+	)
+	redisHost, err := redisContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	redisPort, err := redisContainer.MappedPort(ctx, "6379")
+	if err != nil {
+		panic(err)
+	}
+	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
+	if err != nil {
+		panic(err)
+	}
+	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
+	if err != nil {
+		panic(err)
 	}
 
+	matchingUseCase := matching.CreateMatchingUseCase()
+	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
+	quotationUseCase := quotation.CreateQuotationUseCase(100) // TODO: 100?
+	candleRepo := candleRepoRedis.CreateCandleRepo(redisCache)
+	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
+	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
+	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
+	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingRepo, tradingUseCase, matchingUseCase, 100, logger)            //TODO:100?
+	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
+
+	go background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, tradingAsyncUseCase, quotationUseCase, candleUseCase)
+	go background.RunAsyncTrading(ctx, tradingAsyncUseCase)
+
+	// TODO: workaround
+	serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
+		var userID int
+		userIDString := r.Header.Get("user-id")
+		if userIDString != "" {
+			userID, _ = strconv.Atoi(userIDString)
+		}
+		ctx = httpKit.AddUserID(ctx, userID)
+		return ctx
+	})
+
+	// TODO: workaround
+	for userID := 2; userID <= 1000; userID++ {
+		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(10000000000))
+		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(10000000000))
+	}
+
+	gerUserOrders := httptransport.NewServer(
+		httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase),
+		httpDelivery.DecodeGetUserOrdersRequest,
+		httpDelivery.EncodeGetUserOrdersResponse,
+		serverBeforeAddUserID,
+	)
+	getOrderBook := httptransport.NewServer(
+		httpDelivery.MakeGetOrderBookEndpoint(matchingUseCase),
+		httpDelivery.DecodeGetOrderBookRequest,
+		httpDelivery.EncodeGetOrderBookResponse,
+		serverBeforeAddUserID,
+	)
+	cancelOrder := httptransport.NewServer(
+		httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase),
+		httpDelivery.DecodeCancelOrderRequest,
+		httpDelivery.EncodeCancelOrderResponse,
+		serverBeforeAddUserID,
+	)
+	createOrder := httptransport.NewServer(
+		httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase),
+		httpDelivery.DecodeCreateOrderRequest,
+		httpDelivery.EncodeCreateOrderResponse,
+		serverBeforeAddUserID,
+	)
+	getUserAssets := httptransport.NewServer(
+		httpDelivery.MakeGetUserAssetsEndpoint(userAssetUseCase),
+		httpDelivery.DecodeGetUserAssetsRequests,
+		httpDelivery.EncodeGetUserAssetsResponse,
+		serverBeforeAddUserID,
+	)
+	getUserOrder := httptransport.NewServer(
+		httpDelivery.MakeGetUserOrderEndpoint(orderUserCase),
+		httpDelivery.DecodeGetUserOrderRequest,
+		httpDelivery.EncodeGetUserOrderResponse,
+		serverBeforeAddUserID,
+	)
+
+	return &testSetup{
+		gerUserOrders: gerUserOrders,
+		getOrderBook:  getOrderBook,
+		cancelOrder:   cancelOrder,
+		createOrder:   createOrder,
+		getUserAssets: getUserAssets,
+		getUserOrder:  getUserOrder,
+	}
+}
+
+func TestServer(t *testing.T) {
 	testCases := []struct {
 		scenario string
 		fn       func(t *testing.T)
@@ -327,5 +355,21 @@ func TestServer(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.scenario, testCase.fn)
+	}
+}
+
+func BenchmarkServer(b *testing.B) {
+	testSetup := testSetupFn()
+
+	reqFn := func(payloadRawData string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(payloadRawData))
+		r.Header.Add("user-id", userAIDString)
+		return r
+	}
+	direction := []domain.DirectionEnum{domain.DirectionBuy, domain.DirectionSell}
+
+	for i := 0; i < b.N; i++ {
+		randNum := rand.Float64() * 10
+		testSetup.createOrder.ServeHTTP(httptest.NewRecorder(), reqFn(`{ "direction": `+strconv.Itoa(int(direction[i%2]))+`, "price": `+strconv.FormatFloat(randNum, 'f', -1, 64)+`, "quantity": 3}`))
 	}
 }

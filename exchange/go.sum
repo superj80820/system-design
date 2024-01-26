@@ -1,3 +1,5 @@
+github.com/GavinClarke0/lockless-generic-ring-buffer v0.1.2 h1:DloIW+++dFHhQvHgQOo6nri7dvljOmIHv0cu4Ol2O/c=
+github.com/GavinClarke0/lockless-generic-ring-buffer v0.1.2/go.mod h1:qX28Z2rQ7M8jkRVemHL5zpvZgSEkckB9uXnz9n7/7Qc=
 github.com/emirpasic/gods v1.18.1 h1:FXtiHYKDGKCW2KzwZKx0iC0PQmdlorYgdFG9jPXJ1Bc=
 github.com/emirpasic/gods v1.18.1/go.mod h1:8tpGGwCnJ5H4r6BWwaV6OrWmMoPhUl5jm/FMNAnJvWQ=
 github.com/shopspring/decimal v1.3.1 h1:2Usl1nmF/WZucqkFZhnfFYxxxu8LG21F6nPQBE5gKV8=

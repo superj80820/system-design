@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -39,19 +40,19 @@ type KafkaReader interface {
 
 type readerOption func(*Reader)
 
-func useMockReaderProvider(fn func() KafkaReader) readerManagerConfigOption {
+func useMockReaderProvider(fn func() KafkaReader) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.kafkaReaderProvider = fn })
 	}
 }
 
-func AddReaderPauseHookFn(fn func()) readerManagerConfigOption {
+func AddReaderPauseHookFn(fn func()) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.pauseHookFn = fn })
 	}
 }
 
-func AddKafkaReaderHookFn(fn func(kafkaReader KafkaReader)) readerManagerConfigOption {
+func AddKafkaReaderHookFn(fn func(kafkaReader KafkaReader)) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
 			r.kafkaReaderHookFn = append(r.kafkaReaderHookFn, fn)
@@ -59,8 +60,16 @@ func AddKafkaReaderHookFn(fn func(kafkaReader KafkaReader)) readerManagerConfigO
 	}
 }
 
+func ManualCommit(rmc *readerManagerConfig) {
+	rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
+		r.isManualCommit = true
+	})
+}
+
 type Reader struct {
 	kafkaReader KafkaReader
+
+	isManualCommit bool
 
 	kafkaReaderProvider func() KafkaReader
 	kafkaReaderHookFn   []func(kafkaReader KafkaReader)
@@ -69,6 +78,7 @@ type Reader struct {
 
 	pauseCh chan context.CancelFunc
 	startCh chan context.Context
+	readyCh chan struct{}
 
 	pauseHookFn   func()
 	errorHandleFn func(error)
@@ -77,6 +87,7 @@ type Reader struct {
 }
 
 func defaultPauseHookFn() {}
+
 func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 	return kafka.NewReader(config)
 }
@@ -86,6 +97,7 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 		observers:     make(map[*Observer]*Observer),
 		pauseCh:       make(chan context.CancelFunc, 1),
 		startCh:       make(chan context.Context),
+		readyCh:       make(chan struct{}),
 		pauseHookFn:   defaultPauseHookFn,
 		errorHandleFn: defaultErrorHandleFn,
 	}
@@ -99,17 +111,29 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 		}
 		return kafkaReader
 	}
-	r.kafkaReader = r.kafkaReaderProvider()
 	return r
 }
 
 func (r *Reader) Run() {
 	go func() {
 		for ctx := range r.startCh {
+			if r.kafkaReader != nil {
+				fmt.Println("york already create")
+				r.kafkaReader.Close()
+			} else {
+				fmt.Println("york first create")
+			}
 			r.kafkaReader = r.kafkaReaderProvider()
+			r.readyCh <- struct{}{}
 			for {
-				fmt.Println("start consume")
-				m, err := r.kafkaReader.ReadMessage(ctx)
+				var getMessageFn func(ctx context.Context) (kafka.Message, error)
+				if r.isManualCommit {
+					getMessageFn = r.kafkaReader.FetchMessage // TODO: is correct?
+				} else {
+					getMessageFn = r.kafkaReader.ReadMessage // TODO: is correct?
+				}
+				// fmt.Println("start consume")
+				m, err := getMessageFn(ctx)
 				if err != nil {
 					fmt.Println("stop consume")
 					go r.pauseHookFn()
@@ -120,7 +144,12 @@ func (r *Reader) Run() {
 				}
 
 				r.RangeAllObservers(func(_ *Observer, observer *Observer) bool {
-					if err := observer.notify(m.Value); err != nil { // TODO: think async
+					if err := observer.notify(m.Value, func() error {
+						if err := r.kafkaReader.CommitMessages(ctx, m); err != nil {
+							return errors.Wrap(err, "commit message failed")
+						}
+						return nil
+					}); err != nil { // TODO: think async
 						r.errorHandleFn(err)
 					}
 					return true
@@ -134,6 +163,7 @@ func (r *Reader) SyncStartConsume(ctx context.Context) bool {
 	ctx, cancel := context.WithCancel(ctx)
 	r.pauseCh <- cancel
 	r.startCh <- ctx
+	<-r.readyCh
 	return true
 }
 
@@ -142,6 +172,7 @@ func (r *Reader) StartConsume(ctx context.Context) bool {
 	select {
 	case r.pauseCh <- cancel:
 		r.startCh <- ctx
+		<-r.readyCh
 		return true
 	default:
 		cancel()

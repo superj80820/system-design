@@ -1,21 +1,27 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
-type TradingSequencerUseCase interface {
-	ProcessMessages(tradingEvent *TradingEvent)
-	SequenceMessages(tradingEvent *TradingEvent)
-	SendTradeSequenceMessages(*TradingEvent)
-}
-
-type AsyncTradingSequencerUseCase interface {
-	AsyncEventProcess(ctx context.Context)
-}
-
-type TradingSequencerRepo interface {
-	GetMaxSequenceID() uint64
-	SaveEvent(tradingEvent *TradingEvent)
-	SubscribeTradeSequenceMessage(notify func(*TradingEvent))
-	SendTradeSequenceMessages(*TradingEvent)
+type SequencerRepo[T any] interface {
+	GetMaxSequenceID() (uint64, error)
+	ResetSequence() error
+	GetCurrentSequenceID() uint64
+	GenerateNextSequenceID() uint64
+	SubscribeTradeSequenceMessage(notify func(any *T, commitFn func() error))
+	SendTradeSequenceMessages(context.Context, *T) error
+	SaveEvent(*SequencerEvent) error
+	SaveEvents([]*SequencerEvent) error
+	GetFilterEventsMap([]*SequencerEvent) (map[int64]bool, error)
 	Shutdown()
+}
+
+type SequencerEvent struct {
+	ReferenceID int64
+	SequenceID  int64
+	PreviousID  int64
+	Data        string
+	CreatedAt   time.Time
 }

@@ -64,7 +64,7 @@ type partitionBindObserverReaderManagerOption func(*partitionBindObserverReaderM
 
 var defaultWatchBalanceDuration = 5 * time.Second
 
-func useMockKafkaControllerConnProvider(fn func() (KafkaConn, error)) readerManagerConfigOption {
+func useMockKafkaControllerConnProvider(fn func() (KafkaConn, error)) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.partitionBindObserverReaderManagerOptions = append(
 			rmc.partitionBindObserverReaderManagerOptions,
@@ -74,7 +74,7 @@ func useMockKafkaControllerConnProvider(fn func() (KafkaConn, error)) readerMana
 	}
 }
 
-func setWatchBalanceDuration(duration time.Duration) readerManagerConfigOption {
+func setWatchBalanceDuration(duration time.Duration) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.partitionBindObserverReaderManagerOptions = append(
 			rmc.partitionBindObserverReaderManagerOptions,
@@ -108,7 +108,7 @@ func defaultKafkaControllerConnProvider(url string) func() (KafkaConn, error) {
 	}
 }
 
-func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, startOffset int64, brokers []string, topic string, options ...readerManagerConfigOption) (ReaderManager, error) {
+func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, startOffset int64, brokers []string, topic string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -125,7 +125,6 @@ func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, s
 			return createReader(kafka.ReaderConfig{
 				Brokers:   brokers,
 				Topic:     topic,
-				MinBytes:  10e3, // 10KB
 				MaxBytes:  10e6, // 10MB
 				Partition: partitionID,
 			}, config.readerOptions...)

@@ -3,11 +3,12 @@ package readermanager
 type (
 	Observer struct {
 		key             string
-		notify          Notify
+		notify          NotifyWithManualCommit
 		unSubscribeHook unSubscribeHook
 	}
-	Notify          func(message []byte) error
-	unSubscribeHook func() error
+	Notify                 func(message []byte) error
+	NotifyWithManualCommit func(message []byte, commitFn func() error) error
+	unSubscribeHook        func() error
 
 	ObserverOption func(*Observer)
 )
@@ -15,6 +16,22 @@ type (
 func defaultUnSubscribeHook() error { return nil }
 
 func CreateObserver(key string, notify Notify, options ...ObserverOption) *Observer {
+	observer := &Observer{
+		key: key,
+		notify: func(message []byte, commitFn func() error) error {
+			return notify(message)
+		},
+		unSubscribeHook: defaultUnSubscribeHook,
+	}
+
+	for _, option := range options {
+		option(observer)
+	}
+
+	return observer
+}
+
+func CreateObserverWithManualCommit(key string, notify NotifyWithManualCommit, options ...ObserverOption) *Observer {
 	observer := &Observer{
 		key:             key,
 		notify:          notify,

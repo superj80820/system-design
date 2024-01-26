@@ -13,6 +13,7 @@ type TicketPlusReserveSchedule struct {
 	Mobile                      string                                     `json:"mobile"`
 	Password                    string                                     `json:"password"`
 	EventID                     string                                     `json:"event_id"`
+	SessionID                   string                                     `json:"session_id"`
 	Priority                    map[string]int                             `json:"priority"`
 	CaptchaDuration             time.Duration                              `json:"captcha_duration"`
 	CaptchaCount                int                                        `json:"captcha_count"`
@@ -66,7 +67,7 @@ type TicketPlusRepo interface {
 	GetTicketStatus(ticketAreaIDs, productIDs []string) (*TicketStatus, error)
 	GetTicketStatusOrderByCount(ticketAreaIDs, productIDs []string) (*TicketStatus, error)
 	GetCaptcha(token, sessionID string, refresh bool) (*TicketCaptcha, error)
-	Reserve(ctx context.Context, token string, productIDs []*TicketReserveRequestProduct, captchaKey, captchaAns string) (*TicketReserve, error)
+	Reserve(ctx context.Context, token string, productIDs []*TicketReserveRequestProduct, captchaKey, captchaAns string, isAddMetadata bool) (*TicketReserve, error)
 
 	SaveOrUpdateToken(countryCode, mobile, ticketPlusUserID, accessToken, refreshToken string, accessTokenExpiresIn time.Time) (id int64, err error)
 	GetToken(countryCode, mobile string) (*TicketPlusDBUserToken, error)

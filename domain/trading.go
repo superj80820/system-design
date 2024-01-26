@@ -1,7 +1,7 @@
 package domain
 
 import (
-	"context"
+	context "context"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -18,7 +18,7 @@ const (
 
 // TODO: abstract
 type TradingEvent struct {
-	RefID string // TODO: what this?
+	ReferenceID int64
 
 	EventType  TradingEventTypeEnum
 	SequenceID int
@@ -49,6 +49,7 @@ type TradingLogResultStatusTypeEnum int
 const (
 	TradingLogResultStatusUnknownType TradingLogResultStatusTypeEnum = iota
 	TradingLogResultStatusOKType
+	TradingLogResultStatusCancelType
 )
 
 type TradingLogResult struct {
@@ -65,28 +66,43 @@ type TransferEvent struct {
 
 type TradingRepo interface {
 	SubscribeTradeMessage(notify func(*TradingEvent))
-	SendTradeMessages(*TradingEvent)
+	SendTradeMessages([]*TradingEvent)
 	Done() <-chan struct{}
 	Err() error
 	Shutdown()
 }
 
+type TradingResultStatus int
+
+const (
+	TradingResultStatusCreate TradingResultStatus = iota + 1
+	TradingResultStatusCancel
+)
+
+type TradingResult struct {
+	TradingResultStatus TradingResultStatus
+	TradingEvent        *TradingEvent
+	MatchResult         *MatchResult
+}
+
 type AsyncTradingUseCase interface {
-	AsyncEventProcess(ctx context.Context) error
-	AsyncDBProcess(ctx context.Context) error
-	AsyncTickProcess(ctx context.Context) error
-	AsyncNotifyProcess(ctx context.Context) error
-	AsyncOrderBookProcess(ctx context.Context) error
-	AsyncTradingLogResultProcess(ctx context.Context) error
+	SubscribeTradingResult(fn func(tradingResult *TradingResult))
+	GetLatestOrderBook() *OrderBookEntity
 	Done() <-chan struct{}
 	Shutdown() error
+}
+
+type TradingSequencerUseCase interface {
+	ConsumeTradingEvent(context.Context)
+	ProduceTradingEvent(context.Context, *TradingEvent) error
+	Done() <-chan struct{}
+	Err() error
 }
 
 type TradingUseCase interface {
 	CreateOrder(messages *TradingEvent) (*MatchResult, error)
 	CancelOrder(tradingEvent *TradingEvent) error
 	Transfer(tradingEvent *TradingEvent) error
-	IsOrderBookChanged() bool
 	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)

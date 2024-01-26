@@ -3,35 +3,32 @@ package trading
 import (
 	"context"
 	"fmt"
-	"time"
+	"sync"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
-	"golang.org/x/sync/errgroup"
+	"github.com/superj80820/system-design/kit/util"
 )
 
 type tradingAsyncUseCase struct {
-	tradingUseCase  domain.TradingUseCase
-	tradingRepo     domain.TradingRepo
-	matchingUseCase domain.MatchingUseCase
 	logger          loggerKit.Logger
+	tradingRepo     domain.TradingRepo
+	tradingUseCase  domain.TradingUseCase
+	matchingUseCase domain.MatchingUseCase
 
-	tradingLogResultCh chan *domain.TradingLogResult
-	orderBookCh        chan *domain.OrderEntity
-	saveOrderCh        chan *domain.OrderEntity
-
-	latestOrderBook *domain.OrderBookEntity
-	orderBookDepth  int
-	cancel          context.CancelFunc
-	doneCh          chan struct{}
-	err             error
+	tradingUseCaseLock *sync.Mutex
+	subscriber         util.GenericSyncMap[*func(tradingResult *domain.TradingResult), func(tradingResult *domain.TradingResult)]
+	orderBookDepth     int
+	cancel             context.CancelFunc
+	doneCh             chan struct{}
+	err                error
 }
 
 func CreateAsyncTradingUseCase(
 	ctx context.Context,
-	tradingUseCase domain.TradingUseCase,
 	tradingRepo domain.TradingRepo,
+	tradingUseCase domain.TradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
 	orderBookDepth int,
 	logger loggerKit.Logger,
@@ -39,47 +36,17 @@ func CreateAsyncTradingUseCase(
 	ctx, cancel := context.WithCancel(ctx)
 
 	t := &tradingAsyncUseCase{
+		logger:          logger,
+		tradingRepo:     tradingRepo,
 		tradingUseCase:  tradingUseCase,
 		matchingUseCase: matchingUseCase,
-		tradingRepo:     tradingRepo,
-		saveOrderCh:     make(chan *domain.OrderEntity),
-		orderBookDepth:  orderBookDepth,
-		cancel:          cancel,
-		doneCh:          make(chan struct{}),
-		logger:          logger,
+
+		tradingUseCaseLock: new(sync.Mutex),
+		orderBookDepth:     orderBookDepth,
+		cancel:             cancel,
+		doneCh:             make(chan struct{}),
 	}
 
-	eg, ctx := errgroup.WithContext(ctx)
-	eg.Go(func() error {
-		return t.AsyncEventProcess(ctx)
-	})
-	eg.Go(func() error {
-		return t.AsyncDBProcess(ctx)
-	})
-	eg.Go(func() error {
-		return t.AsyncTradingLogResultProcess(ctx)
-	})
-	eg.Go(func() error {
-		return t.AsyncNotifyProcess(ctx)
-	})
-	eg.Go(func() error {
-		return t.AsyncOrderBookProcess(ctx)
-	})
-	eg.Go(func() error {
-		return t.AsyncTickProcess(ctx)
-	})
-	go func() {
-		t.err = eg.Wait()
-		if err := t.tradingUseCase.Shutdown(); err != nil {
-			t.logger.Error(fmt.Sprintf("shutdown trading use case failed, error: %+v", err))
-		}
-		close(t.doneCh)
-	}()
-
-	return t
-}
-
-func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 	subscribeErrHandleFn := func(err error) error {
 		if errors.Is(err, domain.LessAmountErr) {
 			t.logger.Info(fmt.Sprintf("%+v", err))
@@ -88,112 +55,236 @@ func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 		}
 		return nil
 	}
-
 	t.tradingRepo.SubscribeTradeMessage(func(te *domain.TradingEvent) {
 		switch te.EventType {
 		case domain.TradingEventCreateOrderType:
-			_, err := t.tradingUseCase.CreateOrder(te)
+			t.tradingUseCaseLock.Lock()
+			matchResult, err := tradingUseCase.CreateOrder(te)
+			t.tradingUseCaseLock.Unlock()
 			subscribeErrHandleFn(err)
 
-			t.tradingLogResultCh <- &domain.TradingLogResult{StatusType: domain.TradingLogResultStatusOKType}
+			t.subscriber.Range(func(_ *func(tradingResult *domain.TradingResult), value func(tradingResult *domain.TradingResult)) bool {
+				value(&domain.TradingResult{
+					TradingResultStatus: domain.TradingResultStatusCreate,
+					TradingEvent:        te,
+					MatchResult:         matchResult,
+				})
+				return true
+			})
 		case domain.TradingEventCancelOrderType:
-			err := t.tradingUseCase.CancelOrder(te)
+			t.tradingUseCaseLock.Lock()
+			err := tradingUseCase.CancelOrder(te)
+			t.tradingUseCaseLock.Unlock()
 			subscribeErrHandleFn(err)
+
+			t.subscriber.Range(func(_ *func(tradingResult *domain.TradingResult), value func(tradingResult *domain.TradingResult)) bool {
+				value(&domain.TradingResult{
+					TradingResultStatus: domain.TradingResultStatusCancel,
+					TradingEvent:        te,
+				})
+				return true
+			})
 		case domain.TradingEventTransferType:
-			err := t.tradingUseCase.Transfer(te)
+			t.tradingUseCaseLock.Lock()
+			err := tradingUseCase.Transfer(te)
+			t.tradingUseCaseLock.Unlock()
 			subscribeErrHandleFn(err)
 		default:
 			subscribeErrHandleFn(errors.New("unknown event type"))
 		}
-
-		if t.tradingUseCase.IsOrderBookChanged() {
-			t.latestOrderBook = t.matchingUseCase.GetOrderBook(t.orderBookDepth)
-		}
 	})
-	select {
-	case <-t.tradingRepo.Done():
-		if err := t.tradingRepo.Err(); err != nil {
-			return errors.Wrap(err, "trade subscriber get error")
-		}
-	case <-ctx.Done():
-		t.tradingRepo.Shutdown()
-	}
-	return nil
+
+	return t
 }
 
-func (t *tradingAsyncUseCase) AsyncDBProcess(ctx context.Context) error {
-	orders := make([]*domain.OrderEntity, 0, 1000)   // TODO: performance?
-	ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
-	defer ticker.Stop()
-
-	go func() {
-		for {
-			<-ticker.C
-			// TODO
-		}
-	}()
-
-	for {
-		select {
-		case order := <-t.saveOrderCh:
-			orders = append(orders, order)
-		case <-ctx.Done():
-			return nil
-		}
-	}
+func (t *tradingAsyncUseCase) SubscribeTradingResult(fn func(tradingResult *domain.TradingResult)) {
+	t.subscriber.Store(&fn, fn)
 }
 
-func (t *tradingAsyncUseCase) AsyncTickProcess(ctx context.Context) error {
-	return nil
+func (t *tradingAsyncUseCase) GetLatestOrderBook() *domain.OrderBookEntity {
+	t.tradingUseCaseLock.Lock()
+	defer t.tradingUseCaseLock.Unlock()
+
+	return t.matchingUseCase.GetOrderBook(t.orderBookDepth)
 }
 
-func (t *tradingAsyncUseCase) AsyncNotifyProcess(ctx context.Context) error {
-	return nil
-}
+// func (t *tradingAsyncUseCase) AsyncEventProcess(ctx context.Context) error {
 
-func (t *tradingAsyncUseCase) AsyncOrderBookProcess(ctx context.Context) error {
-	orders := make([]*domain.OrderEntity, 0, 1000)   // TODO: performance?
-	ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
-	defer ticker.Stop()
+// 	<-t.tradingRepo.Done()
 
-	go func() {
-		for {
-			<-ticker.C
-			// TODO
-		}
-	}()
+// 	if err := t.tradingRepo.Err(); err != nil {
+// 		return errors.Wrap(err, "trading subscribe get error")
+// 	}
 
-	for {
-		select {
-		case order := <-t.orderBookCh:
-			orders = append(orders, order)
-		case <-ctx.Done():
-			return nil
-		}
-	}
-}
+// 	return nil
+// }
 
-func (t *tradingAsyncUseCase) AsyncTradingLogResultProcess(ctx context.Context) error {
-	tradingLogResults := make([]*domain.TradingLogResult, 0, 1000) // TODO: performance?
-	ticker := time.NewTicker(100 * time.Millisecond)               // TODO: is best way?
-	defer ticker.Stop()
+// func (t *tradingAsyncUseCase) AsyncDBProcess(ctx context.Context) error {
+// 	var matchResults []*domain.MatchResult
+// 	lock := new(sync.Mutex)
 
-	go func() {
-		for {
-			<-ticker.C
-			// TODO
-		}
-	}()
+// 	go func() {
+// 		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+// 		defer ticker.Stop()
 
-	for {
-		select {
-		case tradingLogResult := <-t.tradingLogResultCh:
-			tradingLogResults = append(tradingLogResults, tradingLogResult)
-		case <-ctx.Done():
-			return nil
-		}
-	}
-}
+// 		for range ticker.C {
+// 			lock.Lock()
+// 			matchResultsClone := make([]*domain.MatchResult, len(matchResults))
+// 			copy(matchResultsClone, matchResults)
+// 			matchResults = nil
+// 			lock.Unlock()
+
+// 			for _, matchDetail := range matchResultsClone {
+// 				t.tradingCacheUseCase.SaveOrderHistory(matchDetail)
+// 			}
+// 		}
+// 	}()
+
+// 	for {
+// 		select {
+// 		case matchResult := <-t.saveOrderCh:
+// 			lock.Lock()
+// 			matchResults = append(matchResults, matchResult)
+// 			lock.Unlock()
+// 		case <-ctx.Done():
+// 			return nil
+// 		}
+// 	}
+// }
+
+// func (t *tradingAsyncUseCase) AsyncTickProcess(ctx context.Context) error {
+// 	var matchResults []*domain.MatchResult
+// 	lock := new(sync.Mutex)
+
+// 	go func() {
+// 		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+// 		defer ticker.Stop()
+
+// 		for range ticker.C {
+// 			lock.Lock()
+// 			matchResultsClone := make([]*domain.MatchResult, len(matchResults))
+// 			copy(matchResultsClone, matchResults)
+// 			matchResults = nil
+// 			lock.Unlock()
+
+// 			for _, matchDetail := range matchResultsClone {
+// 				t.tradingCacheUseCase.SendTick(matchDetail)
+// 			}
+// 		}
+// 	}()
+
+// 	for {
+// 		select {
+// 		case matchResult := <-t.tickCh:
+// 			lock.Lock()
+// 			matchResults = append(matchResults, matchResult)
+// 			lock.Unlock()
+// 		case <-ctx.Done():
+// 			return nil
+// 		}
+// 	}
+// }
+
+// func (t *tradingAsyncUseCase) AsyncNotifyProcess(ctx context.Context) error {
+// 	var matchResults []*domain.MatchResult
+// 	lock := new(sync.Mutex)
+
+// 	go func() {
+// 		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+// 		defer ticker.Stop()
+
+// 		for range ticker.C {
+// 			lock.Lock()
+// 			matchResultsClone := make([]*domain.MatchResult, len(matchResults))
+// 			copy(matchResultsClone, matchResults)
+// 			matchResults = nil
+// 			lock.Unlock()
+
+// 			for _, matchDetail := range matchResultsClone {
+// 				t.tradingCacheUseCase.SendNotification(matchDetail)
+// 			}
+// 		}
+// 	}()
+
+// 	for {
+// 		select {
+// 		case matchResult := <-t.notifyCh:
+// 			lock.Lock()
+// 			matchResults = append(matchResults, matchResult)
+// 			lock.Unlock()
+// 		case <-ctx.Done():
+// 			return nil
+// 		}
+// 	}
+// }
+
+// func (t *tradingAsyncUseCase) AsyncOrderBookProcess(ctx context.Context) error {
+// 	var isOrderBookChange bool
+// 	lock := new(sync.Mutex)
+
+// 	go func() {
+// 		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+// 		defer ticker.Stop()
+
+// 		for range ticker.C {
+// 			lock.Lock()
+// 			isOrderBookChangeClone := isOrderBookChange
+// 			isOrderBookChange = false
+// 			lock.Unlock()
+
+// 			if !isOrderBookChangeClone {
+// 				continue
+// 			}
+
+// 			t.orderBookProcessGetLatestOrderBookCh <- true
+// 			orderBook := <-t.orderBookProcessReceiveLatestOrderBook
+
+// 			t.tradingCacheUseCase.StoreOrderBookCache(orderBook)
+// 		}
+// 	}()
+
+// 	for {
+// 		select {
+// 		case isChange := <-t.isOrderBookChange:
+// 			lock.Lock()
+// 			isOrderBookChange = isChange
+// 			lock.Unlock()
+// 		case <-ctx.Done():
+// 			return nil
+// 		}
+// 	}
+// }
+
+// func (t *tradingAsyncUseCase) AsyncTradingLogResultProcess(ctx context.Context) error {
+// 	var tradingLogResults []*domain.TradingLogResult // TODO: performance?
+// 	lock := new(sync.Mutex)
+
+// 	go func() {
+// 		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+// 		defer ticker.Stop()
+
+// 		for range ticker.C {
+// 			lock.Lock()
+// 			tradingLogResultsClone := make([]*domain.TradingLogResult, len(tradingLogResults))
+// 			copy(tradingLogResultsClone, tradingLogResults)
+// 			tradingLogResults = nil
+// 			lock.Unlock()
+
+// 			t.tradingCacheUseCase.StoreTradingLogCache(tradingLogResultsClone)
+// 		}
+// 	}()
+
+// 	for {
+// 		select {
+// 		case tradingLogResult := <-t.tradingLogResultCh:
+// 			lock.Lock()
+// 			tradingLogResults = append(tradingLogResults, tradingLogResult)
+// 			lock.Unlock()
+// 		case <-ctx.Done():
+// 			return nil
+// 		}
+// 	}
+// }
 
 func (t *tradingAsyncUseCase) Done() <-chan struct{} {
 	return t.doneCh

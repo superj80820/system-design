@@ -1,5 +1,5 @@
 import http from 'k6/http';
-import { sleep } from 'k6';
+import { check } from 'k6';
 
 export const options = {
   // A number specifying the number of VUs to run concurrently.
@@ -55,11 +55,11 @@ export const options = {
 // See https://grafana.com/docs/k6/latest/examples/get-started-with-k6/ to learn more
 // about authoring k6 scripts.
 //
-export default function() {
+export default function () {
   const url = 'http://localhost:9090/api/v1/orders';
   const randomVal = Math.floor(Math.random() * 100)
-  const direction = Math.floor(Math.random() * 2)+1
-  const payload = JSON.stringify({ "direction": direction, "price": 2.34+randomVal, "quantity": randomVal });
+  const direction = Math.floor(Math.random() * 2) + 1
+  const payload = JSON.stringify({ "direction": direction, "price": 2.34 + randomVal, "quantity": randomVal });
 
   const params = {
     headers: {
@@ -68,8 +68,25 @@ export default function() {
     },
   };
 
-  http.post(url, payload, params);
+  const res = http.post(url, payload, params);
+  check(res, { "is 204": res => res.status === 204 })
 }
+
+// export default function() {
+//   const url = 'http://localhost:8081/api/v1/test';
+//   const randomVal = Math.floor(Math.random() * 100)
+//   const direction = Math.floor(Math.random() * 2)+1
+//   const payload = JSON.stringify({ "direction": direction, "price": 2.34+randomVal, "quantity": randomVal });
+
+//   const params = {
+//     headers: {
+//       'Content-Type': 'application/json',
+//       'user-id': '2'
+//     },
+//   };
+
+//   http.get(url, payload, params);
+// }
 
 // export default function() {
 //   const url = 'http://127.0.0.1/api/orders';

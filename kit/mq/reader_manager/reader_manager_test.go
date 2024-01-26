@@ -18,7 +18,7 @@ import (
 type unitTest struct {
 	suite.Suite
 
-	readerManagerForTestProvider func(...readerManagerConfigOption) (ReaderManager, error)
+	readerManagerForTestProvider func(...ReaderManagerConfigOption) (ReaderManager, error)
 
 	readerManager   ReaderManager
 	kafkaReaderMock *mocks.KafkaReader
@@ -435,7 +435,7 @@ type unitTestReaderBySpecPartition struct {
 }
 
 func (u *unitTestReaderBySpecPartition) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
 		return CreateSpecPartitionReaderManager(context.Background(), "topic", LastOffset, 1, []string{}, rmco...)
 	}
 }
@@ -445,8 +445,8 @@ type unitTestReaderByGroupID struct {
 }
 
 func (u *unitTestReaderByGroupID) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
-		return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", LastOffset, rmco...)
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
+		return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", rmco...)
 	}
 }
 
@@ -455,7 +455,7 @@ type unitTestPartitionBindObserverReaderManager struct {
 }
 
 func (u *unitTestPartitionBindObserverReaderManager) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...readerManagerConfigOption) (ReaderManager, error) {
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
 		return CreatePartitionBindObserverReaderManager(context.Background(), "url", LastOffset, []string{}, "topic", rmco...)
 	}
 }

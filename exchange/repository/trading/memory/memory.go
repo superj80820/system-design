@@ -18,7 +18,7 @@ type tradingRepo struct {
 func CreateTradingRepo(ctx context.Context) domain.TradingRepo {
 	ctx, cancel := context.WithCancel(ctx)
 
-	tradingEventCh := make(chan *domain.TradingEvent)
+	tradingEventCh := make(chan *domain.TradingEvent, 10) // do not block trading event
 	done := make(chan struct{})
 
 	t := &tradingRepo{
@@ -53,8 +53,10 @@ func (t *tradingRepo) Err() error {
 	return t.err
 }
 
-func (t *tradingRepo) SendTradeMessages(tradingEvent *domain.TradingEvent) {
-	t.tradingEventCh <- tradingEvent
+func (t *tradingRepo) SendTradeMessages(tradingEvents []*domain.TradingEvent) {
+	for _, tradingEvent := range tradingEvents {
+		t.tradingEventCh <- tradingEvent
+	}
 }
 
 func (t *tradingRepo) Shutdown() {

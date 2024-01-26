@@ -47,6 +47,7 @@ type Option func(*DB)
 
 func UseMySQL(dns string) Option {
 	return func(db *DB) {
+		db.dbType = dbTypeMySQL
 		db.mySQLConfig = &mySQLConfig{
 			dns: dns,
 		}
@@ -97,12 +98,16 @@ func CreateDB(useDB Option, options ...Option) (*DB, error) {
 		return nil, errors.Wrap(err, "get core db failed")
 	}
 	if sqlDB.Ping() != nil {
-		return nil, errors.Wrap(err, "ping core db failed")
+		return nil, errors.New("ping core db failed")
 	}
 
 	gormDB.gormClient = db
 
 	return &gormDB, nil
+}
+
+func (db *DB) Raw(sql string, values ...interface{}) *TX {
+	return db.gormClient.Raw(sql, values...)
 }
 
 func (db *DB) Exec(sql string, values ...interface{}) *TX {
@@ -139,6 +144,10 @@ func (db *DB) Find(dest interface{}, conds ...interface{}) *TX {
 
 func (db *DB) Create(value interface{}) *TX {
 	return db.gormClient.Create(value)
+}
+
+func (db *DB) Order(value interface{}) *TX {
+	return db.gormClient.Order(value) // TODO: dependency
 }
 
 func (db *DB) First(dest interface{}, conds ...interface{}) error {
