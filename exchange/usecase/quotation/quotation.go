@@ -37,42 +37,7 @@ func CreateQuotationUseCase(cap int) domain.QuotationUseCase {
 		tickLock:           new(sync.Mutex),
 	}
 
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
-		defer ticker.Stop()
-
-		for range ticker.C {
-			q.tradingResultsLock.Lock()
-			tradingResultsClone := make([]*domain.TradingResult, len(q.tradingResults))
-			copy(tradingResultsClone, q.tradingResults)
-			q.tradingResults = nil
-			q.tradingResultsLock.Unlock()
-
-			for _, tradingResult := range tradingResultsClone {
-				for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-					tick := &tick{
-						domain.TickEntity{
-							SequenceID:     tradingResult.TradingEvent.SequenceID,
-							TakerOrderID:   matchDetail.TakerOrder.ID,
-							MakerOrderID:   matchDetail.MakerOrder.ID,
-							Price:          matchDetail.Price,
-							Quantity:       matchDetail.Quantity,
-							TakerDirection: matchDetail.TakerOrder.Direction,
-							CreatedAt:      tradingResult.TradingEvent.CreatedAt,
-						},
-					}
-
-					q.tickLock.Lock()
-					if q.tickList.Len() >= q.cap {
-						q.tickList.Remove(q.tickList.Front())
-					}
-					q.tickList.PushBack(tick.String())
-					q.tickLock.Unlock()
-				}
-
-			}
-		}
-	}()
+	go q.collectTickThenSave()
 
 	return q
 }
@@ -95,4 +60,41 @@ func (q *quotationUseCase) GetTicks() ([]string, error) {
 	q.tickLock.Unlock()
 
 	return res, nil
+}
+
+func (q *quotationUseCase) collectTickThenSave() {
+	ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+	defer ticker.Stop()
+
+	for range ticker.C {
+		q.tradingResultsLock.Lock()
+		tradingResultsClone := make([]*domain.TradingResult, len(q.tradingResults))
+		copy(tradingResultsClone, q.tradingResults)
+		q.tradingResults = nil
+		q.tradingResultsLock.Unlock()
+
+		for _, tradingResult := range tradingResultsClone {
+			for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
+				tick := &tick{
+					domain.TickEntity{
+						SequenceID:     tradingResult.TradingEvent.SequenceID,
+						TakerOrderID:   matchDetail.TakerOrder.ID,
+						MakerOrderID:   matchDetail.MakerOrder.ID,
+						Price:          matchDetail.Price,
+						Quantity:       matchDetail.Quantity,
+						TakerDirection: matchDetail.TakerOrder.Direction,
+						CreatedAt:      tradingResult.TradingEvent.CreatedAt,
+					},
+				}
+
+				q.tickLock.Lock()
+				if q.tickList.Len() >= q.cap {
+					q.tickList.Remove(q.tickList.Front())
+				}
+				q.tickList.PushBack(tick.String())
+				q.tickLock.Unlock()
+			}
+
+		}
+	}
 }

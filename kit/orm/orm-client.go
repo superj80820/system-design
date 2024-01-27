@@ -8,6 +8,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -33,7 +34,10 @@ type DB struct {
 	sqliteConfig *sqliteConfig
 }
 
-type TX = gorm.DB
+type (
+	TX         = gorm.DB
+	Expression = clause.Expression
+)
 
 type dbType int
 
@@ -140,6 +144,10 @@ func (db *DB) Update(column string, value interface{}) *TX {
 
 func (db *DB) Find(dest interface{}, conds ...interface{}) *TX {
 	return db.gormClient.Find(dest, conds...)
+}
+
+func (db *DB) Clauses(conds ...Expression) *TX {
+	return db.gormClient.Clauses(conds...)
 }
 
 func (db *DB) Create(value interface{}) *TX {

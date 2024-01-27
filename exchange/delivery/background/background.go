@@ -15,13 +15,16 @@ func RunAsyncTrading(ctx context.Context, asyncTradingUseCase domain.AsyncTradin
 func RunAsyncTradingSequencer(
 	ctx context.Context,
 	tradingSequencerUseCase domain.TradingSequencerUseCase,
-	asyncTradingUseCase domain.AsyncTradingUseCase,
 	quotationUseCase domain.QuotationUseCase,
 	candleUseCase domain.CandleUseCase,
+	orderUseCase domain.OrderUseCase,
+	tradingUseCase domain.TradingUseCase,
 ) error {
-	tradingSequencerUseCase.ConsumeTradingEvent(ctx)
-	asyncTradingUseCase.SubscribeTradingResult(quotationUseCase.AddTick)
-	asyncTradingUseCase.SubscribeTradingResult(candleUseCase.AddData) // TODO: error handle
+	tradingSequencerUseCase.ConsumeTradingEventThenProduce(ctx)
+	tradingUseCase.SubscribeTradingResult(quotationUseCase.AddTick)
+	tradingUseCase.SubscribeTradingResult(candleUseCase.AddData) // TODO: error handle
+	tradingUseCase.SubscribeTradingResult(orderUseCase.SaveHistoryOrdersFromTradingResult)
+	tradingUseCase.SubscribeTradingResult(tradingUseCase.SaveHistoryMatchDetailsFromTradingResult)
 
 	select {
 	case <-tradingSequencerUseCase.Done():

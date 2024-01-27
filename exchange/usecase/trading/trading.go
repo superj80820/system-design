@@ -2,141 +2,254 @@ package trading
 
 import (
 	"context"
-	"strconv"
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	"github.com/superj80820/system-design/kit/util"
 )
 
 type tradingUseCase struct {
-	matchingUseCase  domain.MatchingUseCase
-	userAssetUseCase domain.UserAssetUseCase
-	orderUseCase     domain.OrderUseCase
-	clearingUseCase  domain.ClearingUseCase
-	logger           loggerKit.Logger
+	logger             loggerKit.Logger
+	tradingRepo        domain.TradingRepo
+	matchingUseCase    domain.MatchingUseCase
+	syncTradingUseCase domain.SyncTradingUseCase
 
-	latestOrderBook *domain.OrderBookEntity
-	lastSequenceID  int
-	cancel          context.CancelFunc
-	doneCh          chan struct{}
-	err             error
+	historyMatchingDetailsLock     *sync.Mutex
+	historyMatchingDetails         []*domain.MatchOrderDetail
+	isHistoryMatchingDetailsFullCh chan struct{}
+
+	tradingUseCaseLock *sync.Mutex
+	subscriber         util.GenericSyncMap[*func(tradingResult *domain.TradingResult), func(tradingResult *domain.TradingResult)]
+	orderBookDepth     int
+	cancel             context.CancelFunc
+	doneCh             chan struct{}
+	err                error
 }
 
 func CreateTradingUseCase(
 	ctx context.Context,
-	matchingUseCase domain.MatchingUseCase,
-	userAssetUseCase domain.UserAssetUseCase,
-	orderUseCase domain.OrderUseCase,
-	clearingUseCase domain.ClearingUseCase,
 	tradingRepo domain.TradingRepo,
+	syncTradingUseCase domain.SyncTradingUseCase,
+	matchingUseCase domain.MatchingUseCase,
+	orderBookDepth int,
+	logger loggerKit.Logger,
 ) domain.TradingUseCase {
 	ctx, cancel := context.WithCancel(ctx)
 
 	t := &tradingUseCase{
-		matchingUseCase:  matchingUseCase,
-		userAssetUseCase: userAssetUseCase,
-		orderUseCase:     orderUseCase,
-		clearingUseCase:  clearingUseCase,
-		cancel:           cancel,
-		doneCh:           make(chan struct{}),
+		logger:             logger,
+		tradingRepo:        tradingRepo,
+		syncTradingUseCase: syncTradingUseCase,
+		matchingUseCase:    matchingUseCase,
+
+		historyMatchingDetailsLock:     new(sync.Mutex),
+		isHistoryMatchingDetailsFullCh: make(chan struct{}),
+
+		tradingUseCaseLock: new(sync.Mutex),
+		orderBookDepth:     orderBookDepth,
+		cancel:             cancel,
+		doneCh:             make(chan struct{}),
 	}
+
+	subscribeErrHandleFn := func(err error) error {
+		if errors.Is(err, domain.LessAmountErr) {
+			t.logger.Info(fmt.Sprintf("%+v", err))
+		} else if err != nil {
+			panic(fmt.Sprintf("process message get error: %+v", err))
+		}
+		return nil
+	}
+	t.tradingRepo.SubscribeTradeMessage("global-trader", func(te *domain.TradingEvent) {
+		switch te.EventType {
+		case domain.TradingEventCreateOrderType:
+			t.tradingUseCaseLock.Lock()
+			matchResult, err := syncTradingUseCase.CreateOrder(te)
+			t.tradingUseCaseLock.Unlock()
+			subscribeErrHandleFn(err)
+
+			t.subscriber.Range(func(_ *func(tradingResult *domain.TradingResult), value func(tradingResult *domain.TradingResult)) bool {
+				value(&domain.TradingResult{
+					TradingResultStatus: domain.TradingResultStatusCreate,
+					TradingEvent:        te,
+					MatchResult:         matchResult,
+				})
+				return true
+			})
+		case domain.TradingEventCancelOrderType:
+			t.tradingUseCaseLock.Lock()
+			err := syncTradingUseCase.CancelOrder(te)
+			t.tradingUseCaseLock.Unlock()
+			subscribeErrHandleFn(err)
+
+			t.subscriber.Range(func(_ *func(tradingResult *domain.TradingResult), value func(tradingResult *domain.TradingResult)) bool {
+				value(&domain.TradingResult{
+					TradingResultStatus: domain.TradingResultStatusCancel,
+					TradingEvent:        te,
+				})
+				return true
+			})
+		case domain.TradingEventTransferType:
+			t.tradingUseCaseLock.Lock()
+			err := syncTradingUseCase.Transfer(te)
+			t.tradingUseCaseLock.Unlock()
+			subscribeErrHandleFn(err)
+		default:
+			subscribeErrHandleFn(errors.New("unknown event type"))
+		}
+	})
+
+	go t.collectHistoryMatchingDetailsThenSave(ctx)
 
 	return t
 }
 
-func (t *tradingUseCase) checkEventSequence(tradingEvent *domain.TradingEvent) error {
-	if tradingEvent.SequenceID <= t.lastSequenceID {
-		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event sequence id: "+strconv.Itoa(tradingEvent.SequenceID))
+func (t *tradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
+	if err := t.syncTradingUseCase.CancelOrder(tradingEvent); err != nil {
+		return errors.Wrap(err, "cancel order failed")
 	}
-	if tradingEvent.PreviousID > t.lastSequenceID {
-		// TODO: load from db
-		return errors.Wrap(domain.ErrMissEvent, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(tradingEvent.PreviousID))
-	}
-	if tradingEvent.PreviousID != t.lastSequenceID { // TODO: test think maybe no need previous
-		return errors.Wrap(domain.ErrPreviousIDNotCorrect, "last sequence id: "+strconv.Itoa(t.lastSequenceID)+", message event previous id: "+strconv.Itoa(tradingEvent.PreviousID))
-	}
-
-	t.lastSequenceID = tradingEvent.SequenceID
-
 	return nil
 }
 
 func (t *tradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
-	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return nil, errors.Wrap(err, "check event sequence failed")
-	}
-
-	timeNow := time.Now()
-	year := timeNow.Year()
-	month := int(timeNow.Month())
-	orderID := tradingEvent.SequenceID*10000 + (year*100 + month)
-
-	order, err := t.orderUseCase.CreateOrder(
-		tradingEvent.SequenceID,
-		orderID,
-		tradingEvent.OrderRequestEvent.UserID,
-		tradingEvent.OrderRequestEvent.Direction,
-		tradingEvent.OrderRequestEvent.Price,
-		tradingEvent.OrderRequestEvent.Quantity,
-		tradingEvent.CreatedAt,
-	)
+	matchResult, err := t.syncTradingUseCase.CreateOrder(tradingEvent)
 	if err != nil {
 		return nil, errors.Wrap(err, "create order failed")
 	}
-	matchResult, err := t.matchingUseCase.NewOrder(order)
-	if err != nil {
-		return nil, errors.Wrap(err, "matching order failed")
-	}
-	if err := t.clearingUseCase.ClearMatchResult(matchResult); err != nil {
-		return nil, errors.Wrap(err, "clear match order failed")
-	}
-
 	return matchResult, nil
 }
 
-func (t *tradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
-	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return errors.Wrap(err, "check event sequence failed")
+func (t *tradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
+	if err := t.syncTradingUseCase.Transfer(tradingEvent); err != nil {
+		return errors.Wrap(err, "transfer failed")
 	}
-
-	order, err := t.orderUseCase.GetOrder(tradingEvent.OrderCancelEvent.OrderId)
-	if err != nil {
-		return errors.Wrap(err, "get order failed")
-	}
-	if order.UserID != tradingEvent.OrderCancelEvent.UserID {
-		return errors.New("order does not belong to this user")
-	}
-	if err := t.matchingUseCase.CancelOrder(tradingEvent.CreatedAt, order); err != nil {
-		return errors.Wrap(err, "cancel order failed")
-	}
-	if err := t.clearingUseCase.ClearCancelOrder(order); err != nil {
-		return errors.Wrap(err, "clear cancel order failed")
-	}
-
 	return nil
 }
 
-func (t *tradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
-	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return errors.Wrap(err, "check event sequence failed")
+func (t *tradingUseCase) GetHistoryMatchDetails(orderID int) ([]*domain.MatchOrderDetail, error) {
+	matchOrderDetails, err := t.tradingRepo.GetMatchingDetails(orderID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get matching details failed")
+	}
+	return matchOrderDetails, nil
+}
+
+func (t *tradingUseCase) SaveHistoryMatchDetailsFromTradingResult(tradingResult *domain.TradingResult) {
+	var matchOrderDetails []*domain.MatchOrderDetail
+	for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
+		takerOrderDetail := &domain.MatchOrderDetail{
+			SequenceID:     tradingResult.TradingEvent.SequenceID, // TODO: do not use taker sequence?
+			OrderID:        matchDetail.TakerOrder.ID,
+			CounterOrderID: matchDetail.MakerOrder.ID,
+			UserID:         matchDetail.TakerOrder.UserID,
+			CounterUserID:  matchDetail.MakerOrder.UserID,
+			Direction:      matchDetail.TakerOrder.Direction,
+			Price:          matchDetail.Price,
+			Quantity:       matchDetail.Quantity,
+			Type:           domain.MatchTypeTaker,
+			CreatedAt:      tradingResult.TradingEvent.CreatedAt,
+		}
+		makerOrderDetail := &domain.MatchOrderDetail{
+			SequenceID:     tradingResult.TradingEvent.SequenceID, // TODO: do not use maker sequence?
+			OrderID:        matchDetail.MakerOrder.ID,
+			CounterOrderID: matchDetail.TakerOrder.ID,
+			UserID:         matchDetail.MakerOrder.UserID,
+			CounterUserID:  matchDetail.TakerOrder.UserID,
+			Direction:      matchDetail.MakerOrder.Direction,
+			Price:          matchDetail.Price,
+			Quantity:       matchDetail.Quantity,
+			Type:           domain.MatchTypeMaker,
+			CreatedAt:      tradingResult.TradingEvent.CreatedAt,
+		}
+
+		matchOrderDetails = append(matchOrderDetails, takerOrderDetail, makerOrderDetail)
 	}
 
-	if err := t.userAssetUseCase.Transfer(
-		domain.AssetTransferAvailableToAvailable,
-		tradingEvent.TransferEvent.FromUserID,
-		tradingEvent.TransferEvent.ToUserID,
-		tradingEvent.TransferEvent.AssetID,
-		tradingEvent.TransferEvent.Amount,
-	); err != nil {
-		return errors.Wrap(err, "transfer error")
+	t.historyMatchingDetailsLock.Lock()
+	for _, matchOrderDetail := range matchOrderDetails {
+		t.historyMatchingDetails = append(t.historyMatchingDetails, matchOrderDetail)
 	}
-	return nil
+	historyMatchingDetailsLength := len(t.historyMatchingDetails)
+	t.historyMatchingDetailsLock.Unlock()
+	if historyMatchingDetailsLength >= 1000 {
+		t.isHistoryMatchingDetailsFullCh <- struct{}{}
+	}
+}
+
+func (t *tradingUseCase) SubscribeTradingResult(fn func(tradingResult *domain.TradingResult)) {
+	t.subscriber.Store(&fn, fn)
+}
+
+func (t *tradingUseCase) GetLatestOrderBook() *domain.OrderBookEntity {
+	t.tradingUseCaseLock.Lock()
+	defer t.tradingUseCaseLock.Unlock()
+
+	return t.matchingUseCase.GetOrderBook(t.orderBookDepth)
+}
+
+func (t *tradingUseCase) Done() <-chan struct{} {
+	return t.doneCh
 }
 
 func (t *tradingUseCase) Shutdown() error {
 	t.cancel()
 	<-t.doneCh
 	return t.err
+}
+
+func (t *tradingUseCase) collectHistoryMatchingDetailsThenSave(ctx context.Context) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	errContinue := errors.New("continue")
+	fn := func() error {
+		cloneHistoryMatchingDetails, err := func() ([]*domain.MatchOrderDetail, error) {
+			t.historyMatchingDetailsLock.Lock()
+			defer t.historyMatchingDetailsLock.Unlock()
+
+			if len(t.historyMatchingDetails) == 0 {
+				return nil, errContinue
+			}
+			cloneHistoryMatchingDetails := make([]*domain.MatchOrderDetail, len(t.historyMatchingDetails))
+			copy(cloneHistoryMatchingDetails, t.historyMatchingDetails)
+			t.historyMatchingDetails = nil
+
+			return cloneHistoryMatchingDetails, nil
+		}()
+		if err != nil {
+			return errors.Wrap(err, "clone history matching details failed")
+		}
+
+		if err := t.tradingRepo.SaveMatchingDetails(ctx, cloneHistoryMatchingDetails); err != nil {
+			return errors.Wrap(err, "save matching details failed")
+		}
+
+		return nil
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			if err := fn(); errors.Is(err, errContinue) {
+				continue
+			} else if err != nil {
+				panic(fmt.Sprintf("TODO, error: %+v", err))
+			}
+		case <-t.isHistoryMatchingDetailsFullCh:
+			if err := fn(); errors.Is(err, errContinue) {
+				continue
+			} else if err != nil {
+				panic(fmt.Sprintf("TODO, error: %+v", err))
+			}
+		case <-ctx.Done(): // TODO: test: when shutdown
+			if err := fn(); errors.Is(err, errContinue) {
+				continue
+			} else if err != nil {
+				panic(fmt.Sprintf("TODO, error: %+v", err))
+			}
+		}
+	}
 }

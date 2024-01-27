@@ -1,4 +1,4 @@
-package mq
+package kafka
 
 import (
 	"context"
@@ -11,14 +11,10 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
-	readerManager "github.com/superj80820/system-design/kit/mq/reader_manager"
-	writerManager "github.com/superj80820/system-design/kit/mq/writer_manager"
+	"github.com/superj80820/system-design/kit/mq"
+	readerManager "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
+	writerManager "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
 )
-
-type Message interface {
-	GetKey() string
-	Marshal() ([]byte, error)
-}
 
 type MQTopicOption func(*MQTopicConfig)
 
@@ -77,19 +73,9 @@ func CreateTopic(numPartitions, replicationFactor int) MQTopicOption {
 	}
 }
 
-type MQTopic interface {
-	Subscribe(key string, notify readerManager.Notify, options ...readerManager.ObserverOption) *readerManager.Observer
-	SubscribeWithManualCommit(key string, notify readerManager.NotifyWithManualCommit, options ...readerManager.ObserverOption) *readerManager.Observer
-	UnSubscribe(observer *readerManager.Observer)
-	Produce(ctx context.Context, message Message) error
-	Done() <-chan struct{}
-	Err() error
-	Shutdown() bool
-}
-
 type mqTopic struct {
-	readerManager readerManager.ReaderManager
-	writerManager writerManager.WriterManager
+	readerManager mq.ReaderManager
+	writerManager mq.WriterManager
 
 	topicPartitionInfo []kafka.Partition
 
@@ -100,7 +86,7 @@ type mqTopic struct {
 	err    error
 }
 
-func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (MQTopic, error) {
+func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (mq.MQTopic, error) {
 	mqConfig := &MQTopicConfig{
 		topic:   topic,
 		url:     url,
@@ -128,7 +114,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 	)
 
 	var (
-		reader readerManager.ReaderManager
+		reader mq.ReaderManager
 		err    error
 	)
 	ctx, cancel := context.WithCancel(ctx)
@@ -209,7 +195,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 	return mq, nil
 }
 
-func (m *mqTopic) Subscribe(key string, notify readerManager.Notify, options ...readerManager.ObserverOption) *readerManager.Observer {
+func (m *mqTopic) Subscribe(key string, notify mq.Notify, options ...mq.ObserverOption) mq.Observer {
 	observer := readerManager.CreateObserver(key, notify, options...)
 
 	m.readerManager.AddObserver(observer)
@@ -218,7 +204,7 @@ func (m *mqTopic) Subscribe(key string, notify readerManager.Notify, options ...
 	return observer
 }
 
-func (m *mqTopic) SubscribeWithManualCommit(key string, notify readerManager.NotifyWithManualCommit, options ...readerManager.ObserverOption) *readerManager.Observer {
+func (m *mqTopic) SubscribeWithManualCommit(key string, notify mq.NotifyWithManualCommit, options ...mq.ObserverOption) mq.Observer {
 	observer := readerManager.CreateObserverWithManualCommit(key, notify, options...)
 
 	m.readerManager.AddObserver(observer)
@@ -227,23 +213,13 @@ func (m *mqTopic) SubscribeWithManualCommit(key string, notify readerManager.Not
 	return observer
 }
 
-func (m *mqTopic) UnSubscribe(observer *readerManager.Observer) {
+func (m *mqTopic) UnSubscribe(observer mq.Observer) {
 	m.readerManager.RemoveObserverWithHook(observer)
 	m.readerManager.IfNoObserversThenStopConsume()
 }
 
-func (m *mqTopic) Produce(ctx context.Context, message Message) error {
-	marshalMessage, err := message.Marshal()
-	if err != nil {
-		return errors.Wrap(err, "marshal message failed")
-	}
-
-	kafkaMsg := kafka.Message{
-		Key:   []byte(message.GetKey()),
-		Value: marshalMessage,
-	}
-
-	if err := m.writerManager.WriteMessages(ctx, kafkaMsg); err != nil {
+func (m *mqTopic) Produce(ctx context.Context, message mq.Message) error {
+	if err := m.writerManager.WriteMessages(ctx, message); err != nil {
 		if ctx.Err() != nil { // expected. context done
 			return nil
 		}

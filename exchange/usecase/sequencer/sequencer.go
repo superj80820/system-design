@@ -10,6 +10,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -49,7 +50,7 @@ func CreateTradingSequencerUseCase(
 	}
 }
 
-func (t *tradingSequencerUseCase) ConsumeTradingEvent(ctx context.Context) {
+func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
 	var batchEvents batchEventsStruct
 	ticker := time.NewTicker(t.batchEventsDuration)
 	lock := new(sync.Mutex)
@@ -140,11 +141,52 @@ func (t *tradingSequencerUseCase) ConsumeTradingEvent(ctx context.Context) {
 					return sequencerEventClone, tradingEventClone, latestCommitFn, nil
 				}()
 			if err != nil {
-				return err
+				return errors.Wrap(err, "clone events failed")
 			}
 
 			err = t.sequencerRepo.SaveEvents(sequencerEventClone)
-			if err != nil {
+			if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+				// TODO: test
+				// if duplicate, filter events then retry
+				filterEventsMap, err := t.sequencerRepo.GetFilterEventsMap(sequencerEventClone)
+				if err != nil {
+					return errors.Wrap(err, "get filter events map failed")
+				}
+				var filterSequencerEventClone []*domain.SequencerEvent
+				for _, val := range sequencerEventClone {
+					if filterEventsMap[val.ReferenceID] {
+						continue
+					}
+					filterSequencerEventClone = append(filterSequencerEventClone, val)
+				}
+				var filterTradingEventClone []*domain.TradingEvent
+				for _, val := range tradingEventClone {
+					if filterEventsMap[val.ReferenceID] {
+						continue
+					}
+					filterTradingEventClone = append(filterTradingEventClone, val)
+				}
+
+				if len(filterSequencerEventClone) == 0 || len(filterTradingEventClone) == 0 {
+					return nil
+				}
+
+				if len(batchEvents.sequencerEvent) != len(batchEvents.tradingEvent) {
+					panic("except trading event and sequencer event length")
+				}
+
+				if err := t.sequencerRepo.SaveEvents(sequencerEventClone); err != nil {
+					panic(errors.Wrap(err, "save event failed")) // TODO: use panic?
+				}
+
+				if err := latestCommitFn(); err != nil {
+					return errors.Wrap(err, "commit latest message failed")
+				}
+
+				t.tradingRepo.SendTradeMessages(tradingEventClone)
+
+				return nil
+			} else if err != nil {
 				panic(errors.Wrap(err, "save event failed")) // TODO: use panic?
 			}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/superj80820/system-design/kit/mq"
 )
 
 type groupIDReaderManager struct {
@@ -14,7 +15,7 @@ type groupIDReaderManager struct {
 
 type groupIDReaderManagerOption func(*groupIDReaderManager)
 
-func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, groupID string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
+func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, groupID string, options ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -39,7 +40,7 @@ func CreateGroupIDReaderManager(ctx context.Context, brokers []string, topic, gr
 	return rm, nil
 }
 
-func (g *groupIDReaderManager) AddObserver(observer *Observer) bool {
+func (g *groupIDReaderManager) AddObserver(observer mq.Observer) bool {
 	return g.reader.AddObserver(observer)
 }
 
@@ -53,11 +54,11 @@ func (g *groupIDReaderManager) IfNoObserversThenStopConsume() {
 	}
 }
 
-func (g *groupIDReaderManager) RemoveObserverWithHook(observer *Observer) bool {
+func (g *groupIDReaderManager) RemoveObserverWithHook(observer mq.Observer) bool {
 	if ok := g.reader.RemoveObserver(observer); !ok {
 		return false
 	}
-	go observer.unSubscribeHook()
+	go observer.UnSubscribeHook()
 	return true
 }
 

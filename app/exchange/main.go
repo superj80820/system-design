@@ -28,9 +28,9 @@ import (
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 
+	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
-	// sequencerMemoryRepo "github.com/superj80820/system-design/exchange/repository/sequencer/memory"
-	tradingMemoryRepo "github.com/superj80820/system-design/exchange/repository/trading/memory"
+	tradingMySQLRepo "github.com/superj80820/system-design/exchange/repository/trading/mysql"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
 	candleUseCaseLib "github.com/superj80820/system-design/exchange/usecase/candle"
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
@@ -74,16 +74,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	sequenceMessageTopic, err := mqKit.CreateMQTopic(
-		ctx,
-		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
-		KAFKA_SEQUENCE_TOPIC,
-		mqKit.ConsumeByGroupID(SERVICE_NAME, true),
-		mqKit.CreateTopic(1, 1),
-	)
-	if err != nil {
-		panic(err)
-	}
 
 	mysqlDBName := "db"
 	mysqlDBUsername := "root"
@@ -93,7 +83,9 @@ func main() {
 		mysql.WithDatabase(mysqlDBName),
 		mysql.WithUsername(mysqlDBUsername),
 		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join(".", "schema.sql")),
+		mysql.WithScripts(
+			filepath.Join(".", "schema.sql"), //TODO: workaround
+		),
 	)
 	if err != nil {
 		panic(err)
@@ -128,6 +120,17 @@ func main() {
 		panic(err)
 	}
 
+	sequenceMessageTopic, err := mqKit.CreateMQTopic(
+		ctx,
+		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
+		KAFKA_SEQUENCE_TOPIC,
+		mqKit.ConsumeByGroupID(SERVICE_NAME, true),
+		mqKit.CreateTopic(1, 1),
+	)
+	if err != nil {
+		panic(err)
+	}
+
 	redisContainer, err := redis.RunContainer(ctx,
 		testcontainers.WithImage("docker.io/redis:7"),
 		redis.WithLogLevel(redis.LogLevelVerbose),
@@ -141,14 +144,6 @@ func main() {
 		panic(err)
 	}
 
-	tradingRepo := tradingMemoryRepo.CreateTradingRepo(ctx)
-	assetRepo := assetMemoryRepo.CreateAssetRepo()
-	// sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
-	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
-	if err != nil {
-		panic(err)
-	}
-
 	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
 	if err != nil {
 		panic(err)
@@ -158,23 +153,30 @@ func main() {
 		panic(err)
 	}
 
+	tradingRepo := tradingMySQLRepo.CreateTradingRepo(mysqlDB)
+	assetRepo := assetMemoryRepo.CreateAssetRepo()
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
+	if err != nil {
+		panic(err)
+	}
+	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB)
+	candleRepo := candleRepoRedis.CreateCandleRepo(redisCache)
+
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(100) // TODO: 100?
-	candleRepo := candleRepoRedis.CreateCandleRepo(redisCache)
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
-	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
 	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
 	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingRepo, tradingUseCase, matchingUseCase, 100, logger)            //TODO:100?
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, 3000, 500*time.Millisecond)
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, tradingAsyncUseCase, quotationUseCase, candleUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, tradingAsyncUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
-	// go background.RunAsyncTrading(ctx, tradingAsyncUseCase) // TODO: need?
 
 	// TODO: workaround
 	serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
@@ -266,7 +268,14 @@ func main() {
 			serverBeforeAddUserID,
 		),
 	)
-	// r.Methods("GET").Path("/api/v1/history/orders").Handler()
+	r.Methods("GET").Path("/api/v1/history/orders").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetHistoryOrdersEndpoint(orderUserCase),
+			httpDelivery.DecodeGetHistoryOrdersRequest,
+			httpDelivery.EncodeGetHistoryOrdersResponse,
+			serverBeforeAddUserID,
+		),
+	)
 	// r.Methods("GET").Path("/api/v1/history/orders/{orderID}/matches").Handler()
 	r.Methods("POST").Path("/api/v1/orders/{orderID}/cancel").Handler(
 		httptransport.NewServer(

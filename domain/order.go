@@ -75,4 +75,13 @@ type OrderUseCase interface {
 	RemoveOrder(orderID int) error
 	GetOrder(orderID int) (*OrderEntity, error)
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
+	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
+	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
+	SaveHistoryOrdersFromTradingResult(tradingResult *TradingResult)
+}
+
+type OrderRepo interface {
+	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
+	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
+	SaveHistoryOrdersWithIgnore([]*OrderEntity) error
 }

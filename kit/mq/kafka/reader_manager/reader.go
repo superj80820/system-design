@@ -8,6 +8,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
+	"github.com/superj80820/system-design/kit/mq"
 )
 
 type ReaderWay int
@@ -74,7 +75,7 @@ type Reader struct {
 	kafkaReaderProvider func() KafkaReader
 	kafkaReaderHookFn   []func(kafkaReader KafkaReader)
 
-	observers map[*Observer]*Observer
+	observers map[mq.Observer]mq.Observer
 
 	pauseCh chan context.CancelFunc
 	startCh chan context.Context
@@ -94,7 +95,7 @@ func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 
 func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption) *Reader {
 	r := &Reader{
-		observers:     make(map[*Observer]*Observer),
+		observers:     make(map[mq.Observer]mq.Observer),
 		pauseCh:       make(chan context.CancelFunc, 1),
 		startCh:       make(chan context.Context),
 		readyCh:       make(chan struct{}),
@@ -143,8 +144,8 @@ func (r *Reader) Run() {
 					break
 				}
 
-				r.RangeAllObservers(func(_ *Observer, observer *Observer) bool {
-					if err := observer.notify(m.Value, func() error {
+				r.RangeAllObservers(func(_ mq.Observer, observer mq.Observer) bool {
+					if err := observer.Notify(m.Value, func() error {
 						if err := r.kafkaReader.CommitMessages(ctx, m); err != nil {
 							return errors.Wrap(err, "commit message failed")
 						}
@@ -190,7 +191,7 @@ func (r *Reader) StopConsume() bool {
 	}
 }
 
-func (r *Reader) AddObserver(observer *Observer) bool {
+func (r *Reader) AddObserver(observer mq.Observer) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -202,7 +203,7 @@ func (r *Reader) AddObserver(observer *Observer) bool {
 	return true
 }
 
-func (r *Reader) RemoveObserver(observer *Observer) bool {
+func (r *Reader) RemoveObserver(observer mq.Observer) bool {
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
@@ -221,7 +222,7 @@ func (r *Reader) GetObserversLen() int {
 	return len(r.observers)
 }
 
-func (r *Reader) RangeAllObservers(fn func(key *Observer, value *Observer) bool) {
+func (r *Reader) RangeAllObservers(fn func(key mq.Observer, value mq.Observer) bool) {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 

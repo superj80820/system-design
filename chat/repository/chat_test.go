@@ -13,9 +13,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/superj80820/system-design/domain"
 	httpKit "github.com/superj80820/system-design/kit/http"
-	mqKit "github.com/superj80820/system-design/kit/mq"
-	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
-	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
+	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
+	kafkaMQReaderManagerKit "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
+	kafkaMQWriterManagerKit "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
@@ -31,10 +31,10 @@ type ChatSuite struct {
 
 	mongoDB *mongo.Client
 
-	channelMessageTopic     mqKit.MQTopic
-	userMessageTopic        mqKit.MQTopic
-	userStatusTopic         mqKit.MQTopic
-	friendOnlineStatusTopic mqKit.MQTopic
+	channelMessageTopic     kafkaMQKit.MQTopic
+	userMessageTopic        kafkaMQKit.MQTopic
+	userStatusTopic         kafkaMQKit.MQTopic
+	friendOnlineStatusTopic kafkaMQKit.MQTopic
 
 	mongodbContainer *mongodb.MongoDBContainer
 	kafkaContainer   *kafka.KafkaContainer
@@ -114,40 +114,40 @@ func (suite *ChatSuite) SetupSuite() {
 	_, err = kafkaGo.DialLeader(ctx, "tcp", brokerAddress, userStatusTopicName, 0)
 	assert.Nil(suite.T(), err)
 
-	channelMessageTopic, err := mqKit.CreateMQTopic(
+	channelMessageTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		brokerAddress,
 		channelMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		kafkaMQKit.ConsumeByPartitionsBindObserver(kafkaMQReaderManagerKit.LastOffset),
+		kafkaMQKit.ProduceWay(&kafkaMQWriterManagerKit.Hash{}),
 	)
 	assert.Nil(suite.T(), err)
 	suite.channelMessageTopic = channelMessageTopic
 
-	userMessageTopic, err := mqKit.CreateMQTopic(
+	userMessageTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		brokerAddress,
 		userMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		kafkaMQKit.ConsumeByPartitionsBindObserver(kafkaMQReaderManagerKit.LastOffset),
+		kafkaMQKit.ProduceWay(&kafkaMQWriterManagerKit.Hash{}),
 	)
 	assert.Nil(suite.T(), err)
 	suite.userMessageTopic = userMessageTopic
 
-	userStatusTopic, err := mqKit.CreateMQTopic(
+	userStatusTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		brokerAddress,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":user_status", mqReaderManagerKit.LastOffset),
+		kafkaMQKit.ConsumeByGroupID(serviceName+":user_status", false),
 	)
 	assert.Nil(suite.T(), err)
 	suite.userStatusTopic = userStatusTopic
 
-	friendOnlineStatusTopic, err := mqKit.CreateMQTopic( // TODO: need?
+	friendOnlineStatusTopic, err := kafkaMQKit.CreateMQTopic( // TODO: need?
 		context.TODO(),
 		brokerAddress,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":friend_online_status", mqReaderManagerKit.LastOffset),
+		kafkaMQKit.ConsumeByGroupID(serviceName+":friend_online_status", false),
 	)
 	suite.friendOnlineStatusTopic = friendOnlineStatusTopic
 

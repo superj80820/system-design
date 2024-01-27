@@ -11,18 +11,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
-	"github.com/superj80820/system-design/kit/mq/reader_manager/mocks"
+	"github.com/superj80820/system-design/kit/mq"
+	"github.com/superj80820/system-design/kit/mq/kafka/reader_manager/mocks"
 	"golang.org/x/sync/errgroup"
 )
 
 type unitTest struct {
 	suite.Suite
 
-	readerManagerForTestProvider func(...ReaderManagerConfigOption) (ReaderManager, error)
+	readerManagerForTestProvider func(...ReaderManagerConfigOption) (mq.ReaderManager, error)
 
-	readerManager   ReaderManager
+	readerManager   mq.ReaderManager
 	kafkaReaderMock *mocks.KafkaReader
-	observer        *Observer
+	observer        mq.Observer
 	messageCh       chan []byte
 	hookCh          chan bool
 	pauseHookCh     chan bool
@@ -395,7 +396,7 @@ func (u *unitTest) TestAddObserverWithReBalanceNoRaceCondition() {
 		}
 		return nil
 	})
-	removeCh := make(chan *Observer, 10000)
+	removeCh := make(chan mq.Observer, 10000)
 	eg.Go(func() error {
 		for i := 0; i < 1000000; i++ {
 			observerWithDefaultHook := CreateObserver("b"+strconv.Itoa(i), func(message []byte) error {
@@ -435,7 +436,7 @@ type unitTestReaderBySpecPartition struct {
 }
 
 func (u *unitTestReaderBySpecPartition) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 		return CreateSpecPartitionReaderManager(context.Background(), "topic", LastOffset, 1, []string{}, rmco...)
 	}
 }
@@ -445,7 +446,7 @@ type unitTestReaderByGroupID struct {
 }
 
 func (u *unitTestReaderByGroupID) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 		return CreateGroupIDReaderManager(context.Background(), []string{}, "topic", "groupID", rmco...)
 	}
 }
@@ -455,7 +456,7 @@ type unitTestPartitionBindObserverReaderManager struct {
 }
 
 func (u *unitTestPartitionBindObserverReaderManager) SetupSuite() {
-	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (ReaderManager, error) {
+	u.readerManagerForTestProvider = func(rmco ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 		return CreatePartitionBindObserverReaderManager(context.Background(), "url", LastOffset, []string{}, "topic", rmco...)
 	}
 }

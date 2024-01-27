@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/superj80820/system-design/kit/mq"
 )
 
 type specPartitionReaderManager struct {
@@ -14,7 +15,7 @@ type specPartitionReaderManager struct {
 
 type specPartitionReaderManagerOption func(*specPartitionReaderManager)
 
-func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOffset int64, partition int, brokers []string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
+func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOffset int64, partition int, brokers []string, options ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -44,7 +45,7 @@ func CreateSpecPartitionReaderManager(ctx context.Context, topic string, startOf
 	return rm, nil
 }
 
-func (s *specPartitionReaderManager) AddObserver(observer *Observer) bool {
+func (s *specPartitionReaderManager) AddObserver(observer mq.Observer) bool {
 	return s.reader.AddObserver(observer)
 }
 
@@ -58,11 +59,11 @@ func (s *specPartitionReaderManager) IfNoObserversThenStopConsume() {
 	}
 }
 
-func (s *specPartitionReaderManager) RemoveObserverWithHook(observer *Observer) bool {
+func (s *specPartitionReaderManager) RemoveObserverWithHook(observer mq.Observer) bool {
 	if ok := s.reader.RemoveObserver(observer); !ok {
 		return false
 	}
-	go observer.unSubscribeHook()
+	go observer.UnSubscribeHook()
 	return true
 }
 

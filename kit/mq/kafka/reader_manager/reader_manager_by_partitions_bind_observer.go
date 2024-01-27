@@ -9,6 +9,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
+	"github.com/superj80820/system-design/kit/mq"
 	"github.com/superj80820/system-design/kit/util"
 )
 
@@ -108,7 +109,7 @@ func defaultKafkaControllerConnProvider(url string) func() (KafkaConn, error) {
 	}
 }
 
-func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, startOffset int64, brokers []string, topic string, options ...ReaderManagerConfigOption) (ReaderManager, error) {
+func CreatePartitionBindObserverReaderManager(ctx context.Context, url string, startOffset int64, brokers []string, topic string, options ...ReaderManagerConfigOption) (mq.ReaderManager, error) {
 	config := new(readerManagerConfig)
 	for _, option := range options {
 		option(config)
@@ -211,21 +212,21 @@ func (p *partitionBindObserverReaderManager) StopConsume() bool {
 	return true
 }
 
-func (p *partitionBindObserverReaderManager) AddObserver(observer *Observer) bool {
+func (p *partitionBindObserverReaderManager) AddObserver(observer mq.Observer) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	return p.readers[util.GetConsistentHash(observer.key, len(p.topicPartitionInfo))].AddObserver(observer)
+	return p.readers[util.GetConsistentHash(observer.GetKey(), len(p.topicPartitionInfo))].AddObserver(observer)
 }
 
-func (p *partitionBindObserverReaderManager) RemoveObserverWithHook(observer *Observer) bool {
+func (p *partitionBindObserverReaderManager) RemoveObserverWithHook(observer mq.Observer) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if ok := p.readers[util.GetConsistentHash(observer.key, len(p.topicPartitionInfo))].RemoveObserver(observer); !ok {
+	if ok := p.readers[util.GetConsistentHash(observer.GetKey(), len(p.topicPartitionInfo))].RemoveObserver(observer); !ok {
 		return false
 	}
-	go observer.unSubscribeHook()
+	go observer.UnSubscribeHook()
 
 	return true
 }
@@ -283,15 +284,15 @@ func (p *partitionBindObserverReaderManager) balanceObservers() {
 	var observerInfos []struct {
 		originReaderIdx int
 		originReader    *Reader
-		observer        *Observer
+		observer        mq.Observer
 	}
 
 	for idx, reader := range p.readers {
-		reader.RangeAllObservers(func(key, value *Observer) bool {
+		reader.RangeAllObservers(func(key, value mq.Observer) bool {
 			observerInfos = append(observerInfos, struct {
 				originReaderIdx int
 				originReader    *Reader
-				observer        *Observer
+				observer        mq.Observer
 			}{
 				originReaderIdx: idx,
 				originReader:    reader,
@@ -302,7 +303,7 @@ func (p *partitionBindObserverReaderManager) balanceObservers() {
 	}
 
 	for _, observerInfo := range observerInfos {
-		nextIdx := util.GetConsistentHash(observerInfo.observer.key, len(p.topicPartitionInfo))
+		nextIdx := util.GetConsistentHash(observerInfo.observer.GetKey(), len(p.topicPartitionInfo))
 		if observerInfo.originReaderIdx != nextIdx {
 			observerInfo.originReader.RemoveObserver(observerInfo.observer)
 			p.readers[nextIdx].AddObserver(observerInfo.observer)

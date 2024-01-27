@@ -24,37 +24,7 @@ func CreateCandleUseCase(ctx context.Context, candleRepo domain.CandleRepo) doma
 		done:               make(chan struct{}),
 	}
 
-	go func() {
-		ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
-		defer ticker.Stop()
-
-		for range ticker.C {
-			c.tradingResultsLock.Lock()
-			tradingResultsClone := make([]*domain.TradingResult, len(c.tradingResults))
-			copy(tradingResultsClone, c.tradingResults)
-			c.tradingResults = nil
-			c.tradingResultsLock.Unlock()
-
-			for _, tradingResult := range tradingResultsClone {
-				for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-					if err := c.candleRepo.AddData(
-						ctx,
-						matchDetail.TakerOrder.SequenceID,
-						matchDetail.TakerOrder.CreatedAt,
-						matchDetail.Price,
-						matchDetail.Price,
-						matchDetail.Price,
-						matchDetail.Price,
-						matchDetail.Quantity,
-					); err != nil {
-						c.err = errors.Wrap(err, "add data failed")
-						close(c.done)
-						return
-					}
-				}
-			}
-		}
-	}()
+	go c.collectCandleThenSave(ctx)
 
 	return c
 }
@@ -82,4 +52,36 @@ func (c *candleUseCase) Done() <-chan struct{} {
 
 func (c *candleUseCase) Err() error {
 	return c.err
+}
+
+func (c *candleUseCase) collectCandleThenSave(ctx context.Context) {
+	ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
+	defer ticker.Stop()
+
+	for range ticker.C {
+		c.tradingResultsLock.Lock()
+		tradingResultsClone := make([]*domain.TradingResult, len(c.tradingResults))
+		copy(tradingResultsClone, c.tradingResults)
+		c.tradingResults = nil
+		c.tradingResultsLock.Unlock()
+
+		for _, tradingResult := range tradingResultsClone {
+			for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
+				if err := c.candleRepo.AddData(
+					ctx,
+					tradingResult.TradingEvent.SequenceID,
+					matchDetail.TakerOrder.CreatedAt,
+					matchDetail.Price,
+					matchDetail.Price,
+					matchDetail.Price,
+					matchDetail.Price,
+					matchDetail.Quantity,
+				); err != nil {
+					c.err = errors.Wrap(err, "add data failed")
+					close(c.done)
+					return
+				}
+			}
+		}
+	}
 }

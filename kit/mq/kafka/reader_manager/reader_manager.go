@@ -1,20 +1,8 @@
 package readermanager
 
 import (
-	"context"
 	"fmt"
 )
-
-type ReaderManager interface {
-	AddObserver(observer *Observer) bool
-	SyncStartConsume(ctx context.Context) bool
-	StartConsume(ctx context.Context) bool
-	StopConsume() bool
-	RemoveObserverWithHook(observer *Observer) bool
-	IfNoObserversThenStopConsume()
-	GetObserversLen() int
-	Wait()
-}
 
 func defaultErrorHandleFn(err error) {
 	fmt.Println("get error: ", err) // TODO

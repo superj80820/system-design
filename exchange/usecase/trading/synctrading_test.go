@@ -16,7 +16,6 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
 	"github.com/superj80820/system-design/exchange/usecase/matching"
 	"github.com/superj80820/system-design/exchange/usecase/order"
-	"github.com/superj80820/system-design/exchange/usecase/trading/mocks"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -31,14 +30,13 @@ var (
 )
 
 type testSetup struct {
-	tradingUseCase     domain.TradingUseCase
+	syncTradingUseCase domain.SyncTradingUseCase
 	userAssetUseCase   domain.UserAssetUseCase
 	matchingUseCase    domain.MatchingUseCase
 	createTradingEvent func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent
 }
 
 func testSetupFn() (*testSetup, error) {
-	tradingRepo := new(mocks.TradingRepo)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
@@ -50,7 +48,7 @@ func testSetupFn() (*testSetup, error) {
 		return nil, errors.Wrap(err, "get unique id generate failed")
 	}
 
-	tradingUseCase := CreateTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo)
+	syncTradingUseCase := CreateSyncTradingUseCase(context.Background(), matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
 	createTradingEvent := func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent {
 		return &domain.TradingEvent{
 			EventType:  domain.TradingEventCreateOrderType,
@@ -70,7 +68,7 @@ func testSetupFn() (*testSetup, error) {
 	}
 
 	return &testSetup{
-		tradingUseCase:     tradingUseCase,
+		syncTradingUseCase: syncTradingUseCase,
 		userAssetUseCase:   userAssetUseCase,
 		matchingUseCase:    matchingUseCase,
 		createTradingEvent: createTradingEvent,
@@ -88,7 +86,7 @@ func TestTrading(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.ErrorIs(t, err, domain.LessAmountErr)
 			},
 		},
@@ -126,7 +124,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -143,7 +141,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionBuy, decimal.NewFromFloat(2087.6), decimal.NewFromInt(5)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionBuy, decimal.NewFromFloat(2087.6), decimal.NewFromInt(5)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -160,7 +158,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userBID, 2, 3, domain.DirectionSell, decimal.NewFromFloat(2080.9), decimal.NewFromInt(10)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userBID, 2, 3, domain.DirectionSell, decimal.NewFromFloat(2080.9), decimal.NewFromInt(10)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -221,7 +219,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionSell, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionSell, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -238,7 +236,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2085.34), decimal.NewFromInt(3)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2085.34), decimal.NewFromInt(3)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userAID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -255,7 +253,7 @@ func TestTrading(t *testing.T) {
 				assert.Nil(t, err)
 				assert.Equal(t, "-2000000", asset.Available.String())
 
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userBID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2090.34), decimal.NewFromInt(5)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userBID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2090.34), decimal.NewFromInt(5)))
 				assert.Nil(t, err)
 				asset, err = testSetup.userAssetUseCase.GetAsset(userBID, currencyMap["USDT"])
 				assert.Nil(t, err)
@@ -313,29 +311,29 @@ func TestTrading(t *testing.T) {
 				// 2085.01 5
 				// 2082.34 1
 				// 2081.11 7
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 3, 4, domain.DirectionBuy, decimal.NewFromFloat(2085.01), decimal.NewFromInt(5)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 3, 4, domain.DirectionBuy, decimal.NewFromFloat(2085.01), decimal.NewFromInt(5)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 4, 5, domain.DirectionSell, decimal.NewFromFloat(2088.02), decimal.NewFromInt(3)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 4, 5, domain.DirectionSell, decimal.NewFromFloat(2088.02), decimal.NewFromInt(3)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 6, 7, domain.DirectionBuy, decimal.NewFromFloat(2081.11), decimal.NewFromInt(7)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 6, 7, domain.DirectionBuy, decimal.NewFromFloat(2081.11), decimal.NewFromInt(7)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 7, 8, domain.DirectionBuy, decimal.NewFromFloat(2086.0), decimal.NewFromInt(3)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 7, 8, domain.DirectionBuy, decimal.NewFromFloat(2086.0), decimal.NewFromInt(3)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 8, 9, domain.DirectionBuy, decimal.NewFromFloat(2088.33), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 8, 9, domain.DirectionBuy, decimal.NewFromFloat(2088.33), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 9, 10, domain.DirectionSell, decimal.NewFromFloat(2086.54), decimal.NewFromInt(2)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 9, 10, domain.DirectionSell, decimal.NewFromFloat(2086.54), decimal.NewFromInt(2)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 10, 11, domain.DirectionSell, decimal.NewFromFloat(2086.55), decimal.NewFromInt(5)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 10, 11, domain.DirectionSell, decimal.NewFromFloat(2086.55), decimal.NewFromInt(5)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 11, 12, domain.DirectionBuy, decimal.NewFromFloat(2086.55), decimal.NewFromInt(3)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 11, 12, domain.DirectionBuy, decimal.NewFromFloat(2086.55), decimal.NewFromInt(3)))
 				assert.Nil(t, err)
 
 				// test all
@@ -383,29 +381,29 @@ func TestTrading(t *testing.T) {
 
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
 				assert.Nil(t, err)
-				_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)))
+				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 2, 3, domain.DirectionBuy, decimal.NewFromFloat(2087.8), decimal.NewFromInt(1)))
 				assert.Nil(t, err)
 
 				// test get duplicate event
 				{
-					_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
+					_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 2, domain.DirectionSell, decimal.NewFromFloat(2087.6), decimal.NewFromInt(2)))
 					assert.ErrorIs(t, err, domain.ErrGetDuplicateEvent)
 				}
 
 				// test miss event
 				{
-					_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
+					_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 5, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
 					assert.ErrorIs(t, err, domain.ErrMissEvent)
 				}
 
 				// TODO: test think maybe no need previous
 				// test previous id not correct
 				{
-					_, err = testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
+					_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 1, 6, domain.DirectionSell, decimal.NewFromFloat(2087.60), decimal.NewFromInt(6)))
 					assert.ErrorIs(t, err, domain.ErrPreviousIDNotCorrect)
 				}
 			},
@@ -425,6 +423,6 @@ func BenchmarkTrading(b *testing.B) {
 	direction := []domain.DirectionEnum{domain.DirectionBuy, domain.DirectionSell}
 	for i := 0; i < b.N; i++ {
 		randNum := rand.Float64() * 10
-		testSetup.tradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, i, i+1, direction[i%2], decimal.NewFromFloat(randNum), decimal.NewFromInt(3)))
+		testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, i, i+1, direction[i%2], decimal.NewFromFloat(randNum), decimal.NewFromInt(3)))
 	}
 }

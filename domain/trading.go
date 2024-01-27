@@ -65,8 +65,10 @@ type TransferEvent struct {
 }
 
 type TradingRepo interface {
-	SubscribeTradeMessage(notify func(*TradingEvent))
-	SendTradeMessages([]*TradingEvent)
+	SubscribeTradeMessage(key string, notify func(*TradingEvent))
+	SendTradeMessages(context.Context, []*TradingEvent)
+	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
+	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
 	Done() <-chan struct{}
 	Err() error
 	Shutdown()
@@ -85,24 +87,26 @@ type TradingResult struct {
 	MatchResult         *MatchResult
 }
 
-type AsyncTradingUseCase interface {
-	SubscribeTradingResult(fn func(tradingResult *TradingResult))
-	GetLatestOrderBook() *OrderBookEntity
-	Done() <-chan struct{}
-	Shutdown() error
-}
-
 type TradingSequencerUseCase interface {
-	ConsumeTradingEvent(context.Context)
+	ConsumeTradingEventThenProduce(context.Context)
 	ProduceTradingEvent(context.Context, *TradingEvent) error
 	Done() <-chan struct{}
 	Err() error
 }
 
-type TradingUseCase interface {
+type SyncTradingUseCase interface {
 	CreateOrder(messages *TradingEvent) (*MatchResult, error)
 	CancelOrder(tradingEvent *TradingEvent) error
 	Transfer(tradingEvent *TradingEvent) error
+}
+
+type TradingUseCase interface {
+	SyncTradingUseCase
+	SubscribeTradingResult(fn func(tradingResult *TradingResult))
+	GetLatestOrderBook() *OrderBookEntity
+	SaveHistoryMatchDetailsFromTradingResult(*TradingResult)
+	GetHistoryMatchDetails(orderID int) ([]*MatchOrderDetail, error)
+	Done() <-chan struct{}
 	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)

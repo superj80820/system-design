@@ -21,6 +21,13 @@ type MatchingUseCase interface {
 	GetOrderBook(maxDepth int) *OrderBookEntity
 }
 
+type MatchType int
+
+const (
+	MatchTypeTaker MatchType = iota + 1
+	MatchTypeMaker
+)
+
 type MatchResult struct {
 	TakerOrder   *OrderEntity
 	MatchDetails []*MatchDetail
@@ -31,4 +38,20 @@ type MatchDetail struct {
 	Quantity   decimal.Decimal
 	TakerOrder *OrderEntity
 	MakerOrder *OrderEntity
+}
+
+type MatchOrderDetail struct {
+	ID             int
+	SequenceID     int
+	OrderID        int
+	CounterOrderID int
+	UserID         int
+	CounterUserID  int
+
+	Type      MatchType
+	Direction DirectionEnum
+	Price     decimal.Decimal
+	Quantity  decimal.Decimal
+
+	CreatedAt time.Time
 }

@@ -17,6 +17,10 @@ import (
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
 )
 
+type getHistoryOrdersRequest struct {
+	MaxResults int `json:"max_results"`
+}
+
 type createOrderRequest struct {
 	Direction domain.DirectionEnum `json:"direction"`
 	Price     decimal.Decimal      `json:"price"`    // TODO: is safe?
@@ -36,6 +40,8 @@ type getUserOrderRequest struct {
 }
 
 var (
+	EncodeGetHistoryOrdersResponse = httpTransportKit.EncodeJsonResponse
+
 	DecodeGetSecBarRequest  = httpTransportKit.DecodeEmptyRequest
 	EncodeGetSecBarResponse = httpTransportKit.EncodeJsonResponse
 
@@ -115,6 +121,21 @@ func MakeGetUserOrderEndpoint(svc domain.OrderUseCase) endpoint.Endpoint {
 			return nil, errors.Wrap(err, "get order failed")
 		}
 		return order, nil
+	}
+}
+
+func MakeGetHistoryOrdersEndpoint(svc domain.OrderUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		req := request.(getHistoryOrdersRequest)
+		orders, err := svc.GetHistoryOrders(userID, req.MaxResults)
+		if err != nil {
+			return nil, errors.Wrap(err, "get history orders failed")
+		}
+		return orders, nil
 	}
 }
 
@@ -259,4 +280,17 @@ func DecodeGetOrderBookRequest(ctx context.Context, r *http.Request) (interface{
 		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("max depth format error"))
 	}
 	return getOrderBookRequest{MaxDepth: maxDepthInt}, nil
+}
+
+func DecodeGetHistoryOrdersRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	maxResults := 100
+	maxResultsString := r.URL.Query().Get("max_results")
+	if maxResultsString != "" {
+		maxResultsInt, err := strconv.Atoi(maxResultsString)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("max result format error"))
+		}
+		maxResults = maxResultsInt
+	}
+	return getHistoryOrdersRequest{MaxResults: maxResults}, nil
 }
