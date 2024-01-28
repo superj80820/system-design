@@ -23,7 +23,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 
-	mqKit "github.com/superj80820/system-design/kit/mq"
+	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
+	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
@@ -45,8 +46,10 @@ import (
 )
 
 const (
-	KAFKA_SEQUENCE_TOPIC = "SEQUENCE"
-	SERVICE_NAME         = "exchange-service"
+	KAFKA_SEQUENCE_TOPIC       = "SEQUENCE"
+	KAFKA_TRADING_EVENT_TOPIC  = "TRADING_EVENT"
+	KAFKA_TRADING_RESULT_TOPIC = "TRADING_RESULT"
+	SERVICE_NAME               = "exchange-service"
 )
 
 func main() {
@@ -75,6 +78,26 @@ func main() {
 		panic(err)
 	}
 
+	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/mysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	candleSchemaSQL, err := os.ReadFile("../../exchange/repository/candle/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	sequencerSchemaSQL, err := os.ReadFile("../../exchange/repository/sequencer/kafkaandmysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	err = os.WriteFile("./schema.sql", []byte(string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
+	if err != nil {
+		panic(err)
+	}
 	mysqlDBName := "db"
 	mysqlDBUsername := "root"
 	mysqlDBPassword := "password"
@@ -83,10 +106,12 @@ func main() {
 		mysql.WithDatabase(mysqlDBName),
 		mysql.WithUsername(mysqlDBUsername),
 		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(
-			filepath.Join(".", "schema.sql"), //TODO: workaround
-		),
+		mysql.WithScripts(filepath.Join(".", "schema.sql")),
 	)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Remove("./schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -120,16 +145,18 @@ func main() {
 		panic(err)
 	}
 
-	sequenceMessageTopic, err := mqKit.CreateMQTopic(
+	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
 		ctx,
 		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
 		KAFKA_SEQUENCE_TOPIC,
-		mqKit.ConsumeByGroupID(SERVICE_NAME, true),
-		mqKit.CreateTopic(1, 1),
+		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
+		kafkaMQKit.CreateTopic(1, 1),
 	)
 	if err != nil {
 		panic(err)
 	}
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
 
 	redisContainer, err := redis.RunContainer(ctx,
 		testcontainers.WithImage("docker.io/redis:7"),
@@ -153,27 +180,27 @@ func main() {
 		panic(err)
 	}
 
-	tradingRepo := tradingMySQLRepo.CreateTradingRepo(mysqlDB)
+	tradingRepo := tradingMySQLRepo.CreateTradingRepo(ctx, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
-	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
 	if err != nil {
 		panic(err)
 	}
 	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB)
-	candleRepo := candleRepoRedis.CreateCandleRepo(redisCache)
+	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache)
 
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	quotationUseCase := quotation.CreateQuotationUseCase(100) // TODO: 100?
-	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
-	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
+	quotationUseCase := quotation.CreateQuotationUseCase(tradingRepo, 100) // TODO: 100?
+	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, tradingRepo, candleRepo)
+	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
-	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingRepo, tradingUseCase, matchingUseCase, 100, logger)            //TODO:100?
+	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, 3000, 500*time.Millisecond)
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, tradingAsyncUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -276,7 +303,14 @@ func main() {
 			serverBeforeAddUserID,
 		),
 	)
-	// r.Methods("GET").Path("/api/v1/history/orders/{orderID}/matches").Handler()
+	r.Methods("GET").Path("/api/v1/history/orders/{orderID}/matches").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetHistoryMatchOrderDetailsEndpoint(tradingUseCase),
+			httpDelivery.DecodeGetHistoryMatchOrderDetailsRequest,
+			httpDelivery.EncodeGetHistoryMatchOrderDetailsResponse,
+			serverBeforeAddUserID,
+		),
+	)
 	r.Methods("POST").Path("/api/v1/orders/{orderID}/cancel").Handler(
 		httptransport.NewServer(
 			httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase),

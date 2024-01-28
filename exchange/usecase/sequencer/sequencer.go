@@ -183,7 +183,7 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 					return errors.Wrap(err, "commit latest message failed")
 				}
 
-				t.tradingRepo.SendTradeMessages(tradingEventClone)
+				t.tradingRepo.SendTradeEvent(ctx, tradingEventClone)
 
 				return nil
 			} else if err != nil {
@@ -194,7 +194,7 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 				return errors.Wrap(err, "commit latest message failed")
 			}
 
-			t.tradingRepo.SendTradeMessages(tradingEventClone)
+			t.tradingRepo.SendTradeEvent(ctx, tradingEventClone)
 
 			return nil
 		}

@@ -77,7 +77,7 @@ type OrderUseCase interface {
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
-	SaveHistoryOrdersFromTradingResult(tradingResult *TradingResult)
+	ConsumeTradingResult(key string)
 }
 
 type OrderRepo interface {

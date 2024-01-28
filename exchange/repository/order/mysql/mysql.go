@@ -1,6 +1,8 @@
 package mysql
 
 import (
+	"fmt"
+
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	ormKit "github.com/superj80820/system-design/kit/orm"
@@ -27,7 +29,10 @@ func CreateOrderRepo(orm *ormKit.DB) domain.OrderRepo {
 
 func (o *orderRepo) GetHistoryOrder(userID int, orderID int) (*domain.OrderEntity, error) {
 	var order orderEntityDB
-	if err := o.orm.Where("id = ?", orderID).First(&order).Error; err != nil {
+	err := o.orm.Where("id = ?", orderID).First(&order).Error
+	if mySQLErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mySQLErr, ormKit.ErrRecordNotFound) {
+		return nil, errors.Wrap(domain.ErrNoOrder, fmt.Sprintf("error call stack: %+v", err))
+	} else if err != nil {
 		return nil, errors.Wrap(err, "query order failed")
 	}
 	if userID != order.UserID {

@@ -14,15 +14,38 @@ import (
 )
 
 type tradingRepo struct {
-	orm     *ormKit.DB
-	mqTopic mqKit.MQTopic
-	err     error
-	doneCh  chan struct{}
-	cancel  context.CancelFunc
+	orm                  *ormKit.DB
+	tradingEventMQTopic  mqKit.MQTopic
+	tradingResultMQTopic mqKit.MQTopic
+	err                  error
+	doneCh               chan struct{}
+	cancel               context.CancelFunc
 }
 
 type matchOrderDetailDB struct {
 	*domain.MatchOrderDetail
+}
+
+func (*matchOrderDetailDB) TableName() string {
+	return "match_details"
+}
+
+type tradingResultStruct struct {
+	*domain.TradingResult
+}
+
+var _ mq.Message = (*tradingResultStruct)(nil)
+
+func (t *tradingResultStruct) GetKey() string {
+	return strconv.FormatInt(t.TradingEvent.ReferenceID, 10)
+}
+
+func (t *tradingResultStruct) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(*t)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return marshalData, nil
 }
 
 type tradingEventStruct struct {
@@ -43,15 +66,36 @@ func (t *tradingEventStruct) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func CreateTradingRepo(ctx context.Context, orm *ormKit.DB, mqTopic mqKit.MQTopic) domain.TradingRepo {
+func CreateTradingRepo(ctx context.Context, orm *ormKit.DB, tradingEventMQTopic, tradingResultMQTopic mqKit.MQTopic) domain.TradingRepo {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &tradingRepo{
-		orm:     orm,
-		mqTopic: mqTopic,
-		doneCh:  make(chan struct{}),
-		cancel:  cancel,
+		orm:                  orm,
+		tradingEventMQTopic:  tradingEventMQTopic,
+		tradingResultMQTopic: tradingResultMQTopic,
+		doneCh:               make(chan struct{}),
+		cancel:               cancel,
 	}
+}
+
+func (t *tradingRepo) SendTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	if err := t.tradingResultMQTopic.Produce(ctx, &tradingResultStruct{
+		TradingResult: tradingResult,
+	}); err != nil {
+		return errors.Wrap(err, "produce trading result failed")
+	}
+	return nil
+}
+
+func (t *tradingRepo) SubscribeTradingResult(key string, notify func(*domain.TradingResult)) {
+	t.tradingResultMQTopic.Subscribe(key, func(message []byte) error {
+		var tradingResult domain.TradingResult
+		if err := json.Unmarshal(message, &tradingResult); err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		notify(&tradingResult)
+		return nil
+	})
 }
 
 func (t *tradingRepo) GetMatchingDetails(orderID int) ([]*domain.MatchOrderDetail, error) {
@@ -75,9 +119,9 @@ func (t *tradingRepo) SaveMatchingDetailsWithIgnore(ctx context.Context, matchOr
 	return nil
 }
 
-func (t *tradingRepo) SendTradeMessages(ctx context.Context, tradingEvents []*domain.TradingEvent) {
+func (t *tradingRepo) SendTradeEvent(ctx context.Context, tradingEvents []*domain.TradingEvent) {
 	for _, tradingEvent := range tradingEvents {
-		t.mqTopic.Produce(ctx, &tradingEventStruct{
+		t.tradingEventMQTopic.Produce(ctx, &tradingEventStruct{
 			TradingEvent: tradingEvent,
 		})
 	}
@@ -88,8 +132,8 @@ func (t *tradingRepo) Shutdown() {
 	<-t.doneCh
 }
 
-func (t *tradingRepo) SubscribeTradeMessage(key string, notify func(*domain.TradingEvent)) {
-	t.mqTopic.Subscribe(key, func(message []byte) error {
+func (t *tradingRepo) SubscribeTradeEvent(key string, notify func(*domain.TradingEvent)) {
+	t.tradingEventMQTopic.Subscribe(key, func(message []byte) error {
 		var tradingEvent domain.TradingEvent
 		if err := json.Unmarshal(message, &tradingEvent); err != nil {
 			return errors.Wrap(err, "unmarshal failed")

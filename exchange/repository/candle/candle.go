@@ -2,13 +2,16 @@ package candle
 
 import (
 	"context"
+	"encoding/json"
 	"strconv"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 const (
@@ -19,6 +22,7 @@ const (
 )
 
 // TODO: performance
+// TODO: fix bug(maybe?)
 const addScript = `
 --[[
     根据sequenceId和已合并的tick更新Bar数据
@@ -122,12 +126,52 @@ const addScript = `
     return '{}'      
 `
 
-type candleRepo struct {
-	redisInstance *redisKit.Cache
+var (
+	errBarIsNull                    = errors.New("bar is null")
+	errSequenceIDLessLastSequenceID = errors.New("error sequence id less last sequence id")
+)
+
+type secCandleBar struct {
+	*domain.CandleBar
 }
 
-func CreateCandleRepo(redisInstance *redisKit.Cache) domain.CandleRepo {
+func (secCandleBar) TableName() string {
+	return "sec_bars"
+}
+
+type minCandleBar struct {
+	*domain.CandleBar
+}
+
+func (minCandleBar) TableName() string {
+	return "min_bars"
+}
+
+type hourCandleBar struct {
+	*domain.CandleBar
+}
+
+func (hourCandleBar) TableName() string {
+	return "hour_bars"
+}
+
+type dayCandleBar struct {
+	*domain.CandleBar
+}
+
+func (dayCandleBar) TableName() string {
+	return "day_bars"
+}
+
+type candleRepo struct {
+	orm            *ormKit.DB
+	redisInstance  *redisKit.Cache
+	lastSequenceID int
+}
+
+func CreateCandleRepo(orm *ormKit.DB, redisInstance *redisKit.Cache) domain.CandleRepo {
 	return &candleRepo{
+		orm:           orm,
 		redisInstance: redisInstance,
 	}
 }
@@ -136,18 +180,37 @@ func (c *candleRepo) AddData(
 	ctx context.Context,
 	sequenceID int,
 	createdAt time.Time,
-	openPrice decimal.Decimal,
-	highPrice decimal.Decimal,
-	lowPrice decimal.Decimal,
-	closePrice decimal.Decimal,
-	quantity decimal.Decimal,
+	matchDetails []*domain.MatchDetail,
 ) error {
+	if err := c.checkEventSequence(sequenceID); err != nil {
+		return errors.Wrap(err, "check event sequence failed")
+	}
+
+	openPrice := decimal.NewFromInt(0)
+	closePrice := decimal.NewFromInt(0)
+	highPrice := decimal.NewFromInt(0)
+	lowPrice := decimal.NewFromInt(0)
+	quantity := decimal.NewFromInt(0)
+	for _, matchDetail := range matchDetails {
+		if openPrice.Equal(decimal.Zero) {
+			openPrice = matchDetail.Price
+			highPrice = matchDetail.Price
+			lowPrice = matchDetail.Price
+		} else {
+			highPrice = decimal.Max(highPrice, matchDetail.Price)
+			lowPrice = decimal.Min(lowPrice, matchDetail.Price)
+		}
+		closePrice = matchDetail.Price
+		quantity.Add(matchDetail.Quantity)
+	}
+
 	createdAtTimestamp := createdAt.UnixMilli()
 	secStartTime := createdAtTimestamp / 1000 * 1000
 	minStartTime := createdAtTimestamp / 1000 / 60 * 1000 * 60
 	hourStartTime := createdAtTimestamp / 1000 / 3600 * 1000 * 3600
 	dayStartTime := createdAtTimestamp / 1000 / 3600 / 24 * 1000 * 3600 * 24
 
+	// TODO: maybe need consistent
 	cmd := c.redisInstance.RunLua(
 		ctx,
 		addScript,
@@ -158,14 +221,152 @@ func (c *candleRepo) AddData(
 		strconv.FormatInt(hourStartTime, 10),
 		strconv.FormatInt(dayStartTime, 10),
 		openPrice.String(),
+		closePrice.String(),
 		highPrice.String(),
 		lowPrice.String(),
-		closePrice.String(),
 		quantity.String(),
 	)
 	if err := cmd.Err(); err != nil {
 		return errors.Wrap(err, "run lua failed")
 	}
+	result, err := cmd.Result()
+	if err != nil {
+		return errors.Wrap(err, "get result failed")
+	}
+	resultString, ok := result.(string)
+	if !ok {
+		return errors.Wrap(err, "cast to string failed")
+	}
+	resultMap := make(map[string][]decimal.Decimal)
+	if err := json.Unmarshal([]byte(resultString), &resultMap); err != nil {
+		return errors.Wrap(err, "unmarshal failed")
+	}
+
+	if err := c.SaveSecBar(resultMap["SEC"]); errors.Is(err, errBarIsNull) { //TODO: 'SEC' to enum
+		// do nothing
+	} else if err != nil {
+		return errors.Wrap(err, "save sec bar failed")
+	}
+	if err := c.SaveSecBar(resultMap["MIN"]); errors.Is(err, errBarIsNull) { //TODO: 'MIN' to enum
+		// do nothing
+	} else if err != nil {
+		return errors.Wrap(err, "save sec bar failed")
+	}
+	if err := c.SaveSecBar(resultMap["HOUR"]); errors.Is(err, errBarIsNull) { //TODO: 'HOUR' to enum
+		// do nothing
+	} else if err != nil {
+		return errors.Wrap(err, "save sec bar failed")
+	}
+	if err := c.SaveSecBar(resultMap["DAY"]); errors.Is(err, errBarIsNull) { //TODO: 'DAY' to enum
+		// do nothing
+	} else if err != nil {
+		return errors.Wrap(err, "save sec bar failed")
+	}
+
+	return nil
+}
+
+func (c *candleRepo) SaveSecBar(bar []decimal.Decimal) error {
+	if len(bar) == 0 {
+		return errBarIsNull
+	}
+	startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
+	if err != nil {
+		return errors.Wrap(err, "int64 to int failed")
+	}
+
+	if err := c.orm.Create(
+		secCandleBar{
+			CandleBar: &domain.CandleBar{
+				StartTime:  startTime,
+				ClosePrice: bar[1],
+				HighPrice:  bar[2],
+				LowPrice:   bar[3],
+				OpenPrice:  bar[4],
+				Quantity:   bar[5],
+			},
+		}).Error; err != nil {
+		return errors.Wrap(err, "create bar to db failed")
+	}
+
+	return nil
+}
+
+func (c *candleRepo) SaveMinBar(bar []decimal.Decimal) error {
+	if len(bar) == 0 {
+		return errBarIsNull
+	}
+	startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
+	if err != nil {
+		return errors.Wrap(err, "int64 to int failed")
+	}
+
+	if err := c.orm.Create(
+		minCandleBar{
+			CandleBar: &domain.CandleBar{
+				StartTime:  startTime,
+				ClosePrice: bar[1],
+				HighPrice:  bar[2],
+				LowPrice:   bar[3],
+				OpenPrice:  bar[4],
+				Quantity:   bar[5],
+			},
+		}).Error; err != nil {
+		return errors.Wrap(err, "create bar to db failed")
+	}
+
+	return nil
+}
+
+func (c *candleRepo) SaveHourBar(bar []decimal.Decimal) error {
+	if len(bar) == 0 {
+		return errBarIsNull
+	}
+	startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
+	if err != nil {
+		return errors.Wrap(err, "int64 to int failed")
+	}
+
+	if err := c.orm.Create(
+		hourCandleBar{
+			CandleBar: &domain.CandleBar{
+				StartTime:  startTime,
+				ClosePrice: bar[1],
+				HighPrice:  bar[2],
+				LowPrice:   bar[3],
+				OpenPrice:  bar[4],
+				Quantity:   bar[5],
+			},
+		}).Error; err != nil {
+		return errors.Wrap(err, "create bar to db failed")
+	}
+
+	return nil
+}
+
+func (c *candleRepo) SaveDayBar(bar []decimal.Decimal) error {
+	if len(bar) == 0 {
+		return errBarIsNull
+	}
+	startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
+	if err != nil {
+		return errors.Wrap(err, "int64 to int failed")
+	}
+
+	if err := c.orm.Create(
+		dayCandleBar{
+			CandleBar: &domain.CandleBar{
+				StartTime:  startTime,
+				ClosePrice: bar[1],
+				HighPrice:  bar[2],
+				LowPrice:   bar[3],
+				OpenPrice:  bar[4],
+				Quantity:   bar[5],
+			},
+		}).Error; err != nil {
+		return errors.Wrap(err, "create bar to db failed")
+	}
+
 	return nil
 }
 
@@ -189,4 +390,12 @@ func (c *candleRepo) GetBar(ctx context.Context, timeType domain.CandleTimeType,
 		return nil, errors.Wrap(err, "get bar failed")
 	}
 	return result, nil
+}
+
+func (c *candleRepo) checkEventSequence(sequenceID int) error {
+	if sequenceID <= c.lastSequenceID {
+		return errSequenceIDLessLastSequenceID
+	}
+	c.lastSequenceID = sequenceID
+	return nil
 }

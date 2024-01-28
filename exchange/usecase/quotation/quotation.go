@@ -10,6 +10,7 @@ import (
 )
 
 type quotationUseCase struct {
+	tradingRepo        domain.TradingRepo
 	tradingResults     []*domain.TradingResult
 	tradingResultsLock *sync.Mutex
 	tickLock           *sync.Mutex
@@ -29,8 +30,9 @@ func (t *tick) String() string {
 	return "[" + strconv.FormatInt(t.CreatedAt.UnixMilli(), 10) + "," + direction + "," + t.Price.String() + "," + t.Quantity.String() + "]"
 }
 
-func CreateQuotationUseCase(cap int) domain.QuotationUseCase {
+func CreateQuotationUseCase(tradingRepo domain.TradingRepo, cap int) domain.QuotationUseCase {
 	q := &quotationUseCase{
+		tradingRepo:        tradingRepo,
 		tickList:           list.New(),
 		cap:                cap,
 		tradingResultsLock: new(sync.Mutex),
@@ -42,13 +44,15 @@ func CreateQuotationUseCase(cap int) domain.QuotationUseCase {
 	return q
 }
 
-func (q *quotationUseCase) AddTick(tradingResult *domain.TradingResult) {
-	q.tradingResultsLock.Lock()
-	defer q.tradingResultsLock.Unlock()
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return
-	}
-	q.tradingResults = append(q.tradingResults, tradingResult)
+func (q *quotationUseCase) ConsumeTradingResult(key string) {
+	q.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
+		q.tradingResultsLock.Lock()
+		defer q.tradingResultsLock.Unlock()
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return
+		}
+		q.tradingResults = append(q.tradingResults, tradingResult)
+	})
 }
 
 func (q *quotationUseCase) GetTicks() ([]string, error) {

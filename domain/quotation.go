@@ -7,7 +7,7 @@ import (
 )
 
 type QuotationUseCase interface {
-	AddTick(*TradingResult)
+	ConsumeTradingResult(key string)
 	GetTicks() ([]string, error)
 }
 

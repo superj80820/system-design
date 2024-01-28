@@ -39,7 +39,13 @@ type getUserOrderRequest struct {
 	OrderID int
 }
 
+type getHistoryMatchOrderDetailsRequest struct {
+	OrderID int
+}
+
 var (
+	EncodeGetHistoryMatchOrderDetailsResponse = httpTransportKit.EncodeJsonResponse
+
 	EncodeGetHistoryOrdersResponse = httpTransportKit.EncodeJsonResponse
 
 	DecodeGetSecBarRequest  = httpTransportKit.DecodeEmptyRequest
@@ -121,6 +127,21 @@ func MakeGetUserOrderEndpoint(svc domain.OrderUseCase) endpoint.Endpoint {
 			return nil, errors.Wrap(err, "get order failed")
 		}
 		return order, nil
+	}
+}
+
+func MakeGetHistoryMatchOrderDetailsEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		req := request.(getHistoryMatchOrderDetailsRequest)
+		historyMatchDetails, err := svc.GetHistoryMatchDetails(userID, req.OrderID)
+		if err != nil {
+			return nil, errors.Wrap(err, "get history match details failed")
+		}
+		return historyMatchDetails, nil
 	}
 }
 
@@ -293,4 +314,17 @@ func DecodeGetHistoryOrdersRequest(ctx context.Context, r *http.Request) (interf
 		maxResults = maxResultsInt
 	}
 	return getHistoryOrdersRequest{MaxResults: maxResults}, nil
+}
+
+func DecodeGetHistoryMatchOrderDetailsRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	vars := mux.Vars(r)
+	orderIDString, ok := vars["orderID"]
+	if !ok {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	orderID, err := strconv.Atoi(orderIDString)
+	if err != nil {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get order id failed"))
+	}
+	return getHistoryMatchOrderDetailsRequest{OrderID: orderID}, nil
 }

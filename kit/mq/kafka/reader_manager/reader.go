@@ -145,7 +145,7 @@ func (r *Reader) Run() {
 				}
 
 				r.RangeAllObservers(func(_ mq.Observer, observer mq.Observer) bool {
-					if err := observer.Notify(m.Value, func() error {
+					if err := observer.NotifyWithManualCommit(m.Value, func() error {
 						if err := r.kafkaReader.CommitMessages(ctx, m); err != nil {
 							return errors.Wrap(err, "commit message failed")
 						}

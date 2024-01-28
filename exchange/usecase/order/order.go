@@ -15,6 +15,7 @@ import (
 type orderUseCase struct {
 	assetUseCase domain.UserAssetUseCase
 	orderRepo    domain.OrderRepo
+	tradingRepo  domain.TradingRepo
 
 	baseCurrencyID  int
 	quoteCurrencyID int
@@ -29,11 +30,13 @@ type orderUseCase struct {
 
 func CreateOrderUseCase(
 	assetUseCase domain.UserAssetUseCase,
+	tradingRepo domain.TradingRepo,
 	orderRepo domain.OrderRepo,
 	baseCurrencyID,
 	quoteCurrencyID int,
 ) domain.OrderUseCase {
 	o := &orderUseCase{
+		tradingRepo:                 tradingRepo,
 		assetUseCase:                assetUseCase,
 		orderRepo:                   orderRepo,
 		baseCurrencyID:              baseCurrencyID,
@@ -121,34 +124,36 @@ func (o *orderUseCase) RemoveOrder(orderID int) error {
 	return nil
 }
 
-func (o *orderUseCase) SaveHistoryOrdersFromTradingResult(tradingResult *domain.TradingResult) {
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return
-	}
-	var closedOrders []*domain.OrderEntity
-	if tradingResult.MatchResult.TakerOrder.Status.IsFinalStatus() {
-		closedOrders = append(closedOrders, tradingResult.MatchResult.TakerOrder)
-	}
-	for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-		if matchDetail.MakerOrder.Status.IsFinalStatus() {
-			closedOrders = append(closedOrders, matchDetail.MakerOrder)
+func (o *orderUseCase) ConsumeTradingResult(key string) {
+	o.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return
 		}
-	}
-	if len(closedOrders) == 0 {
-		return
-	}
-	sort.Slice(closedOrders, func(i, j int) bool { // TODO: maybe no need
-		return closedOrders[i].SequenceID > closedOrders[j].SequenceID
+		var closedOrders []*domain.OrderEntity
+		if tradingResult.MatchResult.TakerOrder.Status.IsFinalStatus() {
+			closedOrders = append(closedOrders, tradingResult.MatchResult.TakerOrder)
+		}
+		for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
+			if matchDetail.MakerOrder.Status.IsFinalStatus() {
+				closedOrders = append(closedOrders, matchDetail.MakerOrder)
+			}
+		}
+		if len(closedOrders) == 0 {
+			return
+		}
+		sort.Slice(closedOrders, func(i, j int) bool { // TODO: maybe no need
+			return closedOrders[i].SequenceID > closedOrders[j].SequenceID
+		})
+		o.historyClosedOrdersLock.Lock()
+		for _, closedOrder := range closedOrders { // TODO: maybe use in one for-loop
+			o.historyClosedOrders = append(o.historyClosedOrders, closedOrder)
+		}
+		historyClosedOrdersLength := len(o.historyClosedOrders)
+		o.historyClosedOrdersLock.Unlock()
+		if historyClosedOrdersLength >= 1000 {
+			o.isHistoryClosedOrdersFullCh <- struct{}{}
+		}
 	})
-	o.historyClosedOrdersLock.Lock()
-	for _, closedOrder := range closedOrders { // TODO: maybe use in one for-loop
-		o.historyClosedOrders = append(o.historyClosedOrders, closedOrder)
-	}
-	historyClosedOrdersLength := len(o.historyClosedOrders)
-	o.historyClosedOrdersLock.Unlock()
-	if historyClosedOrdersLength >= 1000 {
-		o.isHistoryClosedOrdersFullCh <- struct{}{}
-	}
 }
 
 func (o *orderUseCase) GetHistoryOrder(userID int, orderID int) (*domain.OrderEntity, error) {

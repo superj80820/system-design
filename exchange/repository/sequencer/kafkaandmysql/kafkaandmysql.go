@@ -99,7 +99,7 @@ func (t *tradingSequencerRepo) SendTradeSequenceMessages(ctx context.Context, tr
 }
 
 func (t *tradingSequencerRepo) SaveEvent(sequencerEvent *domain.SequencerEvent) error {
-	if err := t.orm.Create(sequencerEventDBEntity{
+	if err := t.orm.Create(&sequencerEventDBEntity{
 		SequencerEvent: sequencerEvent,
 	}).Error; err != nil {
 		return errors.Wrap(err, "create trading event failed")

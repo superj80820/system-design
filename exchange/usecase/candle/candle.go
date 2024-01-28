@@ -12,13 +12,15 @@ import (
 type candleUseCase struct {
 	tradingResults     []*domain.TradingResult
 	tradingResultsLock *sync.Mutex
+	tradingRepo        domain.TradingRepo
 	candleRepo         domain.CandleRepo
 	done               chan struct{}
 	err                error
 }
 
-func CreateCandleUseCase(ctx context.Context, candleRepo domain.CandleRepo) domain.CandleUseCase {
+func CreateCandleUseCase(ctx context.Context, tradingRepo domain.TradingRepo, candleRepo domain.CandleRepo) domain.CandleUseCase {
 	c := &candleUseCase{
+		tradingRepo:        tradingRepo,
 		candleRepo:         candleRepo,
 		tradingResultsLock: new(sync.Mutex),
 		done:               make(chan struct{}),
@@ -29,13 +31,15 @@ func CreateCandleUseCase(ctx context.Context, candleRepo domain.CandleRepo) doma
 	return c
 }
 
-func (c *candleUseCase) AddData(tradingResult *domain.TradingResult) {
-	c.tradingResultsLock.Lock()
-	defer c.tradingResultsLock.Unlock()
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return
-	}
-	c.tradingResults = append(c.tradingResults, tradingResult)
+func (c *candleUseCase) ConsumeTradingResult(key string) {
+	c.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
+		c.tradingResultsLock.Lock()
+		defer c.tradingResultsLock.Unlock()
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return
+		}
+		c.tradingResults = append(c.tradingResults, tradingResult)
+	})
 }
 
 func (c *candleUseCase) GetBar(ctx context.Context, timeType domain.CandleTimeType, min, max string) ([]string, error) {
@@ -66,21 +70,15 @@ func (c *candleUseCase) collectCandleThenSave(ctx context.Context) {
 		c.tradingResultsLock.Unlock()
 
 		for _, tradingResult := range tradingResultsClone {
-			for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-				if err := c.candleRepo.AddData(
-					ctx,
-					tradingResult.TradingEvent.SequenceID,
-					matchDetail.TakerOrder.CreatedAt,
-					matchDetail.Price,
-					matchDetail.Price,
-					matchDetail.Price,
-					matchDetail.Price,
-					matchDetail.Quantity,
-				); err != nil {
-					c.err = errors.Wrap(err, "add data failed")
-					close(c.done)
-					return
-				}
+			if err := c.candleRepo.AddData(
+				ctx,
+				tradingResult.TradingEvent.SequenceID,
+				tradingResult.TradingEvent.CreatedAt,
+				tradingResult.MatchResult.MatchDetails,
+			); err != nil {
+				c.err = errors.Wrap(err, "add data failed")
+				close(c.done)
+				return
 			}
 		}
 	}

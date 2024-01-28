@@ -7,11 +7,6 @@ import (
 	"github.com/superj80820/system-design/domain"
 )
 
-func RunAsyncTrading(ctx context.Context, asyncTradingUseCase domain.AsyncTradingUseCase) error {
-	<-asyncTradingUseCase.Done()
-	return nil // TODO: error
-}
-
 func RunAsyncTradingSequencer(
 	ctx context.Context,
 	tradingSequencerUseCase domain.TradingSequencerUseCase,
@@ -21,13 +16,15 @@ func RunAsyncTradingSequencer(
 	tradingUseCase domain.TradingUseCase,
 ) error {
 	tradingSequencerUseCase.ConsumeTradingEventThenProduce(ctx)
-	tradingUseCase.SubscribeTradingResult(quotationUseCase.AddTick)
-	tradingUseCase.SubscribeTradingResult(candleUseCase.AddData) // TODO: error handle
-	tradingUseCase.SubscribeTradingResult(orderUseCase.SaveHistoryOrdersFromTradingResult)
-	tradingUseCase.SubscribeTradingResult(tradingUseCase.SaveHistoryMatchDetailsFromTradingResult)
+	quotationUseCase.ConsumeTradingResult("global-quotation")
+	candleUseCase.ConsumeTradingResult("global-candle") // TODO: error handle
+	orderUseCase.ConsumeTradingResult("global-order")
+	tradingUseCase.ConsumeTradingResult("global-trading")
 
 	select {
 	case <-tradingSequencerUseCase.Done():
 		return errors.Wrap(tradingSequencerUseCase.Err(), "trading sequencer use case get error")
+	case <-candleUseCase.Done():
+		return errors.Wrap(candleUseCase.Err(), "candle use case get error")
 	}
 }

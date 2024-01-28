@@ -23,7 +23,7 @@ type TradingEvent struct {
 	EventType  TradingEventTypeEnum
 	SequenceID int
 	PreviousID int
-	UniqueID   int
+	UniqueID   int // TODO: need?
 
 	OrderRequestEvent *OrderRequestEvent
 	OrderCancelEvent  *OrderCancelEvent
@@ -65,10 +65,15 @@ type TransferEvent struct {
 }
 
 type TradingRepo interface {
-	SubscribeTradeMessage(key string, notify func(*TradingEvent))
-	SendTradeMessages(context.Context, []*TradingEvent)
+	SubscribeTradeEvent(key string, notify func(*TradingEvent))
+	SendTradeEvent(context.Context, []*TradingEvent)
+
+	SubscribeTradingResult(key string, notify func(*TradingResult))
+	SendTradingResult(context.Context, *TradingResult) error
+
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
+
 	Done() <-chan struct{}
 	Err() error
 	Shutdown()
@@ -102,10 +107,9 @@ type SyncTradingUseCase interface {
 
 type TradingUseCase interface {
 	SyncTradingUseCase
-	SubscribeTradingResult(fn func(tradingResult *TradingResult))
 	GetLatestOrderBook() *OrderBookEntity
-	SaveHistoryMatchDetailsFromTradingResult(*TradingResult)
-	GetHistoryMatchDetails(orderID int) ([]*MatchOrderDetail, error)
+	ConsumeTradingResult(key string)
+	GetHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
 	Done() <-chan struct{}
 	Shutdown() error
 	// TODO

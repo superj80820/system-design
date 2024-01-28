@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/domain"
 	mqKit "github.com/superj80820/system-design/kit/mq"
-	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
+	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
@@ -38,12 +38,12 @@ func testSetupFn(t *testing.T) *testSetup {
 	assert.Nil(t, err)
 	kafkaPort, err := kafkaContainer.MappedPort(ctx, "9093") // TODO: is correct?
 	assert.Nil(t, err)
-	sequenceMessageTopic, err := mqKit.CreateMQTopic(
+	sequenceMessageTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
 		"SEQUENCE",
-		mqKit.ConsumeByGroupID("test", mqReaderManagerKit.LastOffset),
-		mqKit.CreateTopic(1, 1),
+		kafkaMQKit.ConsumeByGroupID("test", true),
+		kafkaMQKit.CreateTopic(1, 1),
 	)
 	assert.Nil(t, err)
 
@@ -55,7 +55,7 @@ func testSetupFn(t *testing.T) *testSetup {
 		mysql.WithDatabase(mysqlDBName),
 		mysql.WithUsername(mysqlDBUsername),
 		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join("./../..", "schema.sql")),
+		mysql.WithScripts(filepath.Join(".", "schema.sql")),
 	)
 	assert.Nil(t, err)
 	mysqlDBHost, err := mysqlContainer.Host(ctx)
@@ -104,9 +104,21 @@ func TestTradingSequencerRepo(t *testing.T) {
 				testSetup := testSetupFn(t)
 				defer testSetup.teardown()
 
-				testSetup.tradingSequencerRepo.SaveEvent(1, 0, &domain.TradingEvent{})
-				testSetup.tradingSequencerRepo.SaveEvent(2, 1, &domain.TradingEvent{})
-				testSetup.tradingSequencerRepo.SaveEvent(3, 2, &domain.TradingEvent{})
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 1,
+					PreviousID:  0,
+					SequenceID:  1,
+				}))
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 2,
+					PreviousID:  1,
+					SequenceID:  2,
+				}))
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 3,
+					PreviousID:  2,
+					SequenceID:  3,
+				}))
 				maxSequenceID, err := testSetup.tradingSequencerRepo.GetMaxSequenceID()
 				assert.Nil(t, err)
 				assert.Equal(t, uint64(3), maxSequenceID)
@@ -118,9 +130,21 @@ func TestTradingSequencerRepo(t *testing.T) {
 				testSetup := testSetupFn(t)
 				defer testSetup.teardown()
 
-				testSetup.tradingSequencerRepo.SaveEvent(1, 0, &domain.TradingEvent{})
-				testSetup.tradingSequencerRepo.SaveEvent(2, 1, &domain.TradingEvent{})
-				testSetup.tradingSequencerRepo.SaveEvent(3, 2, &domain.TradingEvent{})
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 1,
+					PreviousID:  0,
+					SequenceID:  1,
+				}))
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 2,
+					PreviousID:  1,
+					SequenceID:  2,
+				}))
+				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
+					ReferenceID: 3,
+					PreviousID:  2,
+					SequenceID:  3,
+				}))
 				tradingSequencerRepo, err := CreateTradingSequencerRepo(context.Background(), testSetup.sequenceMessageTopic, testSetup.orm)
 				assert.Nil(t, err)
 				assert.Equal(t, uint64(3), tradingSequencerRepo.GetCurrentSequenceID())
@@ -148,7 +172,7 @@ func TestTradingSequencerRepo(t *testing.T) {
 				defer testSetup.teardown()
 
 				sequenceIDCh := make(chan int)
-				testSetup.tradingSequencerRepo.SubscribeTradeSequenceMessage(func(te *domain.TradingEvent) {
+				testSetup.tradingSequencerRepo.SubscribeTradeSequenceMessage(func(te *domain.TradingEvent, commitFn func() error) {
 					sequenceIDCh <- te.SequenceID
 				})
 				time.Sleep(10 * time.Second)
