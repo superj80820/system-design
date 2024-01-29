@@ -31,6 +31,10 @@ func (cache *Cache) TxPipeline() *CacheTX {
 	}
 }
 
+func (cache *Cache) LRange(ctx context.Context, key string, start int64, stop int64) *StringSliceCmd {
+	return cache.redisClient.LRange(ctx, key, start, stop)
+}
+
 func (cache *Cache) RunLua(ctx context.Context, script string, keys []string, args ...interface{}) *Cmd {
 	luaScript := goRedis.NewScript(script)
 	cmd := Cmd{luaScript.Run(ctx, cache.redisClient, keys, args...)}

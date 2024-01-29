@@ -210,7 +210,7 @@ func MakeGetDayBarEndpoint(svc domain.CandleUseCase) endpoint.Endpoint {
 
 func MakeGetTickEndpoint(svc domain.QuotationUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
-		ticks, err := svc.GetTicks()
+		ticks, err := svc.GetTickStrings(ctx, 0, -1)
 		if err != nil {
 			return nil, errors.Wrap(err, "get tick failed")
 		}

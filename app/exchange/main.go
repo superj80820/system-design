@@ -20,6 +20,7 @@ import (
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
+	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 
@@ -78,6 +79,10 @@ func main() {
 		panic(err)
 	}
 
+	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/mysqlandredis/schema.sql")
+	if err != nil {
+		panic(err)
+	}
 	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysql/schema.sql")
 	if err != nil {
 		panic(err)
@@ -94,7 +99,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	err = os.WriteFile("./schema.sql", []byte(string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
+	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -188,10 +193,11 @@ func main() {
 	}
 	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB)
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache)
 
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	quotationUseCase := quotation.CreateQuotationUseCase(tradingRepo, 100) // TODO: 100?
+	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, tradingRepo, candleRepo)
 	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])

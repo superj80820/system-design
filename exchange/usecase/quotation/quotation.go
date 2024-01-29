@@ -1,45 +1,36 @@
 package quotation
 
 import (
-	"container/list"
-	"strconv"
+	"context"
 	"sync"
 	"time"
 
+	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 )
 
 type quotationUseCase struct {
 	tradingRepo        domain.TradingRepo
+	quotationRepo      domain.QuotationRepo
 	tradingResults     []*domain.TradingResult
 	tradingResultsLock *sync.Mutex
-	tickLock           *sync.Mutex
-	tickList           *list.List
 	cap                int
+	errLock            *sync.Mutex
+	err                error
+	doneCh             chan struct{}
 }
 
-type tick struct {
-	domain.TickEntity
-}
-
-func (t *tick) String() string {
-	direction := "0" // sell // TODO: why
-	if t.TakerDirection == domain.DirectionBuy {
-		direction = "1" // buy // TODO: why
-	}
-	return "[" + strconv.FormatInt(t.CreatedAt.UnixMilli(), 10) + "," + direction + "," + t.Price.String() + "," + t.Quantity.String() + "]"
-}
-
-func CreateQuotationUseCase(tradingRepo domain.TradingRepo, cap int) domain.QuotationUseCase {
+func CreateQuotationUseCase(ctx context.Context, tradingRepo domain.TradingRepo, quotationRepo domain.QuotationRepo, cap int) domain.QuotationUseCase {
 	q := &quotationUseCase{
 		tradingRepo:        tradingRepo,
-		tickList:           list.New(),
+		quotationRepo:      quotationRepo,
 		cap:                cap,
 		tradingResultsLock: new(sync.Mutex),
-		tickLock:           new(sync.Mutex),
+		errLock:            new(sync.Mutex),
+		doneCh:             make(chan struct{}),
 	}
 
-	go q.collectTickThenSave()
+	go q.collectTickThenSave(ctx)
 
 	return q
 }
@@ -55,18 +46,26 @@ func (q *quotationUseCase) ConsumeTradingResult(key string) {
 	})
 }
 
-func (q *quotationUseCase) GetTicks() ([]string, error) {
-	q.tickLock.Lock()
-	res := make([]string, 0, q.tickList.Len())
-	for front := q.tickList.Front(); front != nil; front = front.Next() {
-		res = append(res, front.Value.(string))
+func (q *quotationUseCase) GetTickStrings(ctx context.Context, start int64, stop int64) ([]string, error) {
+	ticks, err := q.quotationRepo.GetTickStrings(ctx, start, stop)
+	if err != nil {
+		return nil, errors.Wrap(err, "get ticks failed")
 	}
-	q.tickLock.Unlock()
-
-	return res, nil
+	return ticks, nil
 }
 
-func (q *quotationUseCase) collectTickThenSave() {
+func (q *quotationUseCase) Done() <-chan struct{} {
+	return q.doneCh
+}
+
+func (q *quotationUseCase) Err() error {
+	q.errLock.Lock()
+	defer q.errLock.Unlock()
+
+	return q.err
+}
+
+func (q *quotationUseCase) collectTickThenSave(ctx context.Context) {
 	ticker := time.NewTicker(100 * time.Millisecond) // TODO: is best way?
 	defer ticker.Stop()
 
@@ -78,27 +77,26 @@ func (q *quotationUseCase) collectTickThenSave() {
 		q.tradingResultsLock.Unlock()
 
 		for _, tradingResult := range tradingResultsClone {
-			for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-				tick := &tick{
-					domain.TickEntity{
-						SequenceID:     tradingResult.TradingEvent.SequenceID,
-						TakerOrderID:   matchDetail.TakerOrder.ID,
-						MakerOrderID:   matchDetail.MakerOrder.ID,
-						Price:          matchDetail.Price,
-						Quantity:       matchDetail.Quantity,
-						TakerDirection: matchDetail.TakerOrder.Direction,
-						CreatedAt:      tradingResult.TradingEvent.CreatedAt,
-					},
+			ticks := make([]*domain.TickEntity, len(tradingResult.MatchResult.MatchDetails))
+			for idx, matchDetail := range tradingResult.MatchResult.MatchDetails {
+				tick := domain.TickEntity{
+					SequenceID:     tradingResult.TradingEvent.SequenceID,
+					TakerOrderID:   matchDetail.TakerOrder.ID,
+					MakerOrderID:   matchDetail.MakerOrder.ID,
+					Price:          matchDetail.Price,
+					Quantity:       matchDetail.Quantity,
+					TakerDirection: matchDetail.TakerOrder.Direction,
+					CreatedAt:      tradingResult.TradingEvent.CreatedAt,
 				}
-
-				q.tickLock.Lock()
-				if q.tickList.Len() >= q.cap {
-					q.tickList.Remove(q.tickList.Front())
-				}
-				q.tickList.PushBack(tick.String())
-				q.tickLock.Unlock()
+				ticks[idx] = &tick
 			}
-
+			if err := q.quotationRepo.SaveTickStrings(ctx, tradingResult.TradingEvent.SequenceID, ticks); err != nil && !errors.Is(err, domain.ErrNoop) {
+				q.errLock.Lock()
+				q.err = errors.Wrap(err, "save ticks failed")
+				q.errLock.Unlock()
+				close(q.doneCh)
+				return
+			}
 		}
 	}
 }

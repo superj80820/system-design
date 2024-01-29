@@ -26,5 +26,7 @@ func RunAsyncTradingSequencer(
 		return errors.Wrap(tradingSequencerUseCase.Err(), "trading sequencer use case get error")
 	case <-candleUseCase.Done():
 		return errors.Wrap(candleUseCase.Err(), "candle use case get error")
+	case <-quotationUseCase.Done():
+		return errors.Wrap(quotationUseCase.Err(), "quotation use case get error")
 	}
 }
