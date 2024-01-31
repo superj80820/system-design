@@ -21,6 +21,7 @@ import (
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
@@ -58,6 +59,8 @@ const (
 )
 
 func main() {
+	fmt.Println(kafkaWriterManagerMQKit.Hash{})
+
 	currencyMap := map[string]int{
 		"BTC":  1,
 		"USDT": 2,

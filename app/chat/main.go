@@ -15,9 +15,11 @@ import (
 	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
-	kafkaReaderManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
-	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
+	kafkaReaderManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/readermanager"
+	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
 	ormKit "github.com/superj80820/system-design/kit/orm"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 
 	"github.com/gorilla/mux"
 	authHttpRepo "github.com/superj80820/system-design/auth/repository/http"
@@ -49,11 +51,25 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local"))
+	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
 	if err != nil {
 		panic(err)
 	}
-	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:30001,localhost:30002,localhost:30003/?replicaSet=my-replica-set"))
+	mongoHost, err := mongodbContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
+	if err != nil {
+		panic(err)
+	}
+	// mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://localhost:30001,localhost:30002,localhost:30003/?replicaSet=my-replica-set"))
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
+	if err != nil {
+		panic(err)
+	}
+
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL("root:password@tcp(127.0.0.1:3306)/db?charset=utf8mb4&parseTime=True&loc=Local"))
 	if err != nil {
 		panic(err)
 	}
