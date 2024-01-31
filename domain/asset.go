@@ -32,6 +32,8 @@ type UserAssetRepo interface {
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)
 	InitAssets(userID, assetID int) *UserAsset
+	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
+	RecoverBySnapshot(*TradingSnapshot) error
 }
 
 type UserAssetUseCase interface {
@@ -43,4 +45,7 @@ type UserAssetUseCase interface {
 
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)
+
+	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
+	RecoverBySnapshot(*TradingSnapshot) error
 }

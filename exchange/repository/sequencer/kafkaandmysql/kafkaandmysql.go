@@ -45,6 +45,9 @@ type tradingSequencerRepo struct {
 	orm        *ormKit.DB
 	sequenceMQ mqKit.MQTopic
 
+	pauseCh    chan struct{}
+	continueCh chan struct{}
+
 	sequence  *atomic.Uint64
 	observers util.GenericSyncMap[*func(*domain.TradingEvent, func() error), func(*domain.TradingEvent, func() error)] // TODO: test key safe?
 }
@@ -54,6 +57,8 @@ func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, o
 	t := &tradingSequencerRepo{
 		orm:        orm,
 		sequenceMQ: sequenceMQ,
+		pauseCh:    make(chan struct{}),
+		continueCh: make(chan struct{}),
 		sequence:   &sequence,
 	}
 
@@ -67,6 +72,12 @@ func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, o
 	sequence.Add(maxSequenceID)
 
 	t.sequenceMQ.SubscribeWithManualCommit("global-sequencer", func(message []byte, commitFn func() error) error {
+		select {
+		case <-t.pauseCh:
+			<-t.continueCh
+		default:
+		}
+
 		var tradingEvent domain.TradingEvent
 		if err := json.Unmarshal(message, &tradingEvent); err != nil {
 			return errors.Wrap(err, "json unmarshal failed")
@@ -116,6 +127,24 @@ func (t *tradingSequencerRepo) SaveEvents(sequencerEvents []*domain.SequencerEve
 	}
 	if err := t.orm.Create(&sequencerEventsDBEntity).Error; err != nil {
 		return errors.Wrap(err, "create trading events failed")
+	}
+	return nil
+}
+
+func (t *tradingSequencerRepo) Pause() error {
+	select {
+	case t.pauseCh <- struct{}{}:
+	default:
+		// for no block
+	}
+	return nil
+}
+
+func (t *tradingSequencerRepo) Continue() error {
+	select {
+	case t.continueCh <- struct{}{}:
+	default:
+		// for no block
 	}
 	return nil
 }

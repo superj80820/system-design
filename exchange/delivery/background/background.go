@@ -19,6 +19,17 @@ func RunAsyncTradingSequencer(
 	quotationUseCase.ConsumeTradingResult("global-quotation")
 	candleUseCase.ConsumeTradingResult("global-candle") // TODO: error handle
 	orderUseCase.ConsumeTradingResult("global-order")
+
+	tradingSnapshot, err := tradingUseCase.GetHistorySnapshot(ctx)
+	if !errors.Is(err, domain.ErrNoData) && err != nil {
+		return errors.Wrap(err, "get history snapshot failed")
+	}
+	if tradingSnapshot != nil {
+		if err := tradingUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
+			return errors.Wrap(err, "recover by snapshot failed")
+		}
+	}
+
 	tradingUseCase.ConsumeTradingResult("global-trading")
 
 	select {

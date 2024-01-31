@@ -136,7 +136,7 @@ func TestMatching(t *testing.T) {
 				matchEngine.NewOrder(createOrder(11, decimal.NewFromFloat32(2086.55), domain.DirectionSell, decimal.NewFromInt(5)).OrderEntity)
 				matchEngine.NewOrder(createOrder(12, decimal.NewFromFloat32(2086.55), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
 				assert.Equal(t, "2086.55", matchEngine.marketPrice.String())
-				assert.Equal(t, 12, matchEngine.sequenceId)
+				assert.Equal(t, 12, matchEngine.sequenceID)
 				{
 					expectedResults := []struct {
 						price            string

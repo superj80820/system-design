@@ -21,6 +21,7 @@ type tradingSequencerUseCase struct {
 	err                 error
 	sequencerRepo       domain.SequencerRepo[domain.TradingEvent]
 	tradingRepo         domain.TradingRepo
+	tradingUseCase      domain.TradingUseCase
 	lastTimestamp       time.Time
 	batchEventsSize     int
 	batchEventsDuration time.Duration
@@ -36,6 +37,7 @@ func CreateTradingSequencerUseCase(
 	logger loggerKit.Logger,
 	sequencerRepo domain.SequencerRepo[domain.TradingEvent],
 	tradingRepo domain.TradingRepo,
+	tradingUseCase domain.TradingUseCase,
 	batchEventsSize int,
 	batchEventsDuration time.Duration,
 ) domain.TradingSequencerUseCase {
@@ -44,6 +46,7 @@ func CreateTradingSequencerUseCase(
 		doneCh:              make(chan struct{}),
 		sequencerRepo:       sequencerRepo,
 		tradingRepo:         tradingRepo,
+		tradingUseCase:      tradingUseCase,
 		logger:              logger,
 		batchEventsSize:     batchEventsSize,
 		batchEventsDuration: batchEventsDuration,
@@ -113,6 +116,33 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 	}
 
 	t.sequencerRepo.SubscribeTradeSequenceMessage(sequenceMessageFn)
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			timeNow := time.Now()
+			if err := t.sequencerRepo.Pause(); err != nil {
+				setErrAndDone(errors.Wrap(err, "pause failed"))
+				return
+			}
+			snapshot, err := t.tradingUseCase.GetLatestSnapshot(ctx)
+			if err != nil {
+				setErrAndDone(errors.Wrap(err, "get snapshot failed"))
+				return
+			}
+			if err := t.sequencerRepo.Continue(); err != nil {
+				setErrAndDone(errors.Wrap(err, "continue failed"))
+				return
+			}
+			if err = t.tradingUseCase.SaveSnapshot(ctx, snapshot); !errors.Is(err, domain.ErrDuplicate) && err != nil {
+				setErrAndDone(errors.Wrap(err, "continue failed"))
+				return
+			}
+			fmt.Println("save use time", time.Since(timeNow))
+		}
+	}()
 
 	go func() {
 		errContinue := errors.New("continue")

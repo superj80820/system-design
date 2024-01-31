@@ -19,6 +19,9 @@ type MatchingUseCase interface {
 	NewOrder(o *OrderEntity) (*MatchResult, error)
 	CancelOrder(ts time.Time, o *OrderEntity) error
 	GetOrderBook(maxDepth int) *OrderBookEntity
+
+	GetMatchesData() (*MatchData, error)
+	RecoverBySnapshot(*TradingSnapshot) error
 }
 
 type MatchType int
@@ -27,6 +30,12 @@ const (
 	MatchTypeTaker MatchType = iota + 1
 	MatchTypeMaker
 )
+
+type MatchData struct {
+	Buy         []int
+	Sell        []int
+	MarketPrice decimal.Decimal
+}
 
 type MatchResult struct {
 	TakerOrder   *OrderEntity

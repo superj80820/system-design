@@ -124,3 +124,20 @@ func (t *syncTradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
 	}
 	return nil
 }
+
+func (s *syncTradingUseCase) GetSequenceID() int {
+	return s.lastSequenceID
+}
+
+func (s *syncTradingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	if err := s.userAssetUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
+		return errors.Wrap(err, "recover by snapshot failed")
+	}
+	if err := s.orderUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
+		return errors.Wrap(err, "recover by snapshot failed")
+	}
+	if err := s.matchingUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
+		return errors.Wrap(err, "recover by snapshot failed")
+	}
+	return nil
+}

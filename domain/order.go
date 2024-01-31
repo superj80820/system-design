@@ -77,6 +77,8 @@ type OrderUseCase interface {
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
+	GetOrdersData() ([]*OrderEntity, error)
+	RecoverBySnapshot(*TradingSnapshot) error
 	ConsumeTradingResult(key string)
 }
 

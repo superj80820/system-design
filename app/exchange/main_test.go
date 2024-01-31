@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -22,8 +25,10 @@ import (
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
-	sequencerMemoryRepo "github.com/superj80820/system-design/exchange/repository/sequencer/memory"
-	tradingMemoryRepo "github.com/superj80820/system-design/exchange/repository/trading/memory"
+	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
+	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
+	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
 	candleUseCaseLib "github.com/superj80820/system-design/exchange/usecase/candle"
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
@@ -34,9 +39,16 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type testSetup struct {
@@ -46,6 +58,7 @@ type testSetup struct {
 	createOrder   *httptransport.Server
 	getUserAssets *httptransport.Server
 	getUserOrder  *httptransport.Server
+	teardownFn    func()
 }
 
 var (
@@ -59,9 +72,69 @@ var (
 
 func testSetupFn() *testSetup {
 	ctx := context.Background()
-	tradingRepo := tradingMemoryRepo.CreateTradingRepo(ctx)
-	assetRepo := assetMemoryRepo.CreateAssetRepo()
-	sequencerRepo := sequencerMemoryRepo.CreateTradingSequencerRepo(ctx)
+
+	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/mysqlandredis/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysqlandmongo/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/mysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	candleSchemaSQL, err := os.ReadFile("../../exchange/repository/candle/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	sequencerSchemaSQL, err := os.ReadFile("../../exchange/repository/sequencer/kafkaandmysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBName := "db"
+	mysqlDBUsername := "root"
+	mysqlDBPassword := "password"
+	mysqlContainer, err := mysql.RunContainer(ctx,
+		testcontainers.WithImage("mysql:8"),
+		mysql.WithDatabase(mysqlDBName),
+		mysql.WithUsername(mysqlDBUsername),
+		mysql.WithPassword(mysqlDBPassword),
+		mysql.WithScripts(filepath.Join(".", "schema.sql")),
+	)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Remove("./schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBHost, err := mysqlContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
+	if err != nil {
+		panic(err)
+	}
+	mysqlDB, err := ormKit.CreateDB(
+		ormKit.UseMySQL(
+			fmt.Sprintf(
+				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+				mysqlDBUsername,
+				mysqlDBPassword,
+				mysqlDBHost,
+				mysqlDBPort.Port(),
+				mysqlDBName,
+			)))
+	if err != nil {
+		panic(err)
+	}
 
 	redisContainer, err := redis.RunContainer(ctx,
 		testcontainers.WithImage("docker.io/redis:7"),
@@ -79,24 +152,66 @@ func testSetupFn() *testSetup {
 	if err != nil {
 		panic(err)
 	}
+
+	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
+	if err != nil {
+		panic(err)
+	}
+	mongoHost, err := mongodbContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
+	if err != nil {
+		panic(err)
+	}
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
+	if err != nil {
+		panic(err)
+	}
+
+	eventsCollection := mongoDB.Database("exchange").Collection("events")
+	eventsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.M{
+			"sequence_id": -1,
+		},
+		Options: options.Index().SetUnique(true),
+	})
+
+	sequenceMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	if err != nil {
 		panic(err)
 	}
 
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
+	assetRepo := assetMemoryRepo.CreateAssetRepo()
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
+	if err != nil {
+		panic(err)
+	}
+	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache)
+	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB)
+
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	quotationUseCase := quotation.CreateQuotationUseCase(100) // TODO: 100?
-	candleRepo := candleRepoRedis.CreateCandleRepo(redisCache)
-	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
-	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
+	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, tradingRepo, candleRepo)
+	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-	tradingUseCase := trading.CreateTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase, tradingRepo) // TODO: orderBookDepth use function?
-	tradingAsyncUseCase := trading.CreateAsyncTradingUseCase(ctx, tradingRepo, tradingUseCase, matchingUseCase, 100, logger)            //TODO:100?
-	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
+	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
+	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
 
-	go background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, tradingAsyncUseCase, quotationUseCase, candleUseCase)
-	go background.RunAsyncTrading(ctx, tradingAsyncUseCase)
+	go func() {
+		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
+			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
+		}
+	}()
 
 	// TODO: workaround
 	serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
@@ -159,6 +274,20 @@ func testSetupFn() *testSetup {
 		createOrder:   createOrder,
 		getUserAssets: getUserAssets,
 		getUserOrder:  getUserOrder,
+		teardownFn: func() {
+			err := mysqlContainer.Terminate(ctx)
+			if err != nil {
+				panic(err)
+			}
+			err = redisContainer.Terminate(ctx)
+			if err != nil {
+				panic(err)
+			}
+			err = mongodbContainer.Terminate(ctx)
+			if err != nil {
+				panic(err)
+			}
+		},
 	}
 }
 
@@ -171,6 +300,7 @@ func TestServer(t *testing.T) {
 			scenario: "test order book",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn()
+				defer testSetup.teardownFn()
 
 				reqFn := func(payloadRawData string) *http.Request {
 					r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(payloadRawData))
@@ -190,7 +320,7 @@ func TestServer(t *testing.T) {
 				testSetup.createOrder.ServeHTTP(httptest.NewRecorder(), reqFn(`{ "direction": 2, "price": 2086.55, "quantity": 5 }`))
 				testSetup.createOrder.ServeHTTP(httptest.NewRecorder(), reqFn(`{ "direction": 1, "price": 2086.55, "quantity": 3 }`))
 
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 
 				// test all
 				{
@@ -246,13 +376,14 @@ func TestServer(t *testing.T) {
 			scenario: "test get user orders",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn()
+				defer testSetup.teardownFn()
 
 				w := httptest.NewRecorder()
 				r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{ "direction": 1, "price": 2082.34, "quantity": 1 }`))
 				r.Header.Add("user-id", userAIDString)
 				testSetup.createOrder.ServeHTTP(w, r)
 
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 
 				w = httptest.NewRecorder()
 				r = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -269,12 +400,13 @@ func TestServer(t *testing.T) {
 			scenario: "test cancel order",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn()
+				defer testSetup.teardownFn()
 
 				r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{ "direction": 1, "price": 2082.34, "quantity": 1 }`))
 				r.Header.Add("user-id", userAIDString)
 				testSetup.createOrder.ServeHTTP(httptest.NewRecorder(), r)
 
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 
 				w := httptest.NewRecorder()
 				r = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -292,7 +424,7 @@ func TestServer(t *testing.T) {
 				r = mux.SetURLVars(r, map[string]string{"orderID": strconv.Itoa(userOrders[0].ID)})
 				testSetup.cancelOrder.ServeHTTP(w, r)
 
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 
 				w = httptest.NewRecorder()
 				r = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -308,6 +440,7 @@ func TestServer(t *testing.T) {
 			scenario: "test get user assets",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn()
+				defer testSetup.teardownFn()
 
 				w := httptest.NewRecorder()
 				r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -324,12 +457,13 @@ func TestServer(t *testing.T) {
 			scenario: "test get user order",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn()
+				defer testSetup.teardownFn()
 
 				r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(`{ "direction": 1, "price": 2082.34, "quantity": 1 }`))
 				r.Header.Add("user-id", userAIDString)
 				testSetup.createOrder.ServeHTTP(httptest.NewRecorder(), r)
 
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(1000 * time.Millisecond)
 
 				w := httptest.NewRecorder()
 				r = httptest.NewRequest(http.MethodGet, "/", nil)
@@ -360,6 +494,7 @@ func TestServer(t *testing.T) {
 
 func BenchmarkServer(b *testing.B) {
 	testSetup := testSetupFn()
+	defer testSetup.teardownFn()
 
 	reqFn := func(payloadRawData string) *http.Request {
 		r := httptest.NewRequest(http.MethodGet, "/", strings.NewReader(payloadRawData))

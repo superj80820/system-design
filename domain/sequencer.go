@@ -15,6 +15,8 @@ type SequencerRepo[T any] interface {
 	SaveEvent(*SequencerEvent) error
 	SaveEvents([]*SequencerEvent) error
 	GetFilterEventsMap([]*SequencerEvent) (map[int64]bool, error)
+	Pause() error
+	Continue() error
 	Shutdown()
 }
 

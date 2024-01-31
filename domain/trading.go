@@ -74,6 +74,9 @@ type TradingRepo interface {
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
 
+	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
+	SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*UserAsset, ordersData []*OrderEntity, matchesData *MatchData) error
+
 	Done() <-chan struct{}
 	Err() error
 	Shutdown()
@@ -85,6 +88,13 @@ const (
 	TradingResultStatusCreate TradingResultStatus = iota + 1
 	TradingResultStatusCancel
 )
+
+type TradingSnapshot struct { // TODO: minify
+	SequenceID  int                        `bson:"sequence_id"`
+	UsersAssets map[int]map[int]*UserAsset `bson:"users_assets"`
+	Orders      []*OrderEntity             `bson:"orders"`
+	MatchData   *MatchData                 `bson:"match_data"`
+}
 
 type TradingResult struct {
 	TradingResultStatus TradingResultStatus
@@ -103,13 +113,23 @@ type SyncTradingUseCase interface {
 	CreateOrder(messages *TradingEvent) (*MatchResult, error)
 	CancelOrder(tradingEvent *TradingEvent) error
 	Transfer(tradingEvent *TradingEvent) error
+
+	GetSequenceID() int
+	RecoverBySnapshot(*TradingSnapshot) error
 }
 
 type TradingUseCase interface {
-	SyncTradingUseCase
+	CreateOrder(messages *TradingEvent) (*MatchResult, error)
+	CancelOrder(tradingEvent *TradingEvent) error
+	Transfer(tradingEvent *TradingEvent) error
+
 	GetLatestOrderBook() *OrderBookEntity
 	ConsumeTradingResult(key string)
 	GetHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
+	GetLatestSnapshot(context.Context) (*TradingSnapshot, error)
+	SaveSnapshot(context.Context, *TradingSnapshot) error
+	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
+	RecoverBySnapshot(*TradingSnapshot) error
 	Done() <-chan struct{}
 	Shutdown() error
 	// TODO

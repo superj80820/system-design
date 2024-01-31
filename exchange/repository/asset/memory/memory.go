@@ -60,3 +60,31 @@ func (a *assetRepo) GetAsset(userID int, assetID int) (*domain.UserAsset, error)
 	}
 	return nil, domain.NotFoundUserAssetErr
 }
+
+func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, error) {
+	usersAssetsClone := make(map[int]map[int]*domain.UserAsset)
+	a.userAssetsMap.Range(func(userID int, assetsMap *util.GenericSyncMap[int, *domain.UserAsset]) bool {
+		userAssetsMap := make(map[int]*domain.UserAsset)
+		assetsMap.Range(func(assetID int, asset *domain.UserAsset) bool {
+			userAssetsMap[assetID] = &domain.UserAsset{
+				Available: asset.Available,
+				Frozen:    asset.Frozen,
+			}
+			return true
+		})
+		usersAssetsClone[userID] = userAssetsMap
+		return true
+	})
+	return usersAssetsClone, nil
+}
+
+func (a *assetRepo) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	for userID, assetsMap := range tradingSnapshot.UsersAssets { //TODO: test user id unmarshal correct?
+		var storeAssetsMap util.GenericSyncMap[int, *domain.UserAsset]
+		for assetID, asset := range assetsMap {
+			storeAssetsMap.Store(assetID, asset)
+		}
+		a.userAssetsMap.Store(userID, &storeAssetsMap)
+	}
+	return nil
+}

@@ -2,7 +2,10 @@ package trading
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -11,6 +14,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/domain"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
+	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
+	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
+	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
+	ormKit "github.com/superj80820/system-design/kit/orm"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	"github.com/superj80820/system-design/exchange/usecase/asset"
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
@@ -34,13 +47,108 @@ type testSetup struct {
 	userAssetUseCase   domain.UserAssetUseCase
 	matchingUseCase    domain.MatchingUseCase
 	createTradingEvent func(userID, previousID, sequenceID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) *domain.TradingEvent
+	teardownFn         func()
 }
 
 func testSetupFn() (*testSetup, error) {
+	ctx := context.Background()
+
+	quotationSchemaSQL, err := os.ReadFile("../../repository/quotation/mysqlandredis/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	tradingSchemaSQL, err := os.ReadFile("../../repository/trading/mysqlandmongo/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	orderSchemaSQL, err := os.ReadFile("../../repository/order/mysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	candleSchemaSQL, err := os.ReadFile("../../repository/candle/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	sequencerSchemaSQL, err := os.ReadFile("../../repository/sequencer/kafkaandmysql/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBName := "db"
+	mysqlDBUsername := "root"
+	mysqlDBPassword := "password"
+	mysqlContainer, err := mysql.RunContainer(ctx,
+		testcontainers.WithImage("mysql:8"),
+		mysql.WithDatabase(mysqlDBName),
+		mysql.WithUsername(mysqlDBUsername),
+		mysql.WithPassword(mysqlDBPassword),
+		mysql.WithScripts(filepath.Join(".", "schema.sql")),
+	)
+	if err != nil {
+		panic(err)
+	}
+	err = os.Remove("./schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBHost, err := mysqlContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
+	if err != nil {
+		panic(err)
+	}
+	mysqlDB, err := ormKit.CreateDB(
+		ormKit.UseMySQL(
+			fmt.Sprintf(
+				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+				mysqlDBUsername,
+				mysqlDBPassword,
+				mysqlDBHost,
+				mysqlDBPort.Port(),
+				mysqlDBName,
+			)))
+	if err != nil {
+		panic(err)
+	}
+
+	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
+	if err != nil {
+		panic(err)
+	}
+	mongoHost, err := mongodbContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
+	if err != nil {
+		panic(err)
+	}
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
+	if err != nil {
+		panic(err)
+	}
+	eventsCollection := mongoDB.Database("exchange").Collection("events")
+	eventsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.M{
+			"sequence_id": -1,
+		},
+		Options: options.Index().SetUnique(true),
+	})
+
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+
+	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
 	matchingUseCase := matching.CreateMatchingUseCase()
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, currencyMap["BTC"], currencyMap["USDT"])
+	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
 
 	uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
@@ -72,6 +180,16 @@ func testSetupFn() (*testSetup, error) {
 		userAssetUseCase:   userAssetUseCase,
 		matchingUseCase:    matchingUseCase,
 		createTradingEvent: createTradingEvent,
+		teardownFn: func() {
+			err := mysqlContainer.Terminate(ctx)
+			if err != nil {
+				panic(err)
+			}
+			err = mongodbContainer.Terminate(ctx)
+			if err != nil {
+				panic(err)
+			}
+		},
 	}, nil
 }
 
@@ -85,6 +203,7 @@ func TestTrading(t *testing.T) {
 			fn: func(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
+				defer testSetup.teardownFn()
 
 				_, err = testSetup.syncTradingUseCase.CreateOrder(testSetup.createTradingEvent(userAID, 0, 1, domain.DirectionBuy, decimal.NewFromFloat(2082.34), decimal.NewFromInt(1)))
 				assert.ErrorIs(t, err, domain.LessAmountErr)
@@ -95,6 +214,7 @@ func TestTrading(t *testing.T) {
 			fn: func(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
+				defer testSetup.teardownFn()
 
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
@@ -190,6 +310,7 @@ func TestTrading(t *testing.T) {
 			fn: func(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
+				defer testSetup.teardownFn()
 
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
@@ -284,6 +405,7 @@ func TestTrading(t *testing.T) {
 			fn: func(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
+				defer testSetup.teardownFn()
 
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
@@ -378,6 +500,7 @@ func TestTrading(t *testing.T) {
 			fn: func(t *testing.T) {
 				testSetup, err := testSetupFn()
 				assert.Nil(t, err)
+				defer testSetup.teardownFn()
 
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000)))
 				assert.Nil(t, testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000)))
@@ -416,6 +539,7 @@ func TestTrading(t *testing.T) {
 
 func BenchmarkTrading(b *testing.B) {
 	testSetup, _ := testSetupFn()
+	defer testSetup.teardownFn()
 
 	testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000))
 	testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000))

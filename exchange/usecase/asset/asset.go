@@ -87,3 +87,18 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 		return errors.New("unknown transfer type")
 	}
 }
+
+func (u *userAsset) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, error) {
+	usersAssetsData, err := u.assetRepo.GetUsersAssetsData()
+	if err != nil {
+		return nil, errors.Wrap(err, "get users assets data failed")
+	}
+	return usersAssetsData, nil
+}
+
+func (u *userAsset) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	if err := u.assetRepo.RecoverBySnapshot(tradingSnapshot); err != nil {
+		return errors.Wrap(err, "recover by snapshot")
+	}
+	return nil
+}

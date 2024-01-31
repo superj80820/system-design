@@ -76,7 +76,7 @@ func (o *orderUseCase) CreateOrder(sequenceID int, orderID int, userID int, dire
 		UpdatedAt:        ts,
 	}
 
-	o.activeOrders.Store(orderID, &order)
+	o.activeOrders.Store(orderID, &order) // TODO: test performance
 	var userOrders util.GenericSyncMap[int, *domain.OrderEntity]
 	userOrders.Store(orderID, &order)
 	if userOrders, loaded := o.userOrdersMap.LoadOrStore(userID, &userOrders); loaded {
@@ -175,6 +175,41 @@ func (o *orderUseCase) GetHistoryOrders(orderID, maxResults int) ([]*domain.Orde
 		return nil, errors.Wrap(err, "get history orders failed")
 	}
 	return orders, nil
+}
+
+func (o *orderUseCase) GetOrdersData() ([]*domain.OrderEntity, error) {
+	var cloneOrders []*domain.OrderEntity
+	o.activeOrders.Range(func(orderID int, order *domain.OrderEntity) bool {
+		cloneOrders = append(cloneOrders, &domain.OrderEntity{
+			ID:         order.ID,
+			SequenceID: order.SequenceID,
+			UserID:     order.UserID,
+
+			Price:     order.Price,
+			Direction: order.Direction,
+			Status:    order.Status,
+
+			Quantity:         order.Quantity,
+			UnfilledQuantity: order.UnfilledQuantity,
+
+			CreatedAt: order.CreatedAt,
+			UpdatedAt: order.UpdatedAt,
+		})
+		return true
+	})
+	return cloneOrders, nil
+}
+
+func (o *orderUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	for _, order := range tradingSnapshot.Orders { // TODO: test performance
+		o.activeOrders.Store(order.ID, order)
+		var userOrders util.GenericSyncMap[int, *domain.OrderEntity]
+		userOrders.Store(order.ID, order)
+		if userOrders, loaded := o.userOrdersMap.LoadOrStore(order.UserID, &userOrders); loaded {
+			userOrders.Store(order.ID, order)
+		}
+	}
+	return nil
 }
 
 func (o *orderUseCase) collectHistoryClosedOrdersThenSave() {

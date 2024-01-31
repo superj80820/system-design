@@ -13,6 +13,7 @@ import (
 
 type tradingUseCase struct {
 	logger             loggerKit.Logger
+	userAssetUseCase   domain.UserAssetUseCase
 	tradingRepo        domain.TradingRepo
 	matchingUseCase    domain.MatchingUseCase
 	syncTradingUseCase domain.SyncTradingUseCase
@@ -33,6 +34,7 @@ func CreateTradingUseCase(
 	ctx context.Context,
 	tradingRepo domain.TradingRepo,
 	orderUseCase domain.OrderUseCase,
+	userAssetUseCase domain.UserAssetUseCase,
 	syncTradingUseCase domain.SyncTradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
 	orderBookDepth int,
@@ -46,6 +48,7 @@ func CreateTradingUseCase(
 		orderUseCase:       orderUseCase,
 		syncTradingUseCase: syncTradingUseCase,
 		matchingUseCase:    matchingUseCase,
+		userAssetUseCase:   userAssetUseCase,
 
 		historyMatchingDetailsLock:     new(sync.Mutex),
 		isHistoryMatchingDetailsFullCh: make(chan struct{}),
@@ -150,8 +153,12 @@ func (t *tradingUseCase) GetHistoryMatchDetails(userID, orderID int) ([]*domain.
 	return matchOrderDetails, nil
 }
 
-func (t *tradingUseCase) ConsumeTradingResult(key string) {
+func (t *tradingUseCase) ConsumeTradingResult(key string) { // TODO: implement order book in redis
 	t.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return
+		}
+
 		var matchOrderDetails []*domain.MatchOrderDetail
 		for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
 			takerOrderDetail := &domain.MatchOrderDetail{
@@ -199,6 +206,56 @@ func (t *tradingUseCase) GetLatestOrderBook() *domain.OrderBookEntity {
 	defer t.tradingUseCaseLock.Unlock()
 
 	return t.matchingUseCase.GetOrderBook(t.orderBookDepth)
+}
+
+func (t *tradingUseCase) GetLatestSnapshot(ctx context.Context) (*domain.TradingSnapshot, error) {
+	sequenceID := t.syncTradingUseCase.GetSequenceID()
+	usersAssetsData, err := t.userAssetUseCase.GetUsersAssetsData()
+	if err != nil {
+		return nil, errors.Wrap(err, "get all users assets failed")
+	}
+	ordersData, err := t.orderUseCase.GetOrdersData()
+	if err != nil {
+		return nil, errors.Wrap(err, "get all orders failed")
+	}
+	matchesData, err := t.matchingUseCase.GetMatchesData()
+	if err != nil {
+		return nil, errors.Wrap(err, "get all matches failed")
+	}
+	return &domain.TradingSnapshot{
+		SequenceID:  sequenceID,
+		UsersAssets: usersAssetsData,
+		Orders:      ordersData,
+		MatchData:   matchesData,
+	}, nil
+}
+
+func (t *tradingUseCase) GetHistorySnapshot(ctx context.Context) (*domain.TradingSnapshot, error) {
+	historySnapshot, err := t.tradingRepo.GetHistorySnapshot(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get history snapshot failed")
+	}
+	return historySnapshot, nil
+}
+
+func (t *tradingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	if err := t.syncTradingUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
+		return errors.Wrap(err, "recover by snapshot failed")
+	}
+	return nil
+}
+
+func (t *tradingUseCase) SaveSnapshot(ctx context.Context, tradingSnapshot *domain.TradingSnapshot) error {
+	if err := t.tradingRepo.SaveSnapshot(
+		ctx,
+		tradingSnapshot.SequenceID,
+		tradingSnapshot.UsersAssets,
+		tradingSnapshot.Orders,
+		tradingSnapshot.MatchData,
+	); err != nil {
+		return errors.Wrap(err, "save snapshot failed")
+	}
+	return nil
 }
 
 func (t *tradingUseCase) Done() <-chan struct{} {

@@ -10,10 +10,14 @@ import (
 	"github.com/superj80820/system-design/kit/mq"
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 	"gorm.io/gorm/clause"
 )
 
 type tradingRepo struct {
+	mongoCollection      *mongo.Collection
 	orm                  *ormKit.DB
 	tradingEventMQTopic  mqKit.MQTopic
 	tradingResultMQTopic mqKit.MQTopic
@@ -66,11 +70,18 @@ func (t *tradingEventStruct) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func CreateTradingRepo(ctx context.Context, orm *ormKit.DB, tradingEventMQTopic, tradingResultMQTopic mqKit.MQTopic) domain.TradingRepo {
+func CreateTradingRepo(
+	ctx context.Context,
+	mongoCollection *mongo.Collection,
+	orm *ormKit.DB,
+	tradingEventMQTopic,
+	tradingResultMQTopic mqKit.MQTopic,
+) domain.TradingRepo {
 	ctx, cancel := context.WithCancel(ctx)
 
 	return &tradingRepo{
 		orm:                  orm,
+		mongoCollection:      mongoCollection,
 		tradingEventMQTopic:  tradingEventMQTopic,
 		tradingResultMQTopic: tradingResultMQTopic,
 		doneCh:               make(chan struct{}),
@@ -141,6 +152,42 @@ func (t *tradingRepo) SubscribeTradeEvent(key string, notify func(*domain.Tradin
 		notify(&tradingEvent)
 		return nil
 	})
+}
+
+func (t *tradingRepo) GetHistorySnapshot(ctx context.Context) (*domain.TradingSnapshot, error) {
+	findOptions := options.Find()
+	findOptions.SetLimit(1)
+	findOptions.SetSort(bson.D{{Key: "sequence_id", Value: -1}})
+	tradingSnapshotResult, err := t.mongoCollection.Find(ctx, bson.D{}, findOptions)
+	if err != nil {
+		return nil, errors.Wrap(err, "find failed")
+	}
+	var tradingSnapshots []*domain.TradingSnapshot
+	if err := tradingSnapshotResult.All(ctx, &tradingSnapshots); err != nil {
+		return nil, errors.Wrap(err, "decode failed")
+	}
+	if len(tradingSnapshots) == 0 {
+		return nil, domain.ErrNoData
+	}
+	if len(tradingSnapshots) != 1 {
+		return nil, errors.New("except trading snapshots length")
+	}
+	return tradingSnapshots[0], nil
+}
+
+func (t *tradingRepo) SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*domain.UserAsset, ordersData []*domain.OrderEntity, matchesData *domain.MatchData) error {
+	_, err := t.mongoCollection.InsertOne(ctx, domain.TradingSnapshot{
+		SequenceID:  sequenceID,
+		UsersAssets: usersAssetsData,
+		Orders:      ordersData,
+		MatchData:   matchesData,
+	})
+	if mongo.IsDuplicateKeyError(err) {
+		return domain.ErrDuplicate
+	} else if err != nil {
+		return errors.Wrap(err, "save snapshot failed")
+	}
+	return nil
 }
 
 func (t *tradingRepo) Done() <-chan struct{} {

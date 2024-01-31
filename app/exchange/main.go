@@ -22,7 +22,11 @@ import (
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
@@ -32,7 +36,7 @@ import (
 
 	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
-	tradingMySQLRepo "github.com/superj80820/system-design/exchange/repository/trading/mysql"
+	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
 	candleUseCaseLib "github.com/superj80820/system-design/exchange/usecase/candle"
 	"github.com/superj80820/system-design/exchange/usecase/clearing"
@@ -83,7 +87,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysql/schema.sql")
+	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysqlandmongo/schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -128,14 +132,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(fmt.Sprintf(
-		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-		mysqlDBUsername,
-		mysqlDBPassword,
-		mysqlDBHost,
-		mysqlDBPort.Port(),
-		mysqlDBName,
-	), "york")
 	mysqlDB, err := ormKit.CreateDB(
 		ormKit.UseMySQL(
 			fmt.Sprintf(
@@ -150,18 +146,22 @@ func main() {
 		panic(err)
 	}
 
-	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
-		ctx,
-		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
-		KAFKA_SEQUENCE_TOPIC,
-		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
-		kafkaMQKit.CreateTopic(1, 1),
-	)
+	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
 	if err != nil {
 		panic(err)
 	}
-	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	mongoHost, err := mongodbContainer.Host(ctx)
+	if err != nil {
+		panic(err)
+	}
+	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
+	if err != nil {
+		panic(err)
+	}
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
+	if err != nil {
+		panic(err)
+	}
 
 	redisContainer, err := redis.RunContainer(ctx,
 		testcontainers.WithImage("docker.io/redis:7"),
@@ -175,17 +175,40 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
 	if err != nil {
 		panic(err)
 	}
+
+	fmt.Println("for debug: mysql port: ", mysqlDBPort.Port(), " mongo port: ", "mongodb://"+mongoHost+":"+mongoPort.Port())
+
+	eventsCollection := mongoDB.Database("exchange").Collection("events")
+	eventsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.M{
+			"sequence_id": -1,
+		},
+		Options: options.Index().SetUnique(true),
+	})
+
+	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
+		ctx,
+		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
+		KAFKA_SEQUENCE_TOPIC,
+		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
+		kafkaMQKit.CreateTopic(1, 1),
+	)
+	if err != nil {
+		panic(err)
+	}
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	if err != nil {
 		panic(err)
 	}
 
-	tradingRepo := tradingMySQLRepo.CreateTradingRepo(ctx, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
 	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
 	if err != nil {
@@ -202,8 +225,8 @@ func main() {
 	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
-	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, 3000, 500*time.Millisecond)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
+	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
 
 	go func() {
 		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {

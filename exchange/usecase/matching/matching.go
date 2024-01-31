@@ -31,7 +31,7 @@ type matchingUseCase struct {
 	buyBook     *orderBook
 	sellBook    *orderBook
 	marketPrice decimal.Decimal
-	sequenceId  int // TODO: use long
+	sequenceID  int // TODO: use long
 }
 
 func CreateMatchingUseCase() domain.MatchingUseCase {
@@ -80,15 +80,41 @@ func (m *matchingUseCase) CancelOrder(ts time.Time, o *domain.OrderEntity) error
 
 func (m *matchingUseCase) GetOrderBook(maxDepth int) *domain.OrderBookEntity {
 	return &domain.OrderBookEntity{
-		SequenceID: m.sequenceId,
+		SequenceID: m.sequenceID,
 		Price:      m.marketPrice,
 		Sell:       m.sellBook.getOrderBook(maxDepth),
 		Buy:        m.buyBook.getOrderBook(maxDepth),
 	}
 }
 
+func (m *matchingUseCase) GetMatchesData() (*domain.MatchData, error) {
+	cloneBuyBooksID := m.buyBook.getOrderBooksID()
+	cloneSellBooksID := m.sellBook.getOrderBooksID()
+	return &domain.MatchData{
+		Buy:         cloneBuyBooksID,
+		Sell:        cloneSellBooksID,
+		MarketPrice: m.marketPrice,
+	}, nil
+}
+
+func (m *matchingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	orderMap := make(map[int]*domain.OrderEntity)
+	for _, order := range tradingSnapshot.Orders {
+		orderMap[order.ID] = order
+	}
+	for _, orderID := range tradingSnapshot.MatchData.Buy {
+		m.buyBook.add(&order{OrderEntity: orderMap[orderID]})
+	}
+	for _, orderID := range tradingSnapshot.MatchData.Sell {
+		m.sellBook.add(&order{OrderEntity: orderMap[orderID]})
+	}
+	m.sequenceID = tradingSnapshot.SequenceID
+	m.marketPrice = tradingSnapshot.MatchData.MarketPrice
+	return nil
+}
+
 func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
-	m.sequenceId = takerOrder.SequenceID
+	m.sequenceID = takerOrder.SequenceID
 	ts := takerOrder.CreatedAt // TODO: name?
 	matchResult := createMatchResult(takerOrder)
 	takerUnfilledQuantity := takerOrder.Quantity

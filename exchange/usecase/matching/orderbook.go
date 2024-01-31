@@ -41,6 +41,14 @@ func (ob *orderBook) add(o *order) bool {
 	return true // TODO: need check? about performance
 }
 
+func (ob *orderBook) getOrderBooksID() []int {
+	orderBooksID := make([]int, 0, ob.book.Size())
+	ob.book.Each(func(key *orderKey, value *order) {
+		orderBooksID = append(orderBooksID, value.ID)
+	})
+	return orderBooksID
+}
+
 func (ob *orderBook) getOrderBook(maxDepth int) []*domain.OrderBookItemEntity {
 	orderBookItems := make([]*domain.OrderBookItemEntity, 0, maxDepth)
 	var (

@@ -65,7 +65,7 @@ func (u *unitTest) SetupTest() {
 	observer := CreateObserver("key", func(message []byte) error {
 		messageCh <- message
 		return nil
-	}, AddUnSubscribeHook(func() error {
+	}, mq.AddUnSubscribeHook(func() error {
 		hookCh <- true
 		return nil
 	}))
