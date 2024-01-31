@@ -23,9 +23,9 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
-	mqKit "github.com/superj80820/system-design/kit/mq"
-	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
-	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
+	mqKafkaKit "github.com/superj80820/system-design/kit/mq/kafka"
+	mqKafkaReaderManagerKit "github.com/superj80820/system-design/kit/mq/kafka/readermanager"
+	mqKafkaWriterManagerKit "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	traceKit "github.com/superj80820/system-design/kit/trace"
@@ -86,40 +86,40 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	channelMessageTopic, err := mqKit.CreateMQTopic(
+	channelMessageTopic, err := mqKafkaKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		channelMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		mqKafkaKit.ConsumeByPartitionsBindObserver(mqKafkaReaderManagerKit.LastOffset),
+		mqKafkaKit.ProduceWay(&mqKafkaWriterManagerKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
 	}
-	userMessageTopic, err := mqKit.CreateMQTopic(
+	userMessageTopic, err := mqKafkaKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		userMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		mqKafkaKit.ConsumeByPartitionsBindObserver(mqKafkaReaderManagerKit.LastOffset),
+		mqKafkaKit.ProduceWay(&mqKafkaWriterManagerKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
 	}
-	userStatusTopic, err := mqKit.CreateMQTopic(
+	userStatusTopic, err := mqKafkaKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":user_status", mqReaderManagerKit.LastOffset),
+		mqKafkaKit.ConsumeByGroupID(serviceName+":user_status", false),
 	)
 	if err != nil {
 		panic(err)
 	}
-	friendOnlineStatusTopic, err := mqKit.CreateMQTopic( // TODO: need?
+	friendOnlineStatusTopic, err := mqKafkaKit.CreateMQTopic( // TODO: need?
 		context.TODO(),
 		kafkaURL,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":friend_online_status", mqReaderManagerKit.LastOffset),
+		mqKafkaKit.ConsumeByGroupID(serviceName+":friend_online_status", false),
 	)
 	if err != nil {
 		panic(err)
