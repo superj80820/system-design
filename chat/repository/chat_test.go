@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/superj80820/system-design/domain"
 	httpKit "github.com/superj80820/system-design/kit/http"
+	"github.com/superj80820/system-design/kit/mq"
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	kafkaMQReaderManagerKit "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
 	kafkaMQWriterManagerKit "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
@@ -31,10 +32,10 @@ type ChatSuite struct {
 
 	mongoDB *mongo.Client
 
-	channelMessageTopic     kafkaMQKit.MQTopic
-	userMessageTopic        kafkaMQKit.MQTopic
-	userStatusTopic         kafkaMQKit.MQTopic
-	friendOnlineStatusTopic kafkaMQKit.MQTopic
+	channelMessageTopic     mq.MQTopic
+	userMessageTopic        mq.MQTopic
+	userStatusTopic         mq.MQTopic
+	friendOnlineStatusTopic mq.MQTopic
 
 	mongodbContainer *mongodb.MongoDBContainer
 	kafkaContainer   *kafka.KafkaContainer

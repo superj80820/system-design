@@ -14,8 +14,9 @@ import (
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
-	mqReaderManagerKit "github.com/superj80820/system-design/kit/mq/reader_manager"
-	mqWriterManagerKit "github.com/superj80820/system-design/kit/mq/writer_manager"
+	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
+	kafkaReaderManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
+	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 
 	"github.com/gorilla/mux"
@@ -25,7 +26,6 @@ import (
 	"github.com/superj80820/system-design/domain"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
-	mqKit "github.com/superj80820/system-design/kit/mq"
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	utilKit "github.com/superj80820/system-design/kit/util"
@@ -70,40 +70,40 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	channelMessageTopic, err := mqKit.CreateMQTopic(
+	channelMessageTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		channelMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		kafkaMQKit.ConsumeByPartitionsBindObserver(kafkaReaderManagerMQKit.LastOffset),
+		kafkaMQKit.ProduceWay(&kafkaWriterManagerMQKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
 	}
-	userMessageTopic, err := mqKit.CreateMQTopic(
+	userMessageTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		userMessageTopicName,
-		mqKit.ConsumeByPartitionsBindObserver(mqReaderManagerKit.LastOffset),
-		mqKit.ProduceWay(&mqWriterManagerKit.Hash{}),
+		kafkaMQKit.ConsumeByPartitionsBindObserver(kafkaReaderManagerMQKit.LastOffset),
+		kafkaMQKit.ProduceWay(&kafkaWriterManagerMQKit.Hash{}),
 	)
 	if err != nil {
 		panic(err)
 	}
-	userStatusTopic, err := mqKit.CreateMQTopic(
+	userStatusTopic, err := kafkaMQKit.CreateMQTopic(
 		context.TODO(),
 		kafkaURL,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":user_status", mqReaderManagerKit.LastOffset),
+		kafkaMQKit.ConsumeByGroupID(serviceName+":user_status", false),
 	)
 	if err != nil {
 		panic(err)
 	}
-	friendOnlineStatusTopic, err := mqKit.CreateMQTopic( // TODO: need?
+	friendOnlineStatusTopic, err := kafkaMQKit.CreateMQTopic( // TODO: need?
 		context.TODO(),
 		kafkaURL,
 		userStatusTopicName,
-		mqKit.ConsumeByGroupID(serviceName+":friend_online_status", mqReaderManagerKit.LastOffset),
+		kafkaMQKit.ConsumeByGroupID(serviceName+":friend_online_status", false),
 	)
 	if err != nil {
 		panic(err)
@@ -142,6 +142,7 @@ func main() {
 		Handler: r,
 	}
 	go func() {
+		fmt.Println("run")
 		if err := srv.ListenAndServe(); err != nil {
 			logger.Error(fmt.Sprintf("close service failed, error: %+v", err))
 		}

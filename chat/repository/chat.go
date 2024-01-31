@@ -12,8 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	httpKit "github.com/superj80820/system-design/kit/http"
-	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
-	kafkaMQKitReader "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
+	"github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
 
@@ -83,10 +82,10 @@ type ChatRepo struct {
 	channelMessageCollection  *mongo.Collection
 	friendMessageCollection   *mongo.Collection
 
-	channelMessageTopic     kafkaMQKit.MQTopic // TODO: to domain
-	accountMessageTopic     kafkaMQKit.MQTopic
-	accountStatusTopic      kafkaMQKit.MQTopic
-	friendOnlineStatusTopic kafkaMQKit.MQTopic
+	channelMessageTopic     mq.MQTopic // TODO: to domain
+	accountMessageTopic     mq.MQTopic
+	accountStatusTopic      mq.MQTopic
+	friendOnlineStatusTopic mq.MQTopic
 
 	mysqlDB *ormKit.DB
 
@@ -94,10 +93,10 @@ type ChatRepo struct {
 
 	uniqueIDGenerate *utilKit.UniqueIDGenerate
 
-	channelMessageObservers     utilKit.GenericSyncMap[string, *kafkaMQKitReader.Observer]
-	accountMessageObservers     utilKit.GenericSyncMap[string, *kafkaMQKitReader.Observer]
-	accountStatusObservers      utilKit.GenericSyncMap[string, *kafkaMQKitReader.Observer]
-	friendOnlineStatusObservers utilKit.GenericSyncMap[string, *kafkaMQKitReader.Observer]
+	channelMessageObservers     utilKit.GenericSyncMap[string, mq.Observer]
+	accountMessageObservers     utilKit.GenericSyncMap[string, mq.Observer]
+	accountStatusObservers      utilKit.GenericSyncMap[string, mq.Observer]
+	friendOnlineStatusObservers utilKit.GenericSyncMap[string, mq.Observer]
 }
 
 func CreateChatRepo(
@@ -106,7 +105,7 @@ func CreateChatRepo(
 	channelMessageTopic,
 	accountMessageTopic,
 	accountStatusTopic,
-	friendOnlineStatusTopic kafkaMQKit.MQTopic,
+	friendOnlineStatusTopic mq.MQTopic,
 	options ...ChatRepoOption) (*ChatRepo, error) {
 	messageMetadataCollection := client.Database("chat").Collection("message_metadata")
 	channelMessageCollection := client.Database("chat").Collection("channel_message")
@@ -584,7 +583,7 @@ func (chat *ChatRepo) UnSubscribeFriendOnlineStatus(ctx context.Context, friendI
 
 func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 	requestID := strconv.FormatInt(httpKit.GetRequestID(ctx), 10)
-	chat.accountMessageObservers.Range(func(key string, observer *kafkaMQKitReader.Observer) bool {
+	chat.accountMessageObservers.Range(func(key string, observer mq.Observer) bool {
 		if strings.Split(key, ":")[0] != requestID { // TODO: performance
 			return true
 		}
@@ -592,7 +591,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 		chat.accountMessageObservers.Delete(key)
 		return true
 	})
-	chat.channelMessageObservers.Range(func(key string, observer *kafkaMQKitReader.Observer) bool {
+	chat.channelMessageObservers.Range(func(key string, observer mq.Observer) bool {
 		if strings.Split(key, ":")[0] != requestID { // TODO: performance
 			return true
 		}
@@ -600,7 +599,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 		chat.channelMessageObservers.Delete(key)
 		return true
 	})
-	chat.accountStatusObservers.Range(func(key string, observer *kafkaMQKitReader.Observer) bool {
+	chat.accountStatusObservers.Range(func(key string, observer mq.Observer) bool {
 		if strings.Split(key, ":")[0] != requestID { // TODO: performance
 			return true
 		}
@@ -608,7 +607,7 @@ func (chat *ChatRepo) UnSubscribeAll(ctx context.Context) {
 		chat.accountStatusObservers.Delete(key)
 		return true
 	})
-	chat.friendOnlineStatusObservers.Range(func(key string, observer *kafkaMQKitReader.Observer) bool {
+	chat.friendOnlineStatusObservers.Range(func(key string, observer mq.Observer) bool {
 		if strings.Split(key, ":")[0] != requestID { // TODO: performance
 			return true
 		}
