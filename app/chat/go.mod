@@ -5,9 +5,16 @@ go 1.20
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/superj80820/system-design/auth v0.0.0-20240131094201-798298a2afd3
-	github.com/superj80820/system-design/chat v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/chat v0.0.0-20240131100334-26ae06405509
 	github.com/superj80820/system-design/domain v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/core v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/http v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/logger v0.0.0-20240131094201-798298a2afd3
 	github.com/superj80820/system-design/kit/mq v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/orm v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/redis v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/trace v0.0.0-20240131094201-798298a2afd3
+	github.com/superj80820/system-design/kit/util v0.0.0-20240131094201-798298a2afd3
 	github.com/testcontainers/testcontainers-go v0.27.0
 	github.com/testcontainers/testcontainers-go/modules/mongodb v0.27.0
 	go.mongodb.org/mongo-driver v1.13.1
@@ -69,15 +76,6 @@ require (
 	github.com/shopspring/decimal v1.3.1 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/superj80820/system-design/kit/code v0.0.0-20240131085738-3e79fbc2034c // indirect
-	github.com/superj80820/system-design/kit/core v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/http v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/logger v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/orm v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/redis v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/trace v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/superj80820/system-design/kit/util v0.0.0-20240131094201-798298a2afd3 // indirect
-	github.com/testcontainers/testcontainers-go/modules/kafka v0.27.0 // indirect
-	github.com/testcontainers/testcontainers-go/modules/mysql v0.27.0 // indirect
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
