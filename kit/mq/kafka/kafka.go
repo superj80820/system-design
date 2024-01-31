@@ -12,8 +12,8 @@ import (
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
 	"github.com/superj80820/system-design/kit/mq"
-	readerManager "github.com/superj80820/system-design/kit/mq/kafka/reader_manager"
-	writerManager "github.com/superj80820/system-design/kit/mq/kafka/writer_manager"
+	readerManager "github.com/superj80820/system-design/kit/mq/kafka/readermanager"
+	writerManager "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
 )
 
 type MQTopicOption func(*MQTopicConfig)

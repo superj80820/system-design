@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"github.com/superj80820/system-design/kit/mq"
-	"github.com/superj80820/system-design/kit/mq/kafka/reader_manager/mocks"
+	"github.com/superj80820/system-design/kit/mq/kafka/readermanager/mocks"
 	"golang.org/x/sync/errgroup"
 )
 
