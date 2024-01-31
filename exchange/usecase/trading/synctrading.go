@@ -122,6 +122,23 @@ func (t *syncTradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
 	); err != nil {
 		return errors.Wrap(err, "transfer error")
 	}
+
+	return nil
+}
+
+func (s *syncTradingUseCase) Deposit(tradingEvent *domain.TradingEvent) error {
+	if err := s.checkEventSequence(tradingEvent); err != nil {
+		return errors.Wrap(err, "check event sequence failed")
+	}
+
+	if err := s.userAssetUseCase.LiabilityUserTransfer(
+		tradingEvent.DepositEvent.ToUserID,
+		tradingEvent.DepositEvent.AssetID,
+		tradingEvent.DepositEvent.Amount,
+	); err != nil {
+		return errors.Wrap(err, "liability user transfer failed")
+	}
+
 	return nil
 }
 
@@ -139,5 +156,6 @@ func (s *syncTradingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSn
 	if err := s.matchingUseCase.RecoverBySnapshot(tradingSnapshot); err != nil {
 		return errors.Wrap(err, "recover by snapshot failed")
 	}
+	s.lastSequenceID = tradingSnapshot.SequenceID
 	return nil
 }

@@ -121,14 +121,26 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
 
+		snapshotSequenceID := t.tradingUseCase.GetSequenceID()
+
 		for range ticker.C {
-			timeNow := time.Now()
 			if err := t.sequencerRepo.Pause(); err != nil {
 				setErrAndDone(errors.Wrap(err, "pause failed"))
 				return
 			}
+			sequenceID := t.tradingUseCase.GetSequenceID()
+			if snapshotSequenceID == sequenceID {
+				if err := t.sequencerRepo.Continue(); err != nil {
+					setErrAndDone(errors.Wrap(err, "continue failed"))
+					return
+				}
+				continue
+			}
 			snapshot, err := t.tradingUseCase.GetLatestSnapshot(ctx)
-			if err != nil {
+
+			if errors.Is(err, domain.ErrNoop) {
+				continue
+			} else if err != nil {
 				setErrAndDone(errors.Wrap(err, "get snapshot failed"))
 				return
 			}
@@ -140,7 +152,7 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 				setErrAndDone(errors.Wrap(err, "continue failed"))
 				return
 			}
-			fmt.Println("save use time", time.Since(timeNow))
+			snapshotSequenceID = sequenceID
 		}
 	}()
 

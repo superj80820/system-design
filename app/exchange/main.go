@@ -10,18 +10,21 @@ import (
 	"time"
 
 	"path/filepath"
-	"strconv"
 	"syscall"
 
 	httptransport "github.com/go-kit/kit/transport/http"
 	"github.com/gorilla/mux"
-	"github.com/shopspring/decimal"
+	authDelivery "github.com/superj80820/system-design/auth/delivery"
+	authHttpDelivery "github.com/superj80820/system-design/auth/delivery/http"
+	"github.com/superj80820/system-design/auth/usecase"
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
+	traceKit "github.com/superj80820/system-design/kit/trace"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
@@ -106,7 +109,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)), 0644)
+	authSchemaSQL, err := os.ReadFile("../../auth/repository/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)+"\n"+string(authSchemaSQL)), 0644)
 	if err != nil {
 		panic(err)
 	}
@@ -210,6 +217,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	tracer := traceKit.CreateNoOpTracer()
 
 	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
 	assetRepo := assetMemoryRepo.CreateAssetRepo()
@@ -230,6 +238,14 @@ func main() {
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
+	accountUseCase, err := usecase.CreateAccountUseCase(mysqlDB, logger)
+	if err != nil {
+		panic(err)
+	}
+	authUseCase, err := usecase.CreateAuthUseCase(mysqlDB, logger)
+	if err != nil {
+		panic(err)
+	}
 
 	go func() {
 		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
@@ -237,46 +253,37 @@ func main() {
 		}
 	}()
 
-	// TODO: workaround
-	serverBeforeAddUserID := httptransport.ServerBefore(func(ctx context.Context, r *http.Request) context.Context {
-		var userID int
-		userIDString := r.Header.Get("user-id")
-		if userIDString != "" {
-			userID, _ = strconv.Atoi(userIDString)
-		}
-		ctx = httpKit.AddUserID(ctx, userID)
-		return ctx
+	authMiddleware := httpMiddlewareKit.CreateAuthMiddleware(func(ctx context.Context, token string) (userID int64, err error) {
+		return authUseCase.Verify(token)
 	})
-
-	// TODO: workaround
-	for userID := 2; userID <= 1000; userID++ {
-		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["BTC"], decimal.NewFromInt(10000000000))
-		userAssetUseCase.LiabilityUserTransfer(userID, currencyMap["USDT"], decimal.NewFromInt(10000000000))
+	options := []httptransport.ServerOption{
+		httptransport.ServerBefore(httpKit.CustomBeforeCtx(tracer)),
+		httptransport.ServerAfter(httpKit.CustomAfterCtx),
+		httptransport.ServerErrorEncoder(httpKit.EncodeHTTPErrorResponse()),
 	}
-
 	r := mux.NewRouter()
 	r.Methods("GET").Path("/api/v1/assets").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeGetUserAssetsEndpoint(userAssetUseCase),
+			authMiddleware(httpDelivery.MakeGetUserAssetsEndpoint(userAssetUseCase)),
 			httpDelivery.DecodeGetUserAssetsRequests,
 			httpDelivery.EncodeGetUserAssetsResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/orders/{orderID}").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeGetUserOrderEndpoint(orderUserCase),
+			authMiddleware(httpDelivery.MakeGetUserOrderEndpoint(orderUserCase)),
 			httpDelivery.DecodeGetUserOrderRequest,
 			httpDelivery.EncodeGetUserOrderResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/orders").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase),
+			authMiddleware(httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase)),
 			httpDelivery.DecodeGetUserOrdersRequest,
 			httpDelivery.EncodeGetUserOrdersResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/orderBook").Handler(
@@ -284,7 +291,7 @@ func main() {
 			httpDelivery.MakeGetOrderBookEndpoint(matchingUseCase),
 			httpDelivery.DecodeGetOrderBookRequest,
 			httpDelivery.EncodeGetOrderBookResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/ticks").Handler(
@@ -292,7 +299,7 @@ func main() {
 			httpDelivery.MakeGetTickEndpoint(quotationUseCase),
 			httpDelivery.DecodeGetTickRequests,
 			httpDelivery.EncodeGetTickResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/bars/day").Handler(
@@ -300,7 +307,7 @@ func main() {
 			httpDelivery.MakeGetSecBarEndpoint(candleUseCase),
 			httpDelivery.DecodeGetSecBarRequest,
 			httpDelivery.EncodeGetSecBarResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/bars/hour").Handler(
@@ -308,7 +315,7 @@ func main() {
 			httpDelivery.MakeGetHourBarEndpoint(candleUseCase),
 			httpDelivery.DecodeGetHourBarRequest,
 			httpDelivery.EncodeGetHourBarResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/bars/min").Handler(
@@ -316,7 +323,7 @@ func main() {
 			httpDelivery.MakeGetMinBarEndpoint(candleUseCase),
 			httpDelivery.DecodeGetMinBarRequest,
 			httpDelivery.EncodeGetMinBarResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/bars/sec").Handler(
@@ -324,41 +331,84 @@ func main() {
 			httpDelivery.MakeGetSecBarEndpoint(candleUseCase),
 			httpDelivery.DecodeGetSecBarRequest,
 			httpDelivery.EncodeGetSecBarResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/history/orders").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeGetHistoryOrdersEndpoint(orderUserCase),
+			authMiddleware(httpDelivery.MakeGetHistoryOrdersEndpoint(orderUserCase)),
 			httpDelivery.DecodeGetHistoryOrdersRequest,
 			httpDelivery.EncodeGetHistoryOrdersResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("GET").Path("/api/v1/history/orders/{orderID}/matches").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeGetHistoryMatchOrderDetailsEndpoint(tradingUseCase),
+			authMiddleware(httpDelivery.MakeGetHistoryMatchOrderDetailsEndpoint(tradingUseCase)),
 			httpDelivery.DecodeGetHistoryMatchOrderDetailsRequest,
 			httpDelivery.EncodeGetHistoryMatchOrderDetailsResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("POST").Path("/api/v1/orders/{orderID}/cancel").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase),
+			authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase)),
 			httpDelivery.DecodeCancelOrderRequest,
 			httpDelivery.EncodeCancelOrderResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
 	r.Methods("POST").Path("/api/v1/orders").Handler(
 		httptransport.NewServer(
-			httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase),
+			authMiddleware(httpDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase)),
 			httpDelivery.DecodeCreateOrderRequest,
 			httpDelivery.EncodeCreateOrderResponse,
-			serverBeforeAddUserID,
+			options...,
 		),
 	)
+	r.Methods("POST").Path("/api/v1/deposit").Handler(
+		httptransport.NewServer(
+			authMiddleware(httpDelivery.MakeCreateDepositEndpoint(tradingSequencerUseCase)),
+			httpDelivery.DecodeCreateDepositRequest,
+			httpDelivery.EncodeCreateDepositResponse,
+			options...,
+		),
+	)
+	r.Methods("POST").Path("/api/v1/user/register").Handler( // TODO: 須用複數嗎
+		httptransport.NewServer(
+			authHttpDelivery.MakeAccountRegisterEndpoint(accountUseCase),
+			authHttpDelivery.DecodeAccountRegisterRequest,
+			authHttpDelivery.EncodeAccountRegisterResponse,
+			options...,
+		))
+	r.Methods("POST").Path("/api/v1/auth/login").Handler(
+		httptransport.NewServer(
+			authHttpDelivery.MakeAuthLoginEndpoint(authUseCase),
+			authHttpDelivery.DecodeAuthLoginRequest,
+			authHttpDelivery.EncodeAuthLoginResponse,
+			options...,
+		))
+	r.Methods("POST").Path("/api/v1/auth/logout").Handler(
+		httptransport.NewServer(
+			authHttpDelivery.MakeAuthLogoutEndpoint(authUseCase),
+			authHttpDelivery.DecodeAuthLogoutRequest,
+			authHttpDelivery.EncodeAuthLogoutResponse,
+			options...,
+		))
+	r.Methods("POST").Path("/api/v1/auth/verify").Handler(
+		httptransport.NewServer(
+			authDelivery.MakeAuthVerifyEndpoint(authUseCase),
+			authHttpDelivery.DecodeAuthVerifyRequest,
+			authHttpDelivery.EncodeAuthVerifyResponse,
+			options...,
+		))
+	r.Methods("POST").Path("/api/v1/auth/refresh").Handler(
+		httptransport.NewServer(
+			authHttpDelivery.MakeRefreshAccessTokenEndpoint(authUseCase),
+			authHttpDelivery.DecodeRefreshAccessTokenRequest,
+			authHttpDelivery.EncodeRefreshAccessTokenResponse,
+			options...,
+		))
 
 	httpSrv := http.Server{
 		Addr:    ":9090",

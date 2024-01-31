@@ -43,7 +43,15 @@ type getHistoryMatchOrderDetailsRequest struct {
 	OrderID int
 }
 
+type createDepositRequest struct {
+	AssetID int             `json:"asset_id"`
+	Amount  decimal.Decimal `json:"amount"`
+}
+
 var (
+	DecodeCreateDepositRequest  = httpTransportKit.DecodeJsonRequest[createDepositRequest]
+	EncodeCreateDepositResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
+
 	EncodeGetHistoryMatchOrderDetailsResponse = httpTransportKit.EncodeJsonResponse
 
 	EncodeGetHistoryOrdersResponse = httpTransportKit.EncodeJsonResponse
@@ -78,6 +86,27 @@ var (
 
 	EncodeGetOrderBookResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeJsonResponse)
 )
+
+func MakeCreateDepositEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		userID := httpKit.GetUserID(ctx)
+		if userID == 0 {
+			return nil, errors.New("not found user id") // TODO: delete
+		}
+		req := request.(createDepositRequest)
+		if err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
+			EventType: domain.TradingEventDepositType,
+			DepositEvent: &domain.DepositEvent{
+				ToUserID: userID,
+				AssetID:  req.AssetID,
+				Amount:   req.Amount,
+			},
+		}); err != nil {
+			return nil, errors.Wrap(err, "produce trading event failed")
+		}
+		return nil, nil
+	}
+}
 
 func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -33,7 +34,7 @@ type AuthService struct {
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthService(db *ormKit.DB, logger loggerKit.Logger) (*AuthService, error) {
+func CreateAuthUseCase(db *ormKit.DB, logger loggerKit.Logger) (*AuthService, error) {
 	if db == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}
@@ -227,7 +228,12 @@ func (a *AuthService) Verify(accessToken string) (int64, error) {
 }
 
 func (a *AuthService) parseAndValidToken(tokenString string, key *ecdsa.PrivateKey) (*jwt.Token, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	if strings.Index(tokenString, "Bearer") != 0 {
+		return nil, errors.New("no bearer prefix")
+	}
+	formatToken := tokenString[len("Bearer "):]
+
+	token, err := jwt.Parse(formatToken, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
 			return nil, errors.New(fmt.Sprintf("unexpected signing %s", token.Header["alg"]))
 		}

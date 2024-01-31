@@ -17,7 +17,7 @@ type accountService struct {
 	logger loggerKit.Logger
 }
 
-func CreateAccountService(db *ormKit.DB, logger loggerKit.Logger) (*accountService, error) {
+func CreateAccountUseCase(db *ormKit.DB, logger loggerKit.Logger) (*accountService, error) {
 	if db == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}

@@ -148,11 +148,11 @@ func main() {
 		tracer = traceKit.CreateNoOpTracer()
 	}
 
-	accountService, err := usecase.CreateAccountService(singletonDB, logger)
+	accountService, err := usecase.CreateAccountUseCase(singletonDB, logger)
 	if err != nil {
 		panic(err)
 	}
-	authService, err := usecase.CreateAuthService(singletonDB, logger)
+	authService, err := usecase.CreateAuthUseCase(singletonDB, logger)
 	if err != nil {
 		panic(err)
 	}

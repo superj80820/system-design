@@ -64,7 +64,7 @@ export default function () {
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'user-id': '2'
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDY3MzE4OTMsImlhdCI6MTcwNjcyODI5Mywic3ViIjoiMTc1Mjc3MTYwNzQ4ODYzMDc4NCJ9.Tnd_s2ewRBD6rdTM13lNqdNQmlH-jSZrQFKSIblKWr2eiNwK1SDi8FObKL8g0Lt9Gap7_TD2niz8VB9_yE3zcA',
     },
   };
 

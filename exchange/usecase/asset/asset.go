@@ -64,21 +64,21 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 	switch assetTransferType {
 	case domain.AssetTransferAvailableToAvailable:
 		if checkBalance && fromUserAsset.Available.Cmp(amount) < 0 {
-			return domain.LessAmountErr
+			return errors.Wrap(domain.LessAmountErr, "less amount err")
 		}
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)
 		return nil
 	case domain.AssetTransferAvailableToFrozen:
 		if checkBalance && fromUserAsset.Available.Cmp(amount) < 0 {
-			return domain.LessAmountErr
+			return errors.Wrap(domain.LessAmountErr, "less amount err")
 		}
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Frozen = toUserAsset.Frozen.Add(amount)
 		return nil
 	case domain.AssetTransferFrozenToAvailable:
 		if checkBalance && fromUserAsset.Frozen.Cmp(amount) < 0 {
-			return domain.LessAmountErr
+			return errors.Wrap(domain.LessAmountErr, "less amount err")
 		}
 		fromUserAsset.Frozen = fromUserAsset.Frozen.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)

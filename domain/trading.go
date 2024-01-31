@@ -14,6 +14,7 @@ const (
 	TradingEventCreateOrderType
 	TradingEventCancelOrderType
 	TradingEventTransferType
+	TradingEventDepositType
 )
 
 // TODO: abstract
@@ -28,6 +29,7 @@ type TradingEvent struct {
 	OrderRequestEvent *OrderRequestEvent
 	OrderCancelEvent  *OrderCancelEvent
 	TransferEvent     *TransferEvent
+	DepositEvent      *DepositEvent
 
 	CreatedAt time.Time
 }
@@ -58,6 +60,13 @@ type TradingLogResult struct {
 
 type TransferEvent struct {
 	FromUserID int
+	ToUserID   int
+	AssetID    int
+	Amount     decimal.Decimal
+	Sufficient bool // TODO: what this?
+}
+
+type DepositEvent struct {
 	ToUserID   int
 	AssetID    int
 	Amount     decimal.Decimal
@@ -114,6 +123,8 @@ type SyncTradingUseCase interface {
 	CancelOrder(tradingEvent *TradingEvent) error
 	Transfer(tradingEvent *TradingEvent) error
 
+	Deposit(tradingEvent *TradingEvent) error
+
 	GetSequenceID() int
 	RecoverBySnapshot(*TradingSnapshot) error
 }
@@ -123,7 +134,10 @@ type TradingUseCase interface {
 	CancelOrder(tradingEvent *TradingEvent) error
 	Transfer(tradingEvent *TradingEvent) error
 
+	Deposit(tradingEvent *TradingEvent) error
+
 	GetLatestOrderBook() *OrderBookEntity
+	GetSequenceID() int
 	ConsumeTradingResult(key string)
 	GetHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
 	GetLatestSnapshot(context.Context) (*TradingSnapshot, error)
