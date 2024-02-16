@@ -94,7 +94,7 @@ func MakeCreateDepositEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endp
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(createDepositRequest)
-		if err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
+		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
 			EventType: domain.TradingEventDepositType,
 			DepositEvent: &domain.DepositEvent{
 				ToUserID: userID,
@@ -115,7 +115,7 @@ func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoi
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(createOrderRequest)
-		if err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
+		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
 			EventType: domain.TradingEventCreateOrderType,
 			OrderRequestEvent: &domain.OrderRequestEvent{
 				UserID:    userID,
@@ -254,7 +254,7 @@ func MakeCancelOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoi
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(cancelOrderRequest)
-		if err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
+		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
 			EventType: domain.TradingEventCancelOrderType,
 			OrderCancelEvent: &domain.OrderCancelEvent{
 				UserID:  userID,

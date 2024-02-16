@@ -39,7 +39,8 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int) mq.MQTopic {
 					if err := value.NotifyWithManualCommit(message, func() error {
 						return nil
 					}); err != nil {
-						panic(fmt.Sprintf("TODO: error: %+v", errors.Wrap(err, "notify failed")))
+						fmt.Println(fmt.Sprintf("TODO: error: %+v", errors.Wrap(err, "notify failed")))
+						return true
 					}
 					return true
 				})

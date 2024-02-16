@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -25,9 +26,9 @@ func NoRequest(ctx context.Context, messageType endpoint.MessageType, data []byt
 	return nil, nil
 }
 
-func JsonDecodeRequest[T any](ctx context.Context, messageType endpoint.MessageType, data []byte) (T, error) {
+func JsonDecodeRequest[T any](ctx context.Context, messageType endpoint.MessageType, data []byte) (T, error) { // TODO: maybe return pointer?
 	var req T
-	if err := json.Unmarshal(data, req); err != nil {
+	if err := json.Unmarshal(data, &req); err != nil {
 		var noop T
 		return noop, errors.Wrap(err, "json unmarshal failed")
 	}
@@ -47,6 +48,7 @@ func EncodeWSErrorResponse() func(ctx context.Context, err error, conn *websocke
 		if err == nil {
 			panic("encodeError with nil error")
 		}
+		fmt.Println("york", err)
 
 		errorCode := code.CreateWebsocketError(ctx, code.ParseErrorCode(err))
 		jsonData, err := json.Marshal(errorCode)

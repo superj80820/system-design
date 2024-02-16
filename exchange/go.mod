@@ -10,6 +10,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/superj80820/system-design/domain v0.0.0-20240131085738-3e79fbc2034c
 	github.com/superj80820/system-design/kit/code v0.0.0-20240131081435-3a8096cad00b
+	github.com/superj80820/system-design/kit/core v0.0.0-20240131081435-3a8096cad00b
 	github.com/superj80820/system-design/kit/http v0.0.0-20240131085738-3e79fbc2034c
 	github.com/superj80820/system-design/kit/logger v0.0.0-20240131081435-3a8096cad00b
 	github.com/superj80820/system-design/kit/mq v0.0.0-20240131085738-3e79fbc2034c
@@ -82,7 +83,6 @@ require (
 	github.com/shirou/gopsutil/v3 v3.23.12 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
-	github.com/superj80820/system-design/kit/core v0.0.0-20240131081435-3a8096cad00b // indirect
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

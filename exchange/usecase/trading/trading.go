@@ -3,40 +3,187 @@ package trading
 import (
 	"context"
 	"fmt"
-	"sync"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
+	"github.com/superj80820/system-design/kit/core/endpoint"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type tradingUseCase struct {
 	logger             loggerKit.Logger
 	userAssetUseCase   domain.UserAssetUseCase
+	userAssetRepo      domain.UserAssetRepo
 	tradingRepo        domain.TradingRepo
+	candleRepo         domain.CandleRepo
 	matchingUseCase    domain.MatchingUseCase
 	syncTradingUseCase domain.SyncTradingUseCase
 	orderUseCase       domain.OrderUseCase
+	quotationRepo      domain.QuotationRepo
+	currencyUseCase    domain.CurrencyUseCase
+	matchingRepo       domain.MatchingRepo
+	orderRepo          domain.OrderRepo
 
-	historyMatchingDetailsLock     *sync.Mutex
-	historyMatchingDetails         []*domain.MatchOrderDetail
-	isHistoryMatchingDetailsFullCh chan struct{}
+	orderBookDepth int
+	cancel         context.CancelFunc
+	doneCh         chan struct{}
+	err            error
+}
 
-	tradingUseCaseLock *sync.Mutex
-	orderBookDepth     int
-	cancel             context.CancelFunc
-	doneCh             chan struct{}
-	err                error
+// response example:
+//
+//	{
+//		"close24h": "2",
+//		"high24h": "2",
+//		"lastSize": "1",
+//		"low24h": "2",
+//		"open24h": "2",
+//		"price": "2",
+//		"productId": "BTC-USDT",
+//		"sequence": 0,
+//		"side": "buy",
+//		"time": "2024-02-05T10:41:10.564Z",
+//		"tradeId": 1,
+//		"type": "ticker",
+//		"volume24h": "1",
+//		"volume30d": "1"
+//	  }
+type tradingTickNotify struct {
+	Close24H  string    `json:"close24h"`
+	High24H   string    `json:"high24h"`
+	LastSize  string    `json:"lastSize"`
+	Low24H    string    `json:"low24h"`
+	Open24H   string    `json:"open24h"`
+	Price     string    `json:"price"`
+	ProductID string    `json:"productId"`
+	Sequence  int       `json:"sequence"`
+	Side      string    `json:"side"`
+	Time      time.Time `json:"time"`
+	TradeID   int       `json:"tradeId"`
+	Type      string    `json:"type"`
+	Volume24H string    `json:"volume24h"`
+	Volume30D string    `json:"volume30d"`
+}
+
+// response example:
+//
+//	{
+//		"available": "999999999",
+//		"currencyCode": "BTC",
+//		"hold": "1",
+//		"type": "funds",
+//		"userId": "11fa31dd-4933-4caf-9c67-5787c9fe6f21"
+//	}
+type tradingFoundsNotify struct {
+	Available    string `json:"available"`
+	CurrencyCode string `json:"currencyCode"`
+	Hold         string `json:"hold"`
+	Type         string `json:"type"`
+	UserID       string `json:"userId"`
+}
+
+// response example:
+//
+//	{
+//		"makerOrderId": "b60cdaae-6d2b-4bc9-9bb9-92f0ac48d718",
+//		"price": "29",
+//		"productId": "BTC-USDT",
+//		"sequence": 40,
+//		"side": "buy",
+//		"size": "1",
+//		"takerOrderId": "d4d13109-a7a1-47ec-bc58-cb58c4840695",
+//		"time": "2024-02-05T16:34:21.455Z",
+//		"tradeId": 5,
+//		"type": "match"
+//	}
+type tradingMatchNotify struct {
+	MakerOrderID string    `json:"makerOrderId"`
+	Price        string    `json:"price"`
+	ProductID    string    `json:"productId"`
+	Sequence     int       `json:"sequence"`
+	Side         string    `json:"side"`
+	Size         string    `json:"size"`
+	TakerOrderID string    `json:"takerOrderId"`
+	Time         time.Time `json:"time"`
+	TradeID      int       `json:"tradeId"`
+	Type         string    `json:"type"`
+}
+
+// response example:
+//
+//	{
+//		"createdAt": "2024-02-05T16:34:13.488Z",
+//		"executedValue": "29",
+//		"fillFees": "0",
+//		"filledSize": "1",
+//		"funds": "29",
+//		"id": "b60cdaae-6d2b-4bc9-9bb9-92f0ac48d718",
+//		"orderType": "limit",
+//		"price": "29",
+//		"productId": "BTC-USDT",
+//		"settled": false,
+//		"side": "buy",
+//		"size": "1",
+//		"status": "filled",
+//		"type": "order",
+//		"userId": "11fa31dd-4933-4caf-9c67-5787c9fe6f21"
+//	}
+type tradingOrderNotify struct {
+	CreatedAt     time.Time `json:"createdAt"`
+	ExecutedValue string    `json:"executedValue"`
+	FillFees      string    `json:"fillFees"`
+	FilledSize    string    `json:"filledSize"`
+	Funds         string    `json:"funds"`
+	ID            string    `json:"id"`
+	OrderType     string    `json:"orderType"`
+	Price         string    `json:"price"`
+	ProductID     string    `json:"productId"`
+	Settled       bool      `json:"settled"`
+	Side          string    `json:"side"`
+	Size          string    `json:"size"`
+	Status        string    `json:"status"`
+	Type          string    `json:"type"`
+	UserID        string    `json:"userId"`
+}
+
+type tradingOrderBookNotify struct {
+	Asks      [][]float64 `json:"asks"`
+	Bids      [][]float64 `json:"bids"`
+	ProductID string      `json:"productId"`
+	Sequence  int         `json:"sequence"`
+	Time      int64       `json:"time"`
+	Type      string      `json:"type"`
+}
+
+type tradingUserAsset struct {
+	Available    string `json:"available"`
+	CurrencyCode string `json:"currencyCode"`
+	Hold         string `json:"hold"`
+	Type         string `json:"type"`
+	UserID       string `json:"userId"`
+}
+
+type tradingPongNotify struct {
+	Type string `json:"type"`
 }
 
 func CreateTradingUseCase(
 	ctx context.Context,
 	tradingRepo domain.TradingRepo,
+	matchingRepo domain.MatchingRepo,
+	quotationRepo domain.QuotationRepo,
+	candleRepo domain.CandleRepo,
+	orderRepo domain.OrderRepo,
+	userAssetRepo domain.UserAssetRepo,
 	orderUseCase domain.OrderUseCase,
 	userAssetUseCase domain.UserAssetUseCase,
 	syncTradingUseCase domain.SyncTradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
+	currencyUseCase domain.CurrencyUseCase,
 	orderBookDepth int,
 	logger loggerKit.Logger,
 ) domain.TradingUseCase {
@@ -45,26 +192,26 @@ func CreateTradingUseCase(
 	t := &tradingUseCase{
 		logger:             logger,
 		tradingRepo:        tradingRepo,
+		matchingRepo:       matchingRepo,
+		quotationRepo:      quotationRepo,
+		candleRepo:         candleRepo,
+		orderRepo:          orderRepo,
+		userAssetRepo:      userAssetRepo,
 		orderUseCase:       orderUseCase,
 		syncTradingUseCase: syncTradingUseCase,
 		matchingUseCase:    matchingUseCase,
 		userAssetUseCase:   userAssetUseCase,
+		currencyUseCase:    currencyUseCase,
 
-		historyMatchingDetailsLock:     new(sync.Mutex),
-		isHistoryMatchingDetailsFullCh: make(chan struct{}),
-
-		tradingUseCaseLock: new(sync.Mutex),
-		orderBookDepth:     orderBookDepth,
-		cancel:             cancel,
-		doneCh:             make(chan struct{}),
+		orderBookDepth: orderBookDepth,
+		cancel:         cancel,
+		doneCh:         make(chan struct{}),
 	}
 
 	t.tradingRepo.SubscribeTradeEvent("global-trader", func(te *domain.TradingEvent) {
 		switch te.EventType {
 		case domain.TradingEventCreateOrderType:
-			t.tradingUseCaseLock.Lock()
-			matchResult, err := syncTradingUseCase.CreateOrder(te)
-			t.tradingUseCaseLock.Unlock()
+			matchResult, err := syncTradingUseCase.CreateOrder(ctx, te)
 			if errors.Is(err, domain.LessAmountErr) {
 				t.logger.Info(fmt.Sprintf("%+v", err))
 				return
@@ -77,16 +224,11 @@ func CreateTradingUseCase(
 				TradingEvent:        te,
 				MatchResult:         matchResult,
 			})
-			if errors.Is(err, domain.LessAmountErr) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if err != nil {
+			if err != nil {
 				panic(fmt.Sprintf("process message get error: %+v", err))
 			}
 		case domain.TradingEventCancelOrderType:
-			t.tradingUseCaseLock.Lock()
-			err := syncTradingUseCase.CancelOrder(te)
-			t.tradingUseCaseLock.Unlock()
+			err := syncTradingUseCase.CancelOrder(ctx, te)
 			if errors.Is(err, domain.LessAmountErr) {
 				t.logger.Info(fmt.Sprintf("%+v", err))
 				return
@@ -98,26 +240,35 @@ func CreateTradingUseCase(
 				TradingResultStatus: domain.TradingResultStatusCancel,
 				TradingEvent:        te,
 			})
-			if errors.Is(err, domain.LessAmountErr) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if err != nil {
+			if err != nil {
 				panic(fmt.Sprintf("process message get error: %+v", err))
 			}
 		case domain.TradingEventTransferType:
-			t.tradingUseCaseLock.Lock()
-			err := syncTradingUseCase.Transfer(te)
-			t.tradingUseCaseLock.Unlock()
+			err := syncTradingUseCase.Transfer(ctx, te)
 			if errors.Is(err, domain.LessAmountErr) {
 				t.logger.Info(fmt.Sprintf("%+v", err))
 				return
 			} else if err != nil {
 				panic(fmt.Sprintf("process message get error: %+v", err))
 			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusTransfer,
+				TradingEvent:        te,
+			})
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
 		case domain.TradingEventDepositType:
-			t.tradingUseCaseLock.Lock()
-			err := t.Deposit(te)
-			t.tradingUseCaseLock.Unlock()
+			err := t.Deposit(ctx, te)
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusDeposit,
+				TradingEvent:        te,
+			})
 			if err != nil {
 				panic(fmt.Sprintf("process message get error: %+v", err))
 			}
@@ -126,35 +277,36 @@ func CreateTradingUseCase(
 		}
 	})
 
-	go t.collectHistoryMatchingDetailsThenSave(ctx)
-
 	return t
 }
 
-func (t *tradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
-	if err := t.syncTradingUseCase.CancelOrder(tradingEvent); err != nil {
+func (t *tradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+	err := t.syncTradingUseCase.CancelOrder(ctx, tradingEvent)
+	if err != nil {
 		return errors.Wrap(err, "cancel order failed")
 	}
 	return nil
 }
 
-func (t *tradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
-	matchResult, err := t.syncTradingUseCase.CreateOrder(tradingEvent)
+func (t *tradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
+	matchResult, err := t.syncTradingUseCase.CreateOrder(ctx, tradingEvent)
 	if err != nil {
 		return nil, errors.Wrap(err, "create order failed")
 	}
 	return matchResult, nil
 }
 
-func (t *tradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
-	if err := t.syncTradingUseCase.Transfer(tradingEvent); err != nil {
+func (t *tradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+	err := t.syncTradingUseCase.Transfer(ctx, tradingEvent)
+	if err != nil {
 		return errors.Wrap(err, "transfer failed")
 	}
 	return nil
 }
 
-func (t *tradingUseCase) Deposit(tradingEvent *domain.TradingEvent) error {
-	if err := t.syncTradingUseCase.Deposit(tradingEvent); err != nil {
+func (t *tradingUseCase) Deposit(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+	err := t.syncTradingUseCase.Deposit(ctx, tradingEvent)
+	if err != nil {
 		return errors.Wrap(err, "deposit failed")
 	}
 	return nil
@@ -177,66 +329,11 @@ func (t *tradingUseCase) GetHistoryMatchDetails(userID, orderID int) ([]*domain.
 		}
 	}
 
-	matchOrderDetails, err := t.tradingRepo.GetMatchingDetails(orderID)
+	matchOrderDetails, err := t.matchingRepo.GetMatchingDetails(orderID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get matching details failed")
 	}
 	return matchOrderDetails, nil
-}
-
-func (t *tradingUseCase) ConsumeTradingResult(key string) { // TODO: implement order book in redis
-	t.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
-		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-			return
-		}
-
-		var matchOrderDetails []*domain.MatchOrderDetail
-		for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-			takerOrderDetail := &domain.MatchOrderDetail{
-				SequenceID:     tradingResult.TradingEvent.SequenceID, // TODO: do not use taker sequence?
-				OrderID:        matchDetail.TakerOrder.ID,
-				CounterOrderID: matchDetail.MakerOrder.ID,
-				UserID:         matchDetail.TakerOrder.UserID,
-				CounterUserID:  matchDetail.MakerOrder.UserID,
-				Direction:      matchDetail.TakerOrder.Direction,
-				Price:          matchDetail.Price,
-				Quantity:       matchDetail.Quantity,
-				Type:           domain.MatchTypeTaker,
-				CreatedAt:      tradingResult.TradingEvent.CreatedAt,
-			}
-			makerOrderDetail := &domain.MatchOrderDetail{
-				SequenceID:     tradingResult.TradingEvent.SequenceID, // TODO: do not use maker sequence?
-				OrderID:        matchDetail.MakerOrder.ID,
-				CounterOrderID: matchDetail.TakerOrder.ID,
-				UserID:         matchDetail.MakerOrder.UserID,
-				CounterUserID:  matchDetail.TakerOrder.UserID,
-				Direction:      matchDetail.MakerOrder.Direction,
-				Price:          matchDetail.Price,
-				Quantity:       matchDetail.Quantity,
-				Type:           domain.MatchTypeMaker,
-				CreatedAt:      tradingResult.TradingEvent.CreatedAt,
-			}
-
-			matchOrderDetails = append(matchOrderDetails, takerOrderDetail, makerOrderDetail)
-		}
-
-		t.historyMatchingDetailsLock.Lock()
-		for _, matchOrderDetail := range matchOrderDetails {
-			t.historyMatchingDetails = append(t.historyMatchingDetails, matchOrderDetail)
-		}
-		historyMatchingDetailsLength := len(t.historyMatchingDetails)
-		t.historyMatchingDetailsLock.Unlock()
-		if historyMatchingDetailsLength >= 1000 {
-			t.isHistoryMatchingDetailsFullCh <- struct{}{}
-		}
-	})
-}
-
-func (t *tradingUseCase) GetLatestOrderBook() *domain.OrderBookEntity {
-	t.tradingUseCaseLock.Lock()
-	defer t.tradingUseCaseLock.Unlock()
-
-	return t.matchingUseCase.GetOrderBook(t.orderBookDepth)
 }
 
 func (t *tradingUseCase) GetSequenceID() int {
@@ -293,6 +390,199 @@ func (t *tradingUseCase) SaveSnapshot(ctx context.Context, tradingSnapshot *doma
 	return nil
 }
 
+// TODO: error handle when consume failed
+func (t *tradingUseCase) Notify(ctx context.Context, userID int, stream endpoint.Stream[domain.TradingNotifyRequest, any]) error {
+	consumeKey := strconv.Itoa(userID) + "-" + utilKit.GetSnowflakeIDString()
+
+	notifyOrderBookFn := func(orderBook *domain.OrderBookEntity) error {
+		orderBookNotify := tradingOrderBookNotify{
+			ProductID: t.currencyUseCase.GetProductID(),
+			Sequence:  orderBook.SequenceID,
+			Time:      time.Now().UnixMilli(),
+			Type:      "snapshot",           // TODO: workaround
+			Bids:      make([][]float64, 0), // TODO: client need zero value
+			Asks:      make([][]float64, 0), // TODO: client need zero value
+		}
+		for _, val := range orderBook.Buy {
+			orderBookNotify.Bids = append(orderBookNotify.Bids, []float64{val.Price.InexactFloat64(), val.Quantity.InexactFloat64(), 1}) // TODO: 1 is workaround
+		}
+		for _, val := range orderBook.Sell {
+			orderBookNotify.Asks = append(orderBookNotify.Asks, []float64{val.Price.InexactFloat64(), val.Quantity.InexactFloat64(), 1}) // TODO: 1 is workaround
+		}
+		if err := stream.Send(&orderBookNotify); err != nil {
+			return errors.Wrap(err, "send failed")
+		}
+		return nil
+	}
+
+	notifyOrderBookFn(t.matchingUseCase.GetOrderBook(100)) // TODO: max depth
+
+	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, notifyOrderBookFn)
+
+	var (
+		isConsumeTick       bool
+		isConsumeMatch      bool
+		isConsumeFounds     bool
+		isConsumeOrder      bool
+		isConsumeCandleMin  atomic.Bool
+		isConsumeCandleHour atomic.Bool
+		isConsumeCandleDay  atomic.Bool
+	)
+	for {
+		receive, err := stream.Recv()
+		if err != nil {
+			return errors.Wrap(err, "receive failed")
+		}
+		for _, channel := range receive.Channels {
+			switch domain.ExchangeRequestType(channel) {
+			case domain.TickerExchangeRequestType:
+				if isConsumeTick {
+					continue
+				}
+				t.quotationRepo.ConsumeTicks(ctx, consumeKey, func(sequenceID int, ticks []*domain.TickEntity) error {
+					for _, tick := range ticks {
+						if err := stream.Send(&tradingTickNotify{
+							// Close24H  : TODO
+							// High24H   : TODO
+							// LastSize  : TODO
+							// Low24H    : TODO
+							// Open24H   : TODO
+							Price:     tick.Price.String(),
+							ProductID: t.currencyUseCase.GetProductID(),
+							Sequence:  sequenceID,
+							Side:      tick.TakerDirection.String(),
+							Time:      tick.CreatedAt,
+							// TradeID   : TODO
+							Type: string(domain.TickerExchangeRequestType),
+							// Volume24H : TODO
+							// Volume30D : TODO
+						}); err != nil {
+							return errors.Wrap(err, "send failed")
+						}
+					}
+					return nil
+				})
+				isConsumeTick = true
+			case domain.FoundsExchangeRequestType:
+				if isConsumeFounds {
+					continue
+				}
+				t.userAssetRepo.ConsumeUserAsset(ctx, consumeKey, func(notifyUserID, assetID int, userAsset *domain.UserAsset) error {
+					if userID != notifyUserID {
+						return nil
+					}
+
+					currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(assetID))
+					if err != nil {
+						return errors.Wrap(err, "get currency upper name by type failed")
+					}
+
+					if err := stream.Send(tradingFoundsNotify{
+						Available:    userAsset.Available.String(),
+						CurrencyCode: currencyCode,
+						Hold:         userAsset.Frozen.String(),
+						Type:         string(domain.FoundsExchangeRequestType),
+						UserID:       strconv.Itoa(notifyUserID),
+					}); err != nil {
+						return errors.Wrap(err, "send failed")
+					}
+
+					return nil
+				})
+				isConsumeFounds = true
+			case domain.CandlesExchangeRequestType: // TODO: what this?
+			case domain.Candles60ExchangeRequestType, domain.Candles3600ExchangeRequestType, domain.Candles86400ExchangeRequestType:
+				if isConsumeCandleMin.Load() && isConsumeCandleHour.Load() && isConsumeCandleDay.Load() {
+					continue
+				}
+				// if !(isConsumeCandleMin.Load() || isConsumeCandleHour.Load() || isConsumeCandleDay.Load()) {
+				// 	t.candleRepo.ConsumeCandle(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
+				// 		if candleBar.Type == domain.CandleTimeTypeMin && isConsumeCandleMin.Load() ||
+				// 			candleBar.Type == domain.CandleTimeTypeHour && isConsumeCandleHour.Load() ||
+				// 			candleBar.Type == domain.CandleTimeTypeDay && isConsumeCandleDay.Load() {
+				// 			if err := stream.Send(candleBar); err != nil {
+				// 				return errors.Wrap(err, "send failed")
+				// 			}
+				// 		}
+				// 		return nil
+				// 	})
+				// }
+				if domain.ExchangeRequestType(channel) == domain.Candles60ExchangeRequestType {
+					isConsumeCandleMin.Store(true)
+				} else if domain.ExchangeRequestType(channel) == domain.Candles3600ExchangeRequestType {
+					isConsumeCandleHour.Store(true)
+				} else if domain.ExchangeRequestType(channel) == domain.Candles86400ExchangeRequestType {
+					isConsumeCandleDay.Store(true)
+				}
+			case domain.MatchExchangeRequestType:
+				if isConsumeMatch {
+					continue
+				}
+				t.matchingRepo.ConsumeMatchOrder(ctx, consumeKey, func(matchOrderDetail *domain.MatchOrderDetail) error {
+					if matchOrderDetail.Type != domain.MatchTypeTaker {
+						return nil
+					}
+					if err := stream.Send(&tradingMatchNotify{
+						// MakerOrderID : TODO
+						Price: matchOrderDetail.Price.String(),
+						// ProductID    : TODO
+						Sequence:     matchOrderDetail.SequenceID,
+						Side:         matchOrderDetail.Direction.String(),
+						Size:         matchOrderDetail.Quantity.String(),
+						TakerOrderID: strconv.Itoa(matchOrderDetail.UserID),
+						Time:         matchOrderDetail.CreatedAt,
+						// TradeID      : TODO
+						Type: string(domain.MatchExchangeRequestType),
+					}); err != nil {
+						return errors.Wrap(err, "send failed")
+					}
+					return nil
+				})
+				isConsumeMatch = true
+			case domain.Level2ExchangeRequestType:
+			case domain.OrderExchangeRequestType:
+				if isConsumeOrder {
+					continue
+				}
+				t.orderRepo.ConsumeOrder(ctx, consumeKey, func(order *domain.OrderEntity) error {
+					if err := stream.Send(&tradingOrderNotify{
+						CreatedAt:     order.CreatedAt,
+						ExecutedValue: order.Quantity.Sub(order.UnfilledQuantity).Mul(order.Price).String(),
+						FillFees:      "0",
+						FilledSize:    order.Quantity.Sub(order.UnfilledQuantity).String(),
+						Funds:         order.Quantity.Mul(order.Price).String(),
+						ID:            strconv.Itoa(order.ID),
+						OrderType:     "limit",
+						Price:         order.Price.String(),
+						ProductID:     t.currencyUseCase.GetProductID(),
+						// Settled       : TODO: what this?
+						Side: order.Direction.String(),
+						Size: order.Quantity.String(),
+						Status: func(status string) string {
+							if status == "pending" {
+								return "open"
+							} else if status == "fully-filled" {
+								return "filled"
+							}
+							return status
+						}(order.Status.String()),
+						Type:   string(domain.OrderExchangeRequestType),
+						UserID: strconv.Itoa(order.UserID),
+					}); err != nil {
+						return errors.Wrap(err, "send failed")
+					}
+					return nil
+				})
+				isConsumeOrder = true
+			case domain.PingExchangeRequestType:
+				if err := stream.Send(&tradingPongNotify{Type: "pong"}); err != nil {
+					return errors.Wrap(err, "send failed")
+				}
+			}
+		}
+	}
+}
+
 func (t *tradingUseCase) Done() <-chan struct{} {
 	return t.doneCh
 }
@@ -301,58 +591,4 @@ func (t *tradingUseCase) Shutdown() error {
 	t.cancel()
 	<-t.doneCh
 	return t.err
-}
-
-func (t *tradingUseCase) collectHistoryMatchingDetailsThenSave(ctx context.Context) {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	errContinue := errors.New("continue")
-	fn := func() error {
-		cloneHistoryMatchingDetails, err := func() ([]*domain.MatchOrderDetail, error) {
-			t.historyMatchingDetailsLock.Lock()
-			defer t.historyMatchingDetailsLock.Unlock()
-
-			if len(t.historyMatchingDetails) == 0 {
-				return nil, errContinue
-			}
-			cloneHistoryMatchingDetails := make([]*domain.MatchOrderDetail, len(t.historyMatchingDetails))
-			copy(cloneHistoryMatchingDetails, t.historyMatchingDetails)
-			t.historyMatchingDetails = nil
-
-			return cloneHistoryMatchingDetails, nil
-		}()
-		if err != nil {
-			return errors.Wrap(err, "clone history matching details failed")
-		}
-
-		if err := t.tradingRepo.SaveMatchingDetailsWithIgnore(ctx, cloneHistoryMatchingDetails); err != nil {
-			return errors.Wrap(err, "save matching details failed")
-		}
-
-		return nil
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := fn(); errors.Is(err, errContinue) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("TODO, error: %+v", err))
-			}
-		case <-t.isHistoryMatchingDetailsFullCh:
-			if err := fn(); errors.Is(err, errContinue) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("TODO, error: %+v", err))
-			}
-		case <-ctx.Done(): // TODO: test: when shutdown
-			if err := fn(); errors.Is(err, errContinue) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("TODO, error: %+v", err))
-			}
-		}
-	}
 }

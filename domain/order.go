@@ -1,10 +1,32 @@
 package domain
 
 import (
+	context "context"
 	"time"
 
 	"github.com/shopspring/decimal"
 )
+
+type OrderType int
+
+const (
+	OrderTypeUnknown OrderType = iota
+	OrderTypeMarket
+	OrderTypeLimit
+)
+
+func (o OrderType) String() string {
+	switch o {
+	case OrderTypeMarket:
+		return "market"
+	case OrderTypeLimit:
+		return "limit"
+	case OrderTypeUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
 
 type DirectionEnum int
 
@@ -13,6 +35,19 @@ const (
 	DirectionBuy
 	DirectionSell
 )
+
+func (d DirectionEnum) String() string {
+	switch d {
+	case DirectionBuy:
+		return "buy"
+	case DirectionSell:
+		return "sell"
+	case DirectionUnknown:
+		return "unknown"
+	default:
+		return "unknown"
+	}
+}
 
 type OrderStatusEnum int
 
@@ -24,6 +59,25 @@ const (
 	OrderStatusFullyCanceled
 	OrderStatusPartialCanceled
 )
+
+func (o OrderStatusEnum) String() string {
+	switch o {
+	case OrderStatusUnknown:
+		return "unknown"
+	case OrderStatusFullyFilled:
+		return "fully-filled"
+	case OrderStatusPartialFilled:
+		return "partial-filled"
+	case OrderStatusPending:
+		return "pending"
+	case OrderStatusFullyCanceled:
+		return "fully-canceled"
+	case OrderStatusPartialCanceled:
+		return "partial-canceled"
+	default:
+		return "unknown"
+	}
+}
 
 func (o OrderStatusEnum) IsFinalStatus() bool {
 	switch o {
@@ -71,19 +125,25 @@ type OrderEntity struct {
 }
 
 type OrderUseCase interface {
-	CreateOrder(sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, error)
-	RemoveOrder(orderID int) error
+	CreateOrder(ctx context.Context, sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, error)
+	RemoveOrder(ctx context.Context, orderID int) error
 	GetOrder(orderID int) (*OrderEntity, error)
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	GetOrdersData() ([]*OrderEntity, error)
 	RecoverBySnapshot(*TradingSnapshot) error
-	ConsumeTradingResult(key string)
+	ConsumeOrderResult(ctx context.Context, key string)
 }
 
 type OrderRepo interface {
 	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	SaveHistoryOrdersWithIgnore([]*OrderEntity) error
+
+	ProduceOrderSaveMQ(ctx context.Context, order *OrderEntity) error
+	ConsumeOrderSaveMQ(ctx context.Context, key string, notify func(order *OrderEntity) error)
+
+	ProduceOrder(ctx context.Context, order *OrderEntity) error
+	ConsumeOrder(ctx context.Context, key string, notify func(order *OrderEntity) error)
 }

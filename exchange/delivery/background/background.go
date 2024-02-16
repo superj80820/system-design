@@ -14,11 +14,13 @@ func RunAsyncTradingSequencer(
 	candleUseCase domain.CandleUseCase,
 	orderUseCase domain.OrderUseCase,
 	tradingUseCase domain.TradingUseCase,
+	matchingUseCase domain.MatchingUseCase,
 ) error {
 	tradingSequencerUseCase.ConsumeTradingEventThenProduce(ctx)
-	quotationUseCase.ConsumeTradingResult("global-quotation")
-	candleUseCase.ConsumeTradingResult("global-candle") // TODO: error handle
-	orderUseCase.ConsumeTradingResult("global-order")
+	orderUseCase.ConsumeOrderResult(ctx, "global-order")
+	quotationUseCase.ConsumeTick(ctx, "global-quotation")
+	candleUseCase.ConsumeTradingResult(ctx, "global-candle") // TODO: error handle
+	matchingUseCase.ConsumeMatchResult(ctx, "global-matching")
 
 	tradingSnapshot, err := tradingUseCase.GetHistorySnapshot(ctx)
 	if !errors.Is(err, domain.ErrNoData) && err != nil {
@@ -29,8 +31,6 @@ func RunAsyncTradingSequencer(
 			return errors.Wrap(err, "recover by snapshot failed")
 		}
 	}
-
-	tradingUseCase.ConsumeTradingResult("global-trading")
 
 	select {
 	case <-tradingSequencerUseCase.Done():

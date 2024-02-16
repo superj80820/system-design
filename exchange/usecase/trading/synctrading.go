@@ -53,7 +53,7 @@ func (t *syncTradingUseCase) checkEventSequence(tradingEvent *domain.TradingEven
 	return nil
 }
 
-func (t *syncTradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
+func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "check event sequence failed")
 	}
@@ -64,6 +64,7 @@ func (t *syncTradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*do
 	orderID := tradingEvent.SequenceID*10000 + (year*100 + month)
 
 	order, err := t.orderUseCase.CreateOrder(
+		ctx,
 		tradingEvent.SequenceID,
 		orderID,
 		tradingEvent.OrderRequestEvent.UserID,
@@ -75,18 +76,18 @@ func (t *syncTradingUseCase) CreateOrder(tradingEvent *domain.TradingEvent) (*do
 	if err != nil {
 		return nil, errors.Wrap(err, "create order failed")
 	}
-	matchResult, err := t.matchingUseCase.NewOrder(order)
+	matchResult, err := t.matchingUseCase.NewOrder(ctx, order)
 	if err != nil {
 		return nil, errors.Wrap(err, "matching order failed")
 	}
-	if err := t.clearingUseCase.ClearMatchResult(matchResult); err != nil {
+	if err := t.clearingUseCase.ClearMatchResult(ctx, matchResult); err != nil {
 		return nil, errors.Wrap(err, "clear match order failed")
 	}
 
 	return matchResult, nil
 }
 
-func (t *syncTradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) error {
+func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
 		return errors.Wrap(err, "check event sequence failed")
 	}
@@ -101,19 +102,20 @@ func (t *syncTradingUseCase) CancelOrder(tradingEvent *domain.TradingEvent) erro
 	if err := t.matchingUseCase.CancelOrder(tradingEvent.CreatedAt, order); err != nil {
 		return errors.Wrap(err, "cancel order failed")
 	}
-	if err := t.clearingUseCase.ClearCancelOrder(order); err != nil {
+	if err := t.clearingUseCase.ClearCancelOrder(ctx, order); err != nil {
 		return errors.Wrap(err, "clear cancel order failed")
 	}
 
 	return nil
 }
 
-func (t *syncTradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
+func (t *syncTradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
 		return errors.Wrap(err, "check event sequence failed")
 	}
 
 	if err := t.userAssetUseCase.Transfer(
+		ctx,
 		domain.AssetTransferAvailableToAvailable,
 		tradingEvent.TransferEvent.FromUserID,
 		tradingEvent.TransferEvent.ToUserID,
@@ -126,12 +128,13 @@ func (t *syncTradingUseCase) Transfer(tradingEvent *domain.TradingEvent) error {
 	return nil
 }
 
-func (s *syncTradingUseCase) Deposit(tradingEvent *domain.TradingEvent) error {
+func (s *syncTradingUseCase) Deposit(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	if err := s.checkEventSequence(tradingEvent); err != nil {
 		return errors.Wrap(err, "check event sequence failed")
 	}
 
 	if err := s.userAssetUseCase.LiabilityUserTransfer(
+		ctx,
 		tradingEvent.DepositEvent.ToUserID,
 		tradingEvent.DepositEvent.AssetID,
 		tradingEvent.DepositEvent.Amount,

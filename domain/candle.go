@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"time"
 
 	"github.com/shopspring/decimal"
 )
@@ -17,6 +16,7 @@ const (
 )
 
 type CandleBar struct {
+	Type       CandleTimeType `gorm:"-"` // TODO: test
 	StartTime  int
 	ClosePrice decimal.Decimal
 	HighPrice  decimal.Decimal
@@ -26,13 +26,19 @@ type CandleBar struct {
 }
 
 type CandleRepo interface {
-	AddData(ctx context.Context, sequenceID int, createdAt time.Time, matchDetails []*MatchDetail) error
 	GetBar(ctx context.Context, timeType CandleTimeType, min, max string) ([]string, error)
+	SaveBar(candleBar *CandleBar) error
+
+	ProduceCandleSaveMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ConsumeCandleSaveMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
+
+	ProduceCandle(ctx context.Context, candleBar *CandleBar) error
+	ConsumeCandle(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
 }
 
 type CandleUseCase interface {
-	ConsumeTradingResult(key string)
 	GetBar(ctx context.Context, timeType CandleTimeType, min, max string) ([]string, error)
+	ConsumeTradingResult(ctx context.Context, key string)
 	Done() <-chan struct{}
 	Err() error
 }

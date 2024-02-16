@@ -15,5 +15,5 @@ type Account struct {
 }
 
 type AccountService interface {
-	Register(email, password string) error
+	Register(email, password string) (*Account, error)
 }

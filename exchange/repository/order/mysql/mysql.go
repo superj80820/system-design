@@ -1,16 +1,22 @@
 package mysql
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
+	"github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"gorm.io/gorm/clause"
 )
 
 type orderRepo struct {
-	orm *ormKit.DB
+	orm              *ormKit.DB
+	orderMQTopic     mq.MQTopic
+	orderSaveMQTopic mq.MQTopic
 }
 
 type orderEntityDB struct {
@@ -21,9 +27,11 @@ func (*orderEntityDB) TableName() string {
 	return "orders"
 }
 
-func CreateOrderRepo(orm *ormKit.DB) domain.OrderRepo {
+func CreateOrderRepo(orm *ormKit.DB, orderMQTopic, orderSaveMQTopic mq.MQTopic) domain.OrderRepo {
 	return &orderRepo{
-		orm: orm,
+		orm:              orm,
+		orderMQTopic:     orderMQTopic,
+		orderSaveMQTopic: orderSaveMQTopic,
 	}
 }
 
@@ -58,4 +66,68 @@ func (o *orderRepo) SaveHistoryOrdersWithIgnore(orders []*domain.OrderEntity) er
 		return errors.Wrap(err, "save orders failed")
 	}
 	return nil
+}
+
+type mqMessage struct {
+	*domain.OrderEntity
+}
+
+var _ mq.Message = (*mqMessage)(nil)
+
+func (m *mqMessage) GetKey() string {
+	return strconv.Itoa(m.OrderEntity.ID)
+}
+
+func (m *mqMessage) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(m)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return marshalData, nil
+}
+
+func (o *orderRepo) ProduceOrder(ctx context.Context, order *domain.OrderEntity) error {
+	if err := o.orderMQTopic.Produce(ctx, &mqMessage{
+		OrderEntity: order,
+	}); err != nil {
+		return errors.Wrap(err, "produce failed")
+	}
+	return nil
+}
+
+func (o *orderRepo) ConsumeOrder(ctx context.Context, key string, notify func(orders *domain.OrderEntity) error) {
+	o.orderMQTopic.Subscribe(key, func(message []byte) error {
+		var mqMessage mqMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.OrderEntity); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
+}
+
+func (o *orderRepo) ProduceOrderSaveMQ(ctx context.Context, order *domain.OrderEntity) error {
+	if err := o.orderSaveMQTopic.Produce(ctx, &mqMessage{
+		OrderEntity: order,
+	}); err != nil {
+		return errors.Wrap(err, "produce failed")
+	}
+	return nil
+}
+
+func (o *orderRepo) ConsumeOrderSaveMQ(ctx context.Context, key string, notify func(order *domain.OrderEntity) error) {
+	o.orderSaveMQTopic.Subscribe(key, func(message []byte) error {
+		var mqMessage mqMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.OrderEntity); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
 }

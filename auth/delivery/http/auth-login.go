@@ -2,17 +2,15 @@ package http
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 
 	"github.com/go-kit/kit/endpoint"
 	"github.com/superj80820/system-design/domain"
-	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
 )
 
-var (
-	DecodeAuthLoginRequest  = httpTransportKit.DecodeJsonRequest[AuthLoginRequest]
-	EncodeAuthLoginResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeJsonResponse)
-)
+var DecodeAuthLoginRequest = httpTransportKit.DecodeJsonRequest[AuthLoginRequest]
 
 type AuthLoginRequest struct {
 	Email    string `json:"email"`
@@ -33,4 +31,14 @@ func MakeAuthLoginEndpoint(svc domain.AuthUseCase) endpoint.Endpoint {
 		}
 		return &AuthLoginResponse{AccessToken: account.AccessToken, RefreshToken: account.RefreshToken}, nil
 	}
+}
+
+func EncodeAuthLoginResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
+	res := response.(*AuthLoginResponse)
+	http.SetCookie(w, &http.Cookie{
+		Name:  "access_token",
+		Value: res.AccessToken,
+	})
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	return json.NewEncoder(w).Encode(response)
 }

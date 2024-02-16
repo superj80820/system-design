@@ -1,9 +1,13 @@
 package memory
 
 import (
-	"errors"
+	"context"
+	"encoding/json"
+	"strconv"
 
+	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
+	"github.com/superj80820/system-design/kit/mq"
 	"github.com/superj80820/system-design/kit/util"
 )
 
@@ -14,10 +18,13 @@ var assetNameToIDMap = map[string]int{
 
 type assetRepo struct {
 	userAssetsMap util.GenericSyncMap[int, *util.GenericSyncMap[int, *domain.UserAsset]]
+	assetMQTopic  mq.MQTopic
 }
 
-func CreateAssetRepo() domain.UserAssetRepo {
-	return &assetRepo{}
+func CreateAssetRepo(assetMQTopic mq.MQTopic) domain.UserAssetRepo {
+	return &assetRepo{
+		assetMQTopic: assetMQTopic,
+	}
 }
 
 func (*assetRepo) GetAssetIDByName(assetName string) (int, error) {
@@ -76,6 +83,48 @@ func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, err
 		return true
 	})
 	return usersAssetsClone, nil
+}
+
+type mqMessage struct {
+	UserID    int
+	AssetID   int
+	UserAsset *domain.UserAsset
+}
+
+var _ mq.Message = (*mqMessage)(nil)
+
+func (m *mqMessage) GetKey() string {
+	return strconv.Itoa(m.UserID)
+}
+
+func (m *mqMessage) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(m)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return marshalData, nil
+}
+
+func (a *assetRepo) ProduceUserAsset(ctx context.Context, userID int, assetID int, userAsset *domain.UserAsset) { // TODO: maybe save to db?
+	a.assetMQTopic.Produce(ctx, &mqMessage{
+		UserID:    userID,
+		AssetID:   assetID,
+		UserAsset: userAsset,
+	})
+}
+
+func (a *assetRepo) ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *domain.UserAsset) error) { // TODO: maybe need collect
+	a.assetMQTopic.Subscribe(key, func(message []byte) error {
+		var mqMessage mqMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.UserID, mqMessage.AssetID, mqMessage.UserAsset); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
 }
 
 func (a *assetRepo) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {

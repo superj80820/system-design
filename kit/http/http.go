@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -24,6 +25,24 @@ const ( // TODO check correct
 	_CTX_USER_ID
 )
 
+type customBeforeCtxOption struct {
+	cookieAccessTokenKey string
+}
+
+func createCustomBeforeCtxOption() *customBeforeCtxOption {
+	return &customBeforeCtxOption{
+		cookieAccessTokenKey: "access_token",
+	}
+}
+
+type Option func(*customBeforeCtxOption)
+
+func OptionSetCookieAccessTokenKey(key string) Option {
+	return func(cbco *customBeforeCtxOption) {
+		cbco.cookieAccessTokenKey = key
+	}
+}
+
 func ReadUserIP(r *http.Request) string {
 	IPAddress := r.Header.Get("X-Real-Ip")
 	if IPAddress == "" {
@@ -35,12 +54,26 @@ func ReadUserIP(r *http.Request) string {
 	return strings.Split(IPAddress, ":")[0]
 }
 
-func CustomBeforeCtx(tracer trace.Tracer) func(ctx context.Context, r *http.Request) context.Context {
+func CustomBeforeCtx(tracer trace.Tracer, options ...Option) func(ctx context.Context, r *http.Request) context.Context {
 	return func(ctx context.Context, r *http.Request) context.Context {
-		ctx = context.WithValue(ctx, _CTX_TOKEN, r.Header.Get("Authentication")) // TODO: add
-		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)                          // TODO: add
-		ctx = context.WithValue(ctx, _CTX_URL_PATH, r.URL.Path)                  // TODO: add
-		ctx = context.WithValue(ctx, _CTX_IP_KEY, ReadUserIP(r))                 // TODO: check correct // TODO: add
+		option := createCustomBeforeCtxOption()
+		for _, applyOption := range options {
+			applyOption(option)
+		}
+		var accessToken string
+		for _, cookie := range r.Cookies() {
+			if cookie.Name == option.cookieAccessTokenKey {
+				accessToken = cookie.Value
+			}
+		}
+		authentication := r.Header.Get("Authentication")
+		if accessToken == "" && strings.Index(authentication, "Bearer") == 0 {
+			accessToken = authentication[len("Bearer "):]
+		}
+		ctx = context.WithValue(ctx, _CTX_TOKEN, accessToken)    // TODO: add
+		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)          // TODO: add
+		ctx = context.WithValue(ctx, _CTX_URL_PATH, r.URL.Path)  // TODO: add
+		ctx = context.WithValue(ctx, _CTX_IP_KEY, ReadUserIP(r)) // TODO: check correct // TODO: add
 		ctx = AddRequestID(ctx)
 
 		ctx, span := tracer.Start(ctx, GetURL(ctx))
@@ -106,6 +139,8 @@ func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.Respo
 		ctx = CustomAfterCtx(ctx, w)
 
 		errorCode := code.CreateHTTPError(code.ParseErrorCode(err))
+
+		fmt.Println(fmt.Sprintf("%+v", err))
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(errorCode.HTTPCode)

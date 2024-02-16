@@ -538,11 +538,13 @@ func TestTrading(t *testing.T) {
 }
 
 func BenchmarkTrading(b *testing.B) {
+	ctx := context.Background()
+
 	testSetup, _ := testSetupFn()
 	defer testSetup.teardownFn()
 
-	testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["BTC"], decimal.NewFromInt(1000000))
-	testSetup.userAssetUseCase.LiabilityUserTransfer(userAID, currencyMap["USDT"], decimal.NewFromInt(1000000))
+	testSetup.userAssetUseCase.LiabilityUserTransfer(ctx, userAID, currencyMap["BTC"], decimal.NewFromInt(1000000))
+	testSetup.userAssetUseCase.LiabilityUserTransfer(ctx, userAID, currencyMap["USDT"], decimal.NewFromInt(1000000))
 
 	direction := []domain.DirectionEnum{domain.DirectionBuy, domain.DirectionSell}
 	for i := 0; i < b.N; i++ {

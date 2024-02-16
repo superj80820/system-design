@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
+	"github.com/superj80820/system-design/kit/core/endpoint"
 )
 
 type TradingEventTypeEnum int
@@ -80,9 +81,6 @@ type TradingRepo interface {
 	SubscribeTradingResult(key string, notify func(*TradingResult))
 	SendTradingResult(context.Context, *TradingResult) error
 
-	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
-	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
-
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*UserAsset, ordersData []*OrderEntity, matchesData *MatchData) error
 
@@ -96,6 +94,8 @@ type TradingResultStatus int
 const (
 	TradingResultStatusCreate TradingResultStatus = iota + 1
 	TradingResultStatusCancel
+	TradingResultStatusTransfer
+	TradingResultStatusDeposit
 )
 
 type TradingSnapshot struct { // TODO: minify
@@ -113,37 +113,63 @@ type TradingResult struct {
 
 type TradingSequencerUseCase interface {
 	ConsumeTradingEventThenProduce(context.Context)
-	ProduceTradingEvent(context.Context, *TradingEvent) error
+	ProduceTradingEvent(context.Context, *TradingEvent) (int64, error)
 	Done() <-chan struct{}
 	Err() error
 }
 
 type SyncTradingUseCase interface {
-	CreateOrder(messages *TradingEvent) (*MatchResult, error)
-	CancelOrder(tradingEvent *TradingEvent) error
-	Transfer(tradingEvent *TradingEvent) error
+	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, error)
+	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) error
+	Transfer(ctx context.Context, tradingEvent *TradingEvent) error
 
-	Deposit(tradingEvent *TradingEvent) error
+	Deposit(ctx context.Context, tradingEvent *TradingEvent) error
 
 	GetSequenceID() int
 	RecoverBySnapshot(*TradingSnapshot) error
 }
 
+type ExchangeRequestType string
+
+const (
+	UnknownExchangeRequestType      ExchangeRequestType = ""
+	TickerExchangeRequestType       ExchangeRequestType = "ticker"
+	FoundsExchangeRequestType       ExchangeRequestType = "funds"
+	CandlesExchangeRequestType      ExchangeRequestType = "candles"
+	Candles60ExchangeRequestType    ExchangeRequestType = "candles_60"
+	Candles3600ExchangeRequestType  ExchangeRequestType = "candles_3600"
+	Candles86400ExchangeRequestType ExchangeRequestType = "candles_86400"
+	MatchExchangeRequestType        ExchangeRequestType = "match"
+	Level2ExchangeRequestType       ExchangeRequestType = "level2"
+	OrderExchangeRequestType        ExchangeRequestType = "order"
+	PingExchangeRequestType         ExchangeRequestType = "ping"
+)
+
+type TradingNotifyRequest struct {
+	Type        ExchangeRequestType `json:"type"`
+	ProductIds  []string            `json:"product_ids,omitempty"`
+	CurrencyIDs []string            `json:"currency_ids,omitempty"`
+	Channels    []string            `json:"channels"`
+	Token       string              `json:"token"` // TODO: what this?
+}
+
 type TradingUseCase interface {
-	CreateOrder(messages *TradingEvent) (*MatchResult, error)
-	CancelOrder(tradingEvent *TradingEvent) error
-	Transfer(tradingEvent *TradingEvent) error
+	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, error)
+	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) error
+	Transfer(ctx context.Context, tradingEvent *TradingEvent) error
 
-	Deposit(tradingEvent *TradingEvent) error
+	Deposit(ctx context.Context, tradingEvent *TradingEvent) error
 
-	GetLatestOrderBook() *OrderBookEntity
 	GetSequenceID() int
-	ConsumeTradingResult(key string)
 	GetHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
+
 	GetLatestSnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(context.Context, *TradingSnapshot) error
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	RecoverBySnapshot(*TradingSnapshot) error
+
+	Notify(ctx context.Context, userID int, stream endpoint.Stream[TradingNotifyRequest, any]) error
+
 	Done() <-chan struct{}
 	Shutdown() error
 	// TODO

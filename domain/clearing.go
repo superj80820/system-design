@@ -1,6 +1,8 @@
 package domain
 
+import "context"
+
 type ClearingUseCase interface {
-	ClearMatchResult(matchResult *MatchResult) error
-	ClearCancelOrder(order *OrderEntity) error
+	ClearMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ClearCancelOrder(ctx context.Context, order *OrderEntity) error
 }

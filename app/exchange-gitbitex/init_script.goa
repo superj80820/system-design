@@ -1,0 +1,41 @@
+package script
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+
+	authHttpDelivery "github.com/superj80820/system-design/auth/delivery/http"
+)
+
+func script() {
+	if env == "development" {
+		registryHandler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email": "asdfasdf@gmail.com","password": "asdfasdfadf"}`)))
+		w := httptest.NewRecorder()
+		loginHandler.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"email": "asdfasdf@gmail.com","password": "asdfasdfadf"}`)))
+		var loginResponse authHttpDelivery.AuthLoginResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &loginResponse); err != nil {
+			panic(err)
+		}
+
+		authentication := "Bearer " + loginResponse.AccessToken
+
+		fmt.Println("develop information: auth: Authentication:", authentication)
+
+		depositReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"asset_id": 1, "amount": 10000000000}`))
+		depositReq.Header.Set("Authentication", authentication)
+		depositHandler.ServeHTTP(httptest.NewRecorder(), depositReq)
+		depositReq = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"asset_id": 2, "amount": 10000000000}`))
+		depositReq.Header.Set("Authentication", authentication)
+		depositHandler.ServeHTTP(httptest.NewRecorder(), depositReq)
+
+		createOrderReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"direction": 1,"price": 2090.55,"quantity": 3}`))
+		createOrderReq.Header.Set("Authentication", authentication)
+		createOrderHandler.ServeHTTP(httptest.NewRecorder(), createOrderReq)
+		createOrderReq = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"direction": 2,"price": 2090.55,"quantity": 3}`))
+		createOrderReq.Header.Set("Authentication", authentication)
+		createOrderHandler.ServeHTTP(httptest.NewRecorder(), createOrderReq)
+	}
+}

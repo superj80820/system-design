@@ -37,7 +37,10 @@ func AddHTTPResponseHeader(header http.Header) ServerOption {
 }
 
 var (
-	upgrader = websocket.Upgrader{}
+	upgrader = websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+	}
 )
 
 type Server[IN, OUT any] struct {
@@ -105,7 +108,8 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 	ctx = f(ctx, w)
 	// }
 
-	ws, err := upgrader.Upgrade(w, r, s.httpResponseHeader)
+	// ws, err := upgrader.Upgrade(w, r, nil) // TODO: figure out why js WebSocket connection to 'ws://127.0.0.1:9090/ws' failed
+	ws, err := websocket.Upgrade(w, r, w.Header(), 1024, 1024)
 	if err != nil {
 		// 	s.errorHandler.Handle(ctx, err) // TODO
 		return
@@ -119,7 +123,7 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	interruptFunc := func(err error) {
 		cancel()
 		// 	s.errorHandler.Handle(ctx, err) // TODO
-		fmt.Println("get err(TODO)", err)
+		// fmt.Println("get err(TODO)", err)
 		s.errorEncoder(ctx, err, ws)
 		ws.Close()
 	}

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 
 	"github.com/pkg/errors"
@@ -15,13 +16,29 @@ var (
 	ErrPreviousIDNotCorrect = errors.New("message previous id not correct")
 )
 
+type MatchingRepo interface {
+	ProduceOrderBook(ctx context.Context, orderBook *OrderBookEntity) error
+	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookEntity) error)
+
+	ProduceMatchOrderSaveMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ConsumeMatchOrderSaveMQ(ctx context.Context, key string, notify func(*MatchOrderDetail) error)
+
+	ProduceMatchOrder(ctx context.Context, matchOrderDetail *MatchOrderDetail) error
+	ConsumeMatchOrder(ctx context.Context, key string, notify func(*MatchOrderDetail) error)
+
+	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
+	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
+}
+
 type MatchingUseCase interface {
-	NewOrder(o *OrderEntity) (*MatchResult, error)
+	NewOrder(ctx context.Context, o *OrderEntity) (*MatchResult, error)
 	CancelOrder(ts time.Time, o *OrderEntity) error
 	GetOrderBook(maxDepth int) *OrderBookEntity
 
 	GetMatchesData() (*MatchData, error)
 	RecoverBySnapshot(*TradingSnapshot) error
+
+	ConsumeMatchResult(ctx context.Context, key string)
 }
 
 type MatchType int
@@ -38,8 +55,10 @@ type MatchData struct {
 }
 
 type MatchResult struct {
+	SequenceID   int
 	TakerOrder   *OrderEntity
 	MatchDetails []*MatchDetail
+	CreatedAt    time.Time
 }
 
 type MatchDetail struct {

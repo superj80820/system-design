@@ -1,35 +1,55 @@
 package asset
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 )
 
 type userAsset struct {
-	assetRepo domain.UserAssetRepo
+	assetRepo   domain.UserAssetRepo
+	tradingRepo domain.TradingRepo
 }
 
-func CreateUserAssetUseCase(assetRepo domain.UserAssetRepo) domain.UserAssetUseCase {
+func CreateUserAssetUseCase(assetRepo domain.UserAssetRepo, tradingRepo domain.TradingRepo) domain.UserAssetUseCase {
 	return &userAsset{
-		assetRepo: assetRepo,
+		assetRepo:   assetRepo,
+		tradingRepo: tradingRepo,
 	}
 }
 
-func (u *userAsset) LiabilityUserTransfer(toUserID, assetID int, amount decimal.Decimal) error {
-	return u.tryTransfer(domain.AssetTransferAvailableToAvailable, domain.LiabilityUserID, toUserID, assetID, amount, false)
+func (u *userAsset) LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) error {
+	err := u.tryTransfer(ctx, domain.AssetTransferAvailableToAvailable, domain.LiabilityUserID, toUserID, assetID, amount, false)
+	if err != nil {
+		return errors.Wrap(err, "try transfer failed")
+	}
+	return nil
 }
 
-func (u *userAsset) Freeze(userID, assetID int, amount decimal.Decimal) error {
-	return u.tryTransfer(domain.AssetTransferAvailableToFrozen, userID, userID, assetID, amount, true)
+func (u *userAsset) Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error {
+	err := u.tryTransfer(ctx, domain.AssetTransferAvailableToFrozen, userID, userID, assetID, amount, true)
+	if err != nil {
+		return errors.Wrap(err, "try transfer failed")
+	}
+	return nil
 }
 
-func (u *userAsset) Transfer(transferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal) error {
-	return u.tryTransfer(transferType, fromUserID, toUserID, assetID, amount, true)
+func (u *userAsset) Transfer(ctx context.Context, transferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal) error {
+	err := u.tryTransfer(ctx, transferType, fromUserID, toUserID, assetID, amount, true)
+	if err != nil {
+		return errors.Wrap(err, "try transfer failed")
+	}
+	return nil
 }
 
-func (u *userAsset) Unfreeze(userID, assetID int, amount decimal.Decimal) error {
-	return u.tryTransfer(domain.AssetTransferFrozenToAvailable, userID, userID, assetID, amount, true)
+func (u *userAsset) Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error {
+	err := u.tryTransfer(ctx, domain.AssetTransferFrozenToAvailable, userID, userID, assetID, amount, true)
+	if err != nil {
+		return errors.Wrap(err, "try transfer failed")
+	}
+	return nil
 }
 
 func (u *userAsset) GetAsset(userID int, assetID int) (*domain.UserAsset, error) {
@@ -40,9 +60,9 @@ func (u *userAsset) GetAssets(userID int) (map[int]*domain.UserAsset, error) {
 	return u.assetRepo.GetAssets(userID)
 }
 
-func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal, checkBalance bool) error {
+func (u *userAsset) tryTransfer(ctx context.Context, assetTransferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal, checkBalance bool) error {
 	if amount.IsZero() {
-		return nil
+		return nil // TODO: maybe error handle out side
 	}
 	if amount.LessThan(decimal.Zero) {
 		return errors.New("can not operate less zero amount")
@@ -68,6 +88,10 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 		}
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)
+
+		u.assetRepo.ProduceUserAsset(ctx, fromUserID, assetID, fromUserAsset)
+		u.assetRepo.ProduceUserAsset(ctx, toUserID, assetID, toUserAsset)
+
 		return nil
 	case domain.AssetTransferAvailableToFrozen:
 		if checkBalance && fromUserAsset.Available.Cmp(amount) < 0 {
@@ -75,6 +99,12 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 		}
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Frozen = toUserAsset.Frozen.Add(amount)
+
+		u.assetRepo.ProduceUserAsset(ctx, fromUserID, assetID, fromUserAsset)
+		if fromUserID != toUserID { // same user no need produce two times
+			u.assetRepo.ProduceUserAsset(ctx, toUserID, assetID, toUserAsset)
+		}
+
 		return nil
 	case domain.AssetTransferFrozenToAvailable:
 		if checkBalance && fromUserAsset.Frozen.Cmp(amount) < 0 {
@@ -82,6 +112,10 @@ func (u *userAsset) tryTransfer(assetTransferType domain.AssetTransferEnum, from
 		}
 		fromUserAsset.Frozen = fromUserAsset.Frozen.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)
+
+		u.assetRepo.ProduceUserAsset(ctx, fromUserID, assetID, fromUserAsset)
+		u.assetRepo.ProduceUserAsset(ctx, toUserID, assetID, toUserAsset)
+
 		return nil
 	default:
 		return errors.New("unknown transfer type")

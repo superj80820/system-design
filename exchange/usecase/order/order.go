@@ -1,8 +1,7 @@
 package order
 
 import (
-	"fmt"
-	"sort"
+	"context"
 	"sync"
 	"time"
 
@@ -32,32 +31,28 @@ func CreateOrderUseCase(
 	assetUseCase domain.UserAssetUseCase,
 	tradingRepo domain.TradingRepo,
 	orderRepo domain.OrderRepo,
-	baseCurrencyID,
-	quoteCurrencyID int,
 ) domain.OrderUseCase {
 	o := &orderUseCase{
 		tradingRepo:                 tradingRepo,
 		assetUseCase:                assetUseCase,
 		orderRepo:                   orderRepo,
-		baseCurrencyID:              baseCurrencyID,
-		quoteCurrencyID:             quoteCurrencyID,
+		baseCurrencyID:              int(domain.BaseCurrencyType),
+		quoteCurrencyID:             int(domain.QuoteCurrencyType),
 		historyClosedOrdersLock:     new(sync.Mutex),
 		isHistoryClosedOrdersFullCh: make(chan struct{}),
 	}
 
-	go o.collectHistoryClosedOrdersThenSave()
-
 	return o
 }
 
-func (o *orderUseCase) CreateOrder(sequenceID int, orderID int, userID int, direction domain.DirectionEnum, price decimal.Decimal, quantity decimal.Decimal, ts time.Time) (*domain.OrderEntity, error) {
+func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID int, userID int, direction domain.DirectionEnum, price decimal.Decimal, quantity decimal.Decimal, ts time.Time) (*domain.OrderEntity, error) {
 	switch direction {
 	case domain.DirectionSell:
-		if err := o.assetUseCase.Freeze(userID, o.baseCurrencyID, quantity); err != nil {
+		if err := o.assetUseCase.Freeze(ctx, userID, o.baseCurrencyID, quantity); err != nil {
 			return nil, errors.Wrap(err, "freeze base currency failed")
 		}
 	case domain.DirectionBuy:
-		if err := o.assetUseCase.Freeze(userID, o.quoteCurrencyID, price.Mul(quantity)); err != nil {
+		if err := o.assetUseCase.Freeze(ctx, userID, o.quoteCurrencyID, price.Mul(quantity)); err != nil {
 			return nil, errors.Wrap(err, "freeze base currency failed")
 		}
 	default:
@@ -72,6 +67,7 @@ func (o *orderUseCase) CreateOrder(sequenceID int, orderID int, userID int, dire
 		Price:            price,
 		Quantity:         quantity,
 		UnfilledQuantity: quantity,
+		Status:           domain.OrderStatusPending,
 		CreatedAt:        ts,
 		UpdatedAt:        ts,
 	}
@@ -82,6 +78,8 @@ func (o *orderUseCase) CreateOrder(sequenceID int, orderID int, userID int, dire
 	if userOrders, loaded := o.userOrdersMap.LoadOrStore(userID, &userOrders); loaded {
 		userOrders.Store(orderID, &order)
 	}
+
+	o.orderRepo.ProduceOrderSaveMQ(ctx, &order)
 
 	return &order, nil
 }
@@ -108,7 +106,7 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 	return userOrdersClone, nil
 }
 
-func (o *orderUseCase) RemoveOrder(orderID int) error {
+func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
 	removedOrder, loaded := o.activeOrders.LoadAndDelete(orderID)
 	if !loaded {
 		return errors.New("order not found in active orders")
@@ -121,38 +119,23 @@ func (o *orderUseCase) RemoveOrder(orderID int) error {
 	if !loaded {
 		return errors.New("order not found in user orders")
 	}
+
+	o.orderRepo.ProduceOrderSaveMQ(ctx, removedOrder)
+
 	return nil
 }
 
-func (o *orderUseCase) ConsumeTradingResult(key string) {
-	o.tradingRepo.SubscribeTradingResult(key, func(tradingResult *domain.TradingResult) {
-		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-			return
-		}
-		var closedOrders []*domain.OrderEntity
-		if tradingResult.MatchResult.TakerOrder.Status.IsFinalStatus() {
-			closedOrders = append(closedOrders, tradingResult.MatchResult.TakerOrder)
-		}
-		for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-			if matchDetail.MakerOrder.Status.IsFinalStatus() {
-				closedOrders = append(closedOrders, matchDetail.MakerOrder)
+func (o *orderUseCase) ConsumeOrderResult(ctx context.Context, key string) {
+	o.orderRepo.ConsumeOrderSaveMQ(ctx, key, func(order *domain.OrderEntity) error {
+		if order.Status.IsFinalStatus() {
+			if err := o.orderRepo.SaveHistoryOrdersWithIgnore([]*domain.OrderEntity{order}); err != nil { // TODO: use batch
+				return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
 			}
 		}
-		if len(closedOrders) == 0 {
-			return
+		if err := o.orderRepo.ProduceOrder(ctx, order); err != nil {
+			return errors.Wrap(err, "produce order failed")
 		}
-		sort.Slice(closedOrders, func(i, j int) bool { // TODO: maybe no need
-			return closedOrders[i].SequenceID > closedOrders[j].SequenceID
-		})
-		o.historyClosedOrdersLock.Lock()
-		for _, closedOrder := range closedOrders { // TODO: maybe use in one for-loop
-			o.historyClosedOrders = append(o.historyClosedOrders, closedOrder)
-		}
-		historyClosedOrdersLength := len(o.historyClosedOrders)
-		o.historyClosedOrdersLock.Unlock()
-		if historyClosedOrdersLength >= 1000 {
-			o.isHistoryClosedOrdersFullCh <- struct{}{}
-		}
+		return nil
 	})
 }
 
@@ -210,52 +193,4 @@ func (o *orderUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot
 		}
 	}
 	return nil
-}
-
-func (o *orderUseCase) collectHistoryClosedOrdersThenSave() {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	errContinue := errors.New("continue")
-	fn := func() error {
-		historyClosedOrdersClone, err := func() ([]*domain.OrderEntity, error) {
-			o.historyClosedOrdersLock.Lock()
-			defer o.historyClosedOrdersLock.Unlock()
-
-			if len(o.historyClosedOrders) == 0 {
-				return nil, errContinue
-			}
-			historyClosedOrdersClone := make([]*domain.OrderEntity, len(o.historyClosedOrders))
-			copy(historyClosedOrdersClone, o.historyClosedOrders)
-			o.historyClosedOrders = nil
-
-			return historyClosedOrdersClone, nil
-		}()
-		if err != nil {
-			return errors.Wrap(err, "clone history closed orders failed")
-		}
-
-		if err := o.orderRepo.SaveHistoryOrdersWithIgnore(historyClosedOrdersClone); err != nil { // TODO: use batch
-			return errors.Wrap(err, "save history order with ignore failed")
-		}
-
-		return nil
-	}
-
-	for {
-		select {
-		case <-ticker.C:
-			if err := fn(); errors.Is(err, errContinue) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("TODO, error: %+v", err))
-			}
-		case <-o.isHistoryClosedOrdersFullCh:
-			if err := fn(); errors.Is(err, errContinue) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("TODO, error: %+v", err))
-			}
-		}
-	}
 }

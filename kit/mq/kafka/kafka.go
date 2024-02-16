@@ -2,7 +2,6 @@ package kafka
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -172,7 +171,6 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 		}
 		return nil
 	}(); err != nil {
-		fmt.Println("yorkaaa", err)
 		cancel()
 		return nil, err
 	}

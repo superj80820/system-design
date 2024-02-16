@@ -261,7 +261,7 @@ func (t *tradingSequencerUseCase) ConsumeTradingEventThenProduce(ctx context.Con
 	}()
 }
 
-func (t *tradingSequencerUseCase) ProduceTradingEvent(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+func (t *tradingSequencerUseCase) ProduceTradingEvent(ctx context.Context, tradingEvent *domain.TradingEvent) (int64, error) {
 	tradingEvent.ReferenceID = utilKit.GetSnowflakeIDInt64()
 	if err := t.sequencerRepo.SendTradeSequenceMessages(ctx, tradingEvent); err != nil {
 		t.lock.Lock()
@@ -269,7 +269,7 @@ func (t *tradingSequencerUseCase) ProduceTradingEvent(ctx context.Context, tradi
 		t.err = err
 		close(t.doneCh)
 	}
-	return nil
+	return tradingEvent.ReferenceID, nil
 }
 
 func (t *tradingSequencerUseCase) Done() <-chan struct{} {

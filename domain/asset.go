@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"context"
+
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 )
@@ -34,14 +36,17 @@ type UserAssetRepo interface {
 	InitAssets(userID, assetID int) *UserAsset
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error
+
+	ProduceUserAsset(ctx context.Context, userID, assetID int, userAsset *UserAsset)
+	ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *UserAsset) error)
 }
 
 type UserAssetUseCase interface {
-	LiabilityUserTransfer(toUserID, assetID int, amount decimal.Decimal) error
+	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) error
 
-	Transfer(transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) error
-	Freeze(userID, assetID int, amount decimal.Decimal) error
-	Unfreeze(userID, assetID int, amount decimal.Decimal) error
+	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) error
+	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error
+	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error
 
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)

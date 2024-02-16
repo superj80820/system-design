@@ -19,12 +19,24 @@ type accountRegisterRequest struct {
 	Password string `json:"password"`
 }
 
+type accountRegisterResponse struct {
+	ID int64
+
+	AccessToken  string
+	RefreshToken string
+}
+
 func MakeAccountRegisterEndpoint(svc domain.AccountService) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(accountRegisterRequest)
-		if err := svc.Register(req.Email, req.Password); err != nil {
+		account, err := svc.Register(req.Email, req.Password)
+		if err != nil {
 			return nil, err
 		}
-		return nil, nil
+		return &accountRegisterResponse{
+			ID:           account.ID,
+			AccessToken:  account.AccessToken,
+			RefreshToken: account.RefreshToken,
+		}, nil
 	}
 }

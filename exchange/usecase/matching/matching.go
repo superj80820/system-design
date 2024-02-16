@@ -1,6 +1,8 @@
 package matching
 
 import (
+	"context"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -12,9 +14,11 @@ type matchResult struct {
 	domain.MatchResult
 }
 
-func createMatchResult(o *order) *matchResult {
+func createMatchResult(takerOrder *order) *matchResult {
 	return &matchResult{domain.MatchResult{
-		TakerOrder: o.OrderEntity,
+		SequenceID: takerOrder.SequenceID,
+		TakerOrder: takerOrder.OrderEntity,
+		CreatedAt:  takerOrder.CreatedAt,
 	}}
 }
 
@@ -28,30 +32,59 @@ func (m *matchResult) add(price decimal.Decimal, matchedQuantity decimal.Decimal
 }
 
 type matchingUseCase struct {
-	buyBook     *orderBook
-	sellBook    *orderBook
-	marketPrice decimal.Decimal
-	sequenceID  int // TODO: use long
+	matchingRepo       domain.MatchingRepo
+	quotationRepo      domain.QuotationRepo
+	candleRepo         domain.CandleRepo
+	orderRepo          domain.OrderRepo
+	isOrderBookChanged atomic.Bool
+
+	buyBook           *orderBook
+	sellBook          *orderBook
+	marketPrice       decimal.Decimal
+	sequenceID        int // TODO: use long
+	orderBookMaxDepth int
 }
 
-func CreateMatchingUseCase() domain.MatchingUseCase {
-	return &matchingUseCase{
-		buyBook:     createOrderBook(domain.DirectionBuy),
-		sellBook:    createOrderBook(domain.DirectionSell),
-		marketPrice: decimal.Zero, // TODO: check correct?
+func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, quotationRepo domain.QuotationRepo, orderRepo domain.OrderRepo, candleRepo domain.CandleRepo, orderBookMaxDepth int) domain.MatchingUseCase {
+	m := &matchingUseCase{
+		quotationRepo:     quotationRepo,
+		matchingRepo:      matchingRepo,
+		candleRepo:        candleRepo,
+		orderRepo:         orderRepo,
+		buyBook:           createOrderBook(domain.DirectionBuy),
+		sellBook:          createOrderBook(domain.DirectionSell),
+		marketPrice:       decimal.Zero, // TODO: check correct?
+		orderBookMaxDepth: orderBookMaxDepth,
 	}
+
+	go func() {
+		ticker := time.NewTicker(1000 * time.Millisecond)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			if !m.isOrderBookChanged.Load() {
+				continue
+			}
+
+			m.matchingRepo.ProduceOrderBook(ctx, m.GetOrderBook(m.orderBookMaxDepth))
+
+			m.isOrderBookChanged.Store(false)
+		}
+	}()
+
+	return m
 }
 
-func (m *matchingUseCase) NewOrder(o *domain.OrderEntity) (*domain.MatchResult, error) {
+func (m *matchingUseCase) NewOrder(ctx context.Context, o *domain.OrderEntity) (*domain.MatchResult, error) {
 	switch o.Direction {
 	case domain.DirectionBuy:
-		matchResult, err := m.processOrder(&order{o}, m.sellBook, m.buyBook)
+		matchResult, err := m.processOrder(ctx, &order{o}, m.sellBook, m.buyBook)
 		if err != nil {
 			return nil, errors.Wrap(err, "process order failed")
 		}
 		return &matchResult.MatchResult, nil
 	case domain.DirectionSell:
-		matchResult, err := m.processOrder(&order{o}, m.buyBook, m.sellBook)
+		matchResult, err := m.processOrder(ctx, &order{o}, m.buyBook, m.sellBook)
 		if err != nil {
 			return nil, errors.Wrap(err, "process order failed")
 		}
@@ -75,6 +108,9 @@ func (m *matchingUseCase) CancelOrder(ts time.Time, o *domain.OrderEntity) error
 		status = domain.OrderStatusPartialCanceled
 	}
 	orderInstance.updateOrder(o.UnfilledQuantity, status, ts)
+
+	m.isOrderBookChanged.Store(true)
+
 	return nil
 }
 
@@ -113,10 +149,11 @@ func (m *matchingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnaps
 	return nil
 }
 
-func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
+func (m *matchingUseCase) processOrder(ctx context.Context, takerOrder *order, markerBook, anotherBook *orderBook) (*matchResult, error) {
 	m.sequenceID = takerOrder.SequenceID
 	ts := takerOrder.CreatedAt // TODO: name?
 	matchResult := createMatchResult(takerOrder)
+
 	takerUnfilledQuantity := takerOrder.Quantity
 	for {
 		makerOrder, err := markerBook.getFirst()
@@ -154,7 +191,27 @@ func (m *matchingUseCase) processOrder(takerOrder *order, markerBook, anotherBoo
 		takerOrder.updateOrder(takerUnfilledQuantity, orderStatus, ts)
 		anotherBook.add(takerOrder)
 	}
+
+	m.quotationRepo.ProduceTicksSaveMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.matchingRepo.ProduceMatchOrderSaveMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.candleRepo.ProduceCandleSaveMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.isOrderBookChanged.Store(true)
+
 	return matchResult, nil
+}
+
+func (m *matchingUseCase) ConsumeMatchResult(ctx context.Context, key string) {
+	m.matchingRepo.ConsumeMatchOrderSaveMQ(ctx, key, func(matchOrderDetail *domain.MatchOrderDetail) error { // TODO: error handle
+		if err := m.matchingRepo.SaveMatchingDetailsWithIgnore(ctx, []*domain.MatchOrderDetail{matchOrderDetail}); err != nil { // TODO: maybe no batch
+			return errors.Wrap(err, "save matching details failed")
+		}
+
+		if err := m.matchingRepo.ProduceMatchOrder(ctx, matchOrderDetail); err != nil {
+			return errors.Wrap(err, "produce match order failed")
+		}
+
+		return nil
+	})
 }
 
 func min(a, b decimal.Decimal) decimal.Decimal {
@@ -163,92 +220,3 @@ func min(a, b decimal.Decimal) decimal.Decimal {
 	}
 	return b
 }
-
-// package usecase
-
-// import "github.com/superj80820/system-design/domain"
-
-// // class Book<Side> {
-// //     private Side side;
-// //     private Map<Price, PriceLevel> limitMap;
-// // }
-
-// type PriceLevel struct {
-// 	// private Price limitPrice; // TODO: check?
-// 	// private long totalVolume; // TODO: check?
-// 	orders []*Order
-// }
-
-// type Order struct {
-// 	price           int
-// 	quantity        int
-// 	matchedQuantity int // TODO: check ?
-// }
-
-// type bookSide int
-
-// const (
-// 	bookBuySide bookSide = iota + 1
-// 	bookSellSide
-// )
-
-// type Book struct {
-// 	side     bookSide
-// 	limitMap map[int]*PriceLevel
-// }
-
-// type OrderBook struct {
-// 	buyBook  *book
-// 	sellBook *book
-// 	//  bestBid
-// 	//  bestOffer
-// 	//  orderMap
-// }
-
-// type matchingUseCase struct{}
-
-// func CreateOrderUseCase() domain.MatchingUseCase {
-// 	return &matchingUseCase{}
-// }
-
-// func (m *matchingUseCase) NewOrder() {
-// 	if BUY.equals(order.side) {
-// 		return match(orderBook.sellBook, order)
-// 	} else {
-// 		return match(orderBook.buyBook, order)
-// 	}
-// }
-
-// func (m *matchingUseCase) CancelOrder() {
-// 	panic("unimplemented")
-// }
-
-// func match(book Book, order Order) {
-// 	leavesQuantity := order.quantity - order.matchedQuantity
-// 	limitIter := book.limitMap[order.price].orders
-// 	for _, val := range limitIter {
-// 		if leavesQuantity <= 0 {
-// 			break
-// 		}
-// 		matched := min(val.quantity, order.quantity)
-// 		order.matchedQuantity += matched
-// 		leavesQuantity = order.quantity - order.matchedQuantity
-// 		val.quantity -= matched // TODO: check?
-// 		// generateMatchedFill() // TODO: check?
-// 	}
-// 	// while (limitIter.hasNext() && leavesQuantity > 0) {
-// 	//     Quantity matched = min(limitIter.next.quantity, order.quantity);
-// 	//     order.matchedQuantity += matched;
-// 	//     leavesQuantity = order.quantity - order.matchedQuantity;
-// 	//     remove(limitIter.next);
-// 	//     generateMatchedFill();
-// 	// }
-// 	// return SUCCESS(MATCH_SUCCESS, order);
-// }
-
-// func min(a, b int) int {
-// 	if a < b {
-// 		return a
-// 	}
-// 	return b
-// }

@@ -13,7 +13,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"gorm.io/gorm/clause"
 )
 
 type tradingRepo struct {
@@ -24,14 +23,6 @@ type tradingRepo struct {
 	err                  error
 	doneCh               chan struct{}
 	cancel               context.CancelFunc
-}
-
-type matchOrderDetailDB struct {
-	*domain.MatchOrderDetail
-}
-
-func (*matchOrderDetailDB) TableName() string {
-	return "match_details"
 }
 
 type tradingResultStruct struct {
@@ -107,27 +98,6 @@ func (t *tradingRepo) SubscribeTradingResult(key string, notify func(*domain.Tra
 		notify(&tradingResult)
 		return nil
 	})
-}
-
-func (t *tradingRepo) GetMatchingDetails(orderID int) ([]*domain.MatchOrderDetail, error) {
-	var matchOrderDetails []*domain.MatchOrderDetail
-	if err := t.orm.Model(&matchOrderDetailDB{}).Where("order_id = ?", orderID).Order("id DESC").Find(&matchOrderDetails).Error; err != nil {
-		return nil, errors.Wrap(err, "query failed")
-	}
-	return matchOrderDetails, nil
-}
-
-func (t *tradingRepo) SaveMatchingDetailsWithIgnore(ctx context.Context, matchOrderDetails []*domain.MatchOrderDetail) error {
-	matchOrderDetailsDB := make([]*matchOrderDetailDB, len(matchOrderDetails))
-	for idx, matchOrderDetail := range matchOrderDetails { // TODO: need for loop to assign?
-		matchOrderDetailsDB[idx] = &matchOrderDetailDB{
-			MatchOrderDetail: matchOrderDetail,
-		}
-	}
-	if err := t.orm.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(matchOrderDetailsDB).Error; err != nil {
-		return errors.Wrap(err, "save match order details failed")
-	}
-	return nil
 }
 
 func (t *tradingRepo) SendTradeEvent(ctx context.Context, tradingEvents []*domain.TradingEvent) {

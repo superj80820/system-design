@@ -14,15 +14,17 @@ import (
 
 	httptransport "github.com/go-kit/kit/transport/http"
 	"github.com/gorilla/mux"
-	authDelivery "github.com/superj80820/system-design/auth/delivery"
 	authHttpDelivery "github.com/superj80820/system-design/auth/delivery/http"
 	"github.com/superj80820/system-design/auth/usecase"
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
+	wsDelivery "github.com/superj80820/system-design/exchange/delivery/http/ws"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
+	wsKit "github.com/superj80820/system-design/kit/http/websocket"
 	kafkaWriterManagerMQKit "github.com/superj80820/system-design/kit/mq/kafka/writermanager"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	"github.com/testcontainers/testcontainers-go"
@@ -233,10 +235,10 @@ func main() {
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, tradingRepo, candleRepo)
-	orderUserCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
-	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUserCase, currencyMap["BTC"], currencyMap["USDT"])
-	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUserCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUserCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
+	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo, currencyMap["BTC"], currencyMap["USDT"])
+	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase, currencyMap["BTC"], currencyMap["USDT"])
+	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
 	accountUseCase, err := usecase.CreateAccountUseCase(mysqlDB, logger)
 	if err != nil {
@@ -248,7 +250,7 @@ func main() {
 	}
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUserCase, tradingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -272,7 +274,7 @@ func main() {
 	)
 	r.Methods("GET").Path("/api/v1/orders/{orderID}").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpDelivery.MakeGetUserOrderEndpoint(orderUserCase)),
+			authMiddleware(httpDelivery.MakeGetUserOrderEndpoint(orderUseCase)),
 			httpDelivery.DecodeGetUserOrderRequest,
 			httpDelivery.EncodeGetUserOrderResponse,
 			options...,
@@ -280,7 +282,7 @@ func main() {
 	)
 	r.Methods("GET").Path("/api/v1/orders").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpDelivery.MakeGetUserOrdersEndpoint(orderUserCase)),
+			authMiddleware(httpDelivery.MakeGetUserOrdersEndpoint(orderUseCase)),
 			httpDelivery.DecodeGetUserOrdersRequest,
 			httpDelivery.EncodeGetUserOrdersResponse,
 			options...,
@@ -336,7 +338,7 @@ func main() {
 	)
 	r.Methods("GET").Path("/api/v1/history/orders").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpDelivery.MakeGetHistoryOrdersEndpoint(orderUserCase)),
+			authMiddleware(httpDelivery.MakeGetHistoryOrdersEndpoint(orderUseCase)),
 			httpDelivery.DecodeGetHistoryOrdersRequest,
 			httpDelivery.EncodeGetHistoryOrdersResponse,
 			options...,
@@ -374,6 +376,14 @@ func main() {
 			options...,
 		),
 	)
+	r.Methods("GET").Path("/api/v1/products").Handler(
+		httptransport.NewServer(
+			httpDelivery.MakeGetProducesEndpoint(),
+			httpDelivery.DecodeGetProductsRequest,
+			httpDelivery.EncodeGetProductsResponse,
+			options...,
+		),
+	)
 	r.Methods("POST").Path("/api/v1/user/register").Handler( // TODO: 須用複數嗎
 		httptransport.NewServer(
 			authHttpDelivery.MakeAccountRegisterEndpoint(accountUseCase),
@@ -397,7 +407,7 @@ func main() {
 		))
 	r.Methods("POST").Path("/api/v1/auth/verify").Handler(
 		httptransport.NewServer(
-			authDelivery.MakeAuthVerifyEndpoint(authUseCase),
+			authHttpDelivery.MakeAuthVerifyEndpoint(authUseCase),
 			authHttpDelivery.DecodeAuthVerifyRequest,
 			authHttpDelivery.EncodeAuthVerifyResponse,
 			options...,
@@ -408,6 +418,15 @@ func main() {
 			authHttpDelivery.DecodeRefreshAccessTokenRequest,
 			authHttpDelivery.EncodeRefreshAccessTokenResponse,
 			options...,
+		))
+	r.Handle("/ws",
+		wsTransport.NewServer(
+			wsDelivery.MakeExchangeEndpoint(tradingUseCase),
+			wsDelivery.DecodeStreamExchangeRequest,
+			wsKit.JsonEncodeResponse[any],
+			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
+			// wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer)), // TODO
+			// wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()), // TODO
 		))
 
 	httpSrv := http.Server{
