@@ -164,19 +164,17 @@ func (dayCandleBar) TableName() string {
 }
 
 type candleRepo struct {
-	orm               *ormKit.DB
-	redisInstance     *redisKit.Cache
-	candleMQTopic     mq.MQTopic
-	candleSaveMQTopic mq.MQTopic
-	lastSequenceID    int
+	orm            *ormKit.DB
+	redisInstance  *redisKit.Cache
+	candleMQTopic  mq.MQTopic
+	lastSequenceID int
 }
 
-func CreateCandleRepo(orm *ormKit.DB, redisInstance *redisKit.Cache, candleMQTopic, candleSaveMQTopic mq.MQTopic) domain.CandleRepo {
+func CreateCandleRepo(orm *ormKit.DB, redisInstance *redisKit.Cache, candleMQTopic mq.MQTopic) domain.CandleRepo {
 	return &candleRepo{
-		orm:               orm,
-		redisInstance:     redisInstance,
-		candleMQTopic:     candleMQTopic,
-		candleSaveMQTopic: candleSaveMQTopic,
+		orm:           orm,
+		redisInstance: redisInstance,
+		candleMQTopic: candleMQTopic,
 	}
 }
 
@@ -216,7 +214,7 @@ func (c *candleRepo) SaveBar(candleBar *domain.CandleBar) error {
 }
 
 // GetBar response: [timestamp, openPrice, highPrice, lowPrice, closePrice, quantity]
-func (c *candleRepo) GetBar(ctx context.Context, timeType domain.CandleTimeType, min, max string) ([]string, error) {
+func (c *candleRepo) GetBar(ctx context.Context, timeType domain.CandleTimeType, start, stop string, sortOrderBy domain.SortOrderByEnum) ([]string, error) {
 	var redisKey string
 	switch timeType {
 	case domain.CandleTimeTypeSec:
@@ -228,9 +226,16 @@ func (c *candleRepo) GetBar(ctx context.Context, timeType domain.CandleTimeType,
 	case domain.CandleTimeTypeDay:
 		redisKey = redisKeyDay
 	}
-	result, err := c.redisInstance.ZRangeByScore(ctx, redisKey, &redisKit.ZRangeBy{
-		Min: min,
-		Max: max,
+	var revArg bool
+	if sortOrderBy == domain.DESCSortOrderByEnum {
+		revArg = true
+	}
+	result, err := c.redisInstance.ZRangeArgs(ctx, redisKit.ZRangeArgs{
+		Key:     redisKey,
+		Start:   start,
+		Stop:    stop,
+		ByScore: true,
+		Rev:     revArg,
 	}).Result()
 	if err != nil {
 		return nil, errors.Wrap(err, "get bar failed")
@@ -256,8 +261,8 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (c *candleRepo) ProduceCandleSaveMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
-	if err := c.candleSaveMQTopic.Produce(ctx, &mqMessage{
+func (c *candleRepo) ProduceCandleMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
+	if err := c.candleMQTopic.Produce(ctx, &mqMessage{
 		MatchResult: matchResult,
 	}); err != nil {
 		return errors.Wrap(err, "produce failed")
@@ -266,8 +271,8 @@ func (c *candleRepo) ProduceCandleSaveMQByMatchResult(ctx context.Context, match
 	return nil
 }
 
-func (c *candleRepo) ConsumeCandleSaveMQ(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
-	c.candleSaveMQTopic.Subscribe(key, func(message []byte) error {
+func (c *candleRepo) ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
+	c.candleMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
@@ -401,20 +406,6 @@ func (c *candleRepo) ProduceCandle(ctx context.Context, candleBar *domain.Candle
 		return errors.Wrap(err, "produce failed")
 	}
 	return nil
-}
-
-func (c *candleRepo) ConsumeCandle(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
-	c.candleMQTopic.Subscribe(key, func(message []byte) error {
-		var mqMessage mqCandleMessage
-		err := json.Unmarshal(message, &mqMessage)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		if err := notify(mqMessage.CandleBar); err != nil {
-			return errors.Wrap(err, "notify failed")
-		}
-		return nil
-	})
 }
 
 func (c *candleRepo) checkEventSequence(sequenceID int) error {

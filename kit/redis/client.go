@@ -23,6 +23,7 @@ type Cmd struct {
 type (
 	StringSliceCmd = goRedis.StringSliceCmd
 	ZRangeBy       = goRedis.ZRangeBy
+	ZRangeArgs     = goRedis.ZRangeArgs
 )
 
 func (cache *Cache) TxPipeline() *CacheTX {
@@ -47,6 +48,10 @@ func (cache *Cache) Set(ctx context.Context, key string, value interface{}, expi
 
 func (cache *Cache) Del(ctx context.Context, keys ...string) error { // TODO: tx
 	return cache.redisClient.Del(ctx, keys...).Err()
+}
+
+func (cache *Cache) ZRangeArgs(ctx context.Context, z ZRangeArgs) *StringSliceCmd {
+	return cache.redisClient.ZRangeArgs(ctx, z)
 }
 
 func (cache *Cache) ZRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd {

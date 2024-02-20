@@ -32,7 +32,7 @@ type tradingResultStruct struct {
 var _ mq.Message = (*tradingResultStruct)(nil)
 
 func (t *tradingResultStruct) GetKey() string {
-	return strconv.FormatInt(t.TradingEvent.ReferenceID, 10)
+	return strconv.Itoa(t.TradingEvent.ReferenceID)
 }
 
 func (t *tradingResultStruct) Marshal() ([]byte, error) {

@@ -14,6 +14,13 @@ type Account struct {
 	UpdatedAt time.Time
 }
 
+type AccountRepo interface {
+	Create(email, password string) (*Account, error)
+	Get(userID int) (*Account, error)
+	GetEmail(email string) (*Account, error)
+}
+
 type AccountService interface {
 	Register(email, password string) (*Account, error)
+	Get(userID int) (*Account, error)
 }

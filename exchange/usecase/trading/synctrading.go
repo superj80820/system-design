@@ -2,12 +2,11 @@ package trading
 
 import (
 	"context"
+	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
-	loggerKit "github.com/superj80820/system-design/kit/logger"
 )
 
 type syncTradingUseCase struct {
@@ -15,10 +14,8 @@ type syncTradingUseCase struct {
 	userAssetUseCase domain.UserAssetUseCase
 	orderUseCase     domain.OrderUseCase
 	clearingUseCase  domain.ClearingUseCase
-	logger           loggerKit.Logger
 
-	latestOrderBook *domain.OrderBookEntity
-	lastSequenceID  int
+	lastSequenceID int
 }
 
 func CreateSyncTradingUseCase(
@@ -58,15 +55,10 @@ func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *doma
 		return nil, errors.Wrap(err, "check event sequence failed")
 	}
 
-	timeNow := time.Now()
-	year := timeNow.Year()
-	month := int(timeNow.Month())
-	orderID := tradingEvent.SequenceID*10000 + (year*100 + month)
-
 	order, err := t.orderUseCase.CreateOrder(
 		ctx,
 		tradingEvent.SequenceID,
-		orderID,
+		tradingEvent.OrderRequestEvent.OrderID,
 		tradingEvent.OrderRequestEvent.UserID,
 		tradingEvent.OrderRequestEvent.Direction,
 		tradingEvent.OrderRequestEvent.Price,
@@ -94,7 +86,7 @@ func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *doma
 
 	order, err := t.orderUseCase.GetOrder(tradingEvent.OrderCancelEvent.OrderId)
 	if err != nil {
-		return errors.Wrap(err, "get order failed")
+		return errors.Wrap(err, fmt.Sprintf("get order failed, order id: %d", tradingEvent.OrderCancelEvent.OrderId))
 	}
 	if order.UserID != tradingEvent.OrderCancelEvent.UserID {
 		return errors.New("order does not belong to this user")

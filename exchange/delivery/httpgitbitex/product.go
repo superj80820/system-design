@@ -34,7 +34,6 @@ func MakeGetProductsEndpoint(currencyUseCase domain.CurrencyUseCase) endpoint.En
 		res := &getProductsResponse{
 			struct{ *domain.CurrencyProduct }{currencyUseCase.GetProduct()}, // TODO: maybe just return slice?
 		}
-
 		return res, nil
 	}
 }

@@ -26,14 +26,15 @@ const (
 )
 
 type AuthService struct {
-	db     *ormKit.DB
-	logger loggerKit.Logger
+	db          *ormKit.DB
+	accountRepo domain.AccountRepo
+	logger      loggerKit.Logger
 
 	accessTokenKey  *ecdsa.PrivateKey
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthUseCase(db *ormKit.DB, logger loggerKit.Logger) (domain.AuthUseCase, error) {
+func CreateAuthUseCase(db *ormKit.DB, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
 	if db == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}
@@ -49,14 +50,14 @@ func CreateAuthUseCase(db *ormKit.DB, logger loggerKit.Logger) (domain.AuthUseCa
 	return &AuthService{
 		db:              db,
 		logger:          logger,
+		accountRepo:     accountRepo,
 		accessTokenKey:  accessTokenKey,
 		refreshTokenKey: refreshTokenKey,
 	}, nil
 }
 
 func (a *AuthService) Login(email, password string) (*domain.Account, error) {
-	var account repository.AccountEntity
-	err := a.db.First(&account, "email = ?", email)
+	account, err := a.accountRepo.GetEmail(email)
 	if errors.Is(err, ormKit.ErrRecordNotFound) {
 		return nil, code.CreateErrorCode(http.StatusUnauthorized)
 	} else if err != nil {

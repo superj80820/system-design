@@ -192,24 +192,19 @@ func (m *matchingUseCase) processOrder(ctx context.Context, takerOrder *order, m
 		anotherBook.add(takerOrder)
 	}
 
-	m.quotationRepo.ProduceTicksSaveMQByMatchResult(ctx, &matchResult.MatchResult)
-	m.matchingRepo.ProduceMatchOrderSaveMQByMatchResult(ctx, &matchResult.MatchResult)
-	m.candleRepo.ProduceCandleSaveMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.quotationRepo.ProduceTicksMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.matchingRepo.ProduceMatchOrderMQByMatchResult(ctx, &matchResult.MatchResult)
+	m.candleRepo.ProduceCandleMQByMatchResult(ctx, &matchResult.MatchResult)
 	m.isOrderBookChanged.Store(true)
 
 	return matchResult, nil
 }
 
-func (m *matchingUseCase) ConsumeMatchResult(ctx context.Context, key string) {
-	m.matchingRepo.ConsumeMatchOrderSaveMQ(ctx, key, func(matchOrderDetail *domain.MatchOrderDetail) error { // TODO: error handle
-		if err := m.matchingRepo.SaveMatchingDetailsWithIgnore(ctx, []*domain.MatchOrderDetail{matchOrderDetail}); err != nil { // TODO: maybe no batch
+func (m *matchingUseCase) ConsumeMatchResultToSave(ctx context.Context, key string) {
+	m.matchingRepo.ConsumeMatchOrderMQBatch(ctx, key, func(matchOrderDetails []*domain.MatchOrderDetail) error { // TODO: error handle
+		if err := m.matchingRepo.SaveMatchingDetailsWithIgnore(ctx, matchOrderDetails); err != nil {
 			return errors.Wrap(err, "save matching details failed")
 		}
-
-		if err := m.matchingRepo.ProduceMatchOrder(ctx, matchOrderDetail); err != nil {
-			return errors.Wrap(err, "produce match order failed")
-		}
-
 		return nil
 	})
 }

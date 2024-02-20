@@ -70,12 +70,16 @@ func ManualCommit(rmc *readerManagerConfig) {
 type Reader struct {
 	kafkaReader KafkaReader
 
+	messages     []*kafka.Message
+	messagesLock *sync.Mutex
+
 	isManualCommit bool
 
 	kafkaReaderProvider func() KafkaReader
 	kafkaReaderHookFn   []func(kafkaReader KafkaReader)
 
-	observers map[mq.Observer]mq.Observer
+	observers       map[mq.Observer]mq.Observer
+	observerBatches map[mq.Observer]mq.Observer
 
 	pauseCh chan context.CancelFunc
 	startCh chan context.Context
@@ -95,12 +99,14 @@ func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 
 func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption) *Reader {
 	r := &Reader{
-		observers:     make(map[mq.Observer]mq.Observer),
-		pauseCh:       make(chan context.CancelFunc, 1),
-		startCh:       make(chan context.Context),
-		readyCh:       make(chan struct{}),
-		pauseHookFn:   defaultPauseHookFn,
-		errorHandleFn: defaultErrorHandleFn,
+		messagesLock:    new(sync.Mutex),
+		observers:       make(map[mq.Observer]mq.Observer),
+		observerBatches: make(map[mq.Observer]mq.Observer),
+		pauseCh:         make(chan context.CancelFunc, 1),
+		startCh:         make(chan context.Context),
+		readyCh:         make(chan struct{}),
+		pauseHookFn:     defaultPauseHookFn,
+		errorHandleFn:   defaultErrorHandleFn,
 	}
 	for _, option := range options {
 		option(r)
@@ -116,6 +122,7 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 }
 
 func (r *Reader) Run() {
+	ticker := time.NewTicker(100 * time.Millisecond)
 	go func() {
 		for ctx := range r.startCh {
 			if r.kafkaReader != nil {
@@ -144,9 +151,42 @@ func (r *Reader) Run() {
 					break
 				}
 
-				r.RangeAllObservers(func(_ mq.Observer, observer mq.Observer) bool {
-					if err := observer.NotifyWithManualCommit(m.Value, func() error {
-						if err := r.kafkaReader.CommitMessages(ctx, m); err != nil {
+				r.messagesLock.Lock()
+				r.messages = append(r.messages, &m)
+				r.messagesLock.Unlock()
+			}
+		}
+	}()
+	go func() {
+		defer ticker.Stop()
+
+		for range ticker.C {
+			latestKafkaMessage := new(kafka.Message)
+			r.messagesLock.Lock()
+			cloneMessages := make([][]byte, len(r.messages))
+			for idx, message := range r.messages {
+				cloneMessages[idx] = message.Value
+				latestKafkaMessage = message
+			}
+			r.messages = nil
+			r.messagesLock.Unlock()
+
+			r.RangeAllObserverBatches(func(_, observerBatch mq.Observer) bool {
+				if err := observerBatch.NotifyBatchWithManualCommit(cloneMessages, func() error {
+					if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
+						return errors.Wrap(err, "commit message failed")
+					}
+					return nil
+				}); err != nil { // TODO: think async
+					r.errorHandleFn(err)
+				}
+				return true
+			})
+
+			for _, m := range cloneMessages {
+				r.RangeAllObservers(func(_, observer mq.Observer) bool {
+					if err := observer.NotifyWithManualCommit(m, func() error {
+						if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
 							return errors.Wrap(err, "commit message failed")
 						}
 						return nil
@@ -227,6 +267,17 @@ func (r *Reader) RangeAllObservers(fn func(key mq.Observer, value mq.Observer) b
 	defer r.lock.RUnlock()
 
 	for key, value := range r.observers {
+		if !fn(key, value) {
+			return
+		}
+	}
+}
+
+func (r *Reader) RangeAllObserverBatches(fn func(key mq.Observer, value mq.Observer) bool) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+
+	for key, value := range r.observerBatches {
 		if !fn(key, value) {
 			return
 		}

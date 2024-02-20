@@ -202,8 +202,26 @@ func (m *mqTopic) Subscribe(key string, notify mq.Notify, options ...mq.Observer
 	return observer
 }
 
+func (m *mqTopic) SubscribeBatch(key string, notifyBatch mq.NotifyBatch, options ...mq.ObserverOption) mq.Observer {
+	observer := readerManager.CreateObserverBatch(key, notifyBatch, options...)
+
+	m.readerManager.AddObserver(observer)
+	m.readerManager.StartConsume(context.Background())
+
+	return observer
+}
+
 func (m *mqTopic) SubscribeWithManualCommit(key string, notify mq.NotifyWithManualCommit, options ...mq.ObserverOption) mq.Observer {
 	observer := readerManager.CreateObserverWithManualCommit(key, notify, options...)
+
+	m.readerManager.AddObserver(observer)
+	m.readerManager.StartConsume(context.Background())
+
+	return observer
+}
+
+func (m *mqTopic) SubscribeBatchWithManualCommit(key string, notifyBatch mq.NotifyBatchWithManualCommit, options ...mq.ObserverOption) mq.Observer {
+	observer := readerManager.CreateObserverBatchWithManualCommit(key, notifyBatch, options...)
 
 	m.readerManager.AddObserver(observer)
 	m.readerManager.StartConsume(context.Background())

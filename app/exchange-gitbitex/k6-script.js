@@ -56,51 +56,18 @@ export const options = {
 // about authoring k6 scripts.
 //
 export default function () {
-  const url = 'http://localhost:9090/api/v1/orders';
+  const url = 'http://localhost:9090/api/orders';
   const randomVal = Math.floor(Math.random() * 100)
-  const direction = Math.floor(Math.random() * 2) + 1
-  const payload = JSON.stringify({ "direction": direction, "price": 2.34 + randomVal, "quantity": randomVal });
+  const direction = ["buy", "sell"][Math.floor(Math.random() * 2)]
+  const payload = JSON.stringify({ "productId": "BTC-USDT", "side": direction, "price": 2.34 + randomVal, "size": randomVal, "type": "limit" });
 
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDcyNDQwOTgsImlhdCI6MTcwNzI0MDQ5OCwic3ViIjoiMTc1NDkxOTk2MTQyMTE1NjM1MiJ9.cDSQOpNTsKGYG4K3TaJPXoEIRLuZoqyKof_s_xlugn05cG0sSTQd_LOvsLwm7cvNGdiFHbEfRDXWcV3mtouorg',
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg0NTA3MDIsImlhdCI6MTcwODQ0NzEwMiwic3ViIjoiMTc1OTk4MDgwOTI4NjA2MjA4MCJ9.lOzP0BACGYEbCKkTdEz1HcMZG4pldzw2zsHAGYMg_y7NHLGC-LJYP5JoFthrmA9xPiftQCWMJg7oUGIwIh1WOg',
     },
   };
 
   const res = http.post(url, payload, params);
-  check(res, { "is 204": res => res.status === 204 })
+  check(res, { "is 200": res => res.status === 200 })
 }
-
-// export default function() {
-//   const url = 'http://localhost:8081/api/v1/test';
-//   const randomVal = Math.floor(Math.random() * 100)
-//   const direction = Math.floor(Math.random() * 2)+1
-//   const payload = JSON.stringify({ "direction": direction, "price": 2.34+randomVal, "quantity": randomVal });
-
-//   const params = {
-//     headers: {
-//       'Content-Type': 'application/json',
-//       'user-id': '2'
-//     },
-//   };
-
-//   http.get(url, payload, params);
-// }
-
-// export default function() {
-//   const url = 'http://127.0.0.1/api/orders';
-//   const randomVal = Math.floor(Math.random() * 100)
-//   const direction = Math.floor(Math.random() * 2)
-//   const directionMap = ["buy","sell"]
-//   const payload = JSON.stringify({"productId":"BTC-USDT","side":directionMap[direction],"type":"limit","price":10+randomVal,"size":1+randomVal,"funds":(10+randomVal)*(1+randomVal)});
-
-//   const params = {
-//     headers: {
-//       "Content-Type": "application/json;charset=UTF-8",
-//       "Cookie": "JSESSIONID=9BBD64B1B3DED2880AF139FB82ECCB8A; accessToken=ff009c63-efb2-4c54-9b5f-9b88105522f4:9BBD64B1B3DED2880AF139FB82ECCB8A:35e8d276a558b1d6f96295fe01eb2381",
-//     },
-//   };
-
-//   http.post(url, payload, params);
-// }

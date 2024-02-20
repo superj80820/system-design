@@ -33,9 +33,9 @@ type createOrderRequest struct {
 	ProductID string    `json:"productId"`
 	Side      sideType  `json:"side"`
 	Type      orderType `json:"type"`
-	Price     int64     `json:"price"`
-	Size      int64     `json:"size"`
-	Funds     int64     `json:"funds"`
+	Price     float64   `json:"price"`
+	Size      float64   `json:"size"`
+	Funds     float64   `json:"funds"`
 }
 
 type createOrderResponse struct {
@@ -131,7 +131,7 @@ var (
 //	    "executedValue": null,
 //	    "status": null
 //	}
-func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+func MakeCreateOrderEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {
@@ -150,19 +150,13 @@ func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoi
 		default:
 			return nil, errors.New("not found side type")
 		}
-		_, err = svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
-			EventType: domain.TradingEventCreateOrderType,
-			OrderRequestEvent: &domain.OrderRequestEvent{
-				UserID:    userID,
-				Direction: direction,
-				Price:     decimal.NewFromInt(req.Price),
-				Quantity:  decimal.NewFromInt(req.Size),
-			},
-		})
+		tradingEvent, err := svc.ProduceCreateOrderTradingEvent(ctx, userID, direction, decimal.NewFromFloat(req.Price), decimal.NewFromFloat(req.Size))
 		if err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
-		return &createOrderResponse{}, nil // TODO: maybe need return id
+		return &createOrderResponse{
+			ID: strconv.Itoa(tradingEvent.OrderRequestEvent.OrderID),
+		}, nil // TODO: maybe need return id
 	}
 }
 
@@ -245,7 +239,7 @@ func MakeGetAccountOrdersEndpoint(orderUseCase domain.OrderUseCase, currencyUseC
 //	}
 //
 // ]
-func MakerGetHistoryOrdersEndpoint(orderUseCase domain.OrderUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
+func MakerGetHistoryOrdersEndpoint(tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(getHistoryOrdersRequest)
 
@@ -253,22 +247,18 @@ func MakerGetHistoryOrdersEndpoint(orderUseCase domain.OrderUseCase, currencyUse
 			return nil, code.CreateErrorCode(http.StatusNotFound).AddErrorMetaData(errors.New("not found product error"))
 		}
 
-		userID := httpKit.GetUserID(ctx)
-		if userID == 0 {
-			return nil, errors.New("not found user id") // TODO: delete
-		}
-		orders, err := orderUseCase.GetHistoryOrders(userID, 1000)
+		details, err := tradingUseCase.GetHistoryMatchDetails(100) // TODO: get first 1000
 		if err != nil {
 			return nil, errors.Wrap(err, "get history orders failed")
 		}
-		res := make(getHistoryOrdersResponse, len(orders))
-		for idx, order := range orders {
+		res := make(getHistoryOrdersResponse, len(details))
+		for idx, detail := range details {
 			res[idx] = struct{ *historyOrder }{&historyOrder{
-				Sequence: order.SequenceID,
-				Time:     order.CreatedAt,
-				Price:    order.Price.String(),
-				Size:     order.Quantity.String(),
-				Side:     order.Direction.String(),
+				Sequence: detail.SequenceID,
+				Time:     detail.CreatedAt,
+				Price:    detail.Price.String(),
+				Size:     detail.Quantity.String(),
+				Side:     detail.Direction.String(),
 			},
 			}
 		}

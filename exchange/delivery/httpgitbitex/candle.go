@@ -44,25 +44,25 @@ func MakeGetCandleEndpoint(candleUseCase domain.CandleUseCase, currencyUseCase d
 		}
 
 		end := time.Now().UnixMilli()
-		start := end - 60*60*24*10
+		start := end - 60*60*24*10*1000
 		endString := strconv.FormatInt(end, 10)
 		startString := strconv.FormatInt(start, 10)
 
 		bar, err := func() ([]string, error) {
 			if req.granularity/60 == 1 {
-				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeMin, startString, endString)
+				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeMin, startString, endString, domain.DESCSortOrderByEnum)
 				if err != nil {
 					return nil, errors.Wrap(err, "get bar failed")
 				}
 				return bar, nil
 			} else if req.granularity/60/60 == 1 {
-				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeHour, startString, endString)
+				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeHour, startString, endString, domain.DESCSortOrderByEnum)
 				if err != nil {
 					return nil, errors.Wrap(err, "get bar failed")
 				}
 				return bar, nil
 			} else if req.granularity/60/60/24 == 1 {
-				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeDay, startString, endString)
+				bar, err := candleUseCase.GetBar(ctx, domain.CandleTimeTypeDay, startString, endString, domain.DESCSortOrderByEnum)
 				if err != nil {
 					return nil, errors.Wrap(err, "get bar failed")
 				}
@@ -81,6 +81,7 @@ func MakeGetCandleEndpoint(candleUseCase domain.CandleUseCase, currencyUseCase d
 			if err != nil {
 				return nil, errors.Wrap(err, "unmarshal filed")
 			}
+			varSlice[0] = float64(int(varSlice[0]) / 1000) // TODO: safe?
 			res[idx] = varSlice
 		}
 

@@ -2,8 +2,8 @@ package memory
 
 import (
 	"context"
-	"fmt"
 	"sync"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/kit/mq"
@@ -11,17 +11,19 @@ import (
 )
 
 type memoryMQ struct {
-	observers util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
-	messageCh chan []byte
-	doneCh    chan struct{}
-	cancel    context.CancelFunc
-	lock      *sync.Mutex
-	err       error
+	observers       util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
+	observerBatches util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
+	messageCh       chan []byte
+	messages        [][]byte
+	doneCh          chan struct{}
+	cancel          context.CancelFunc
+	lock            *sync.Mutex
+	err             error
 }
 
 var _ mq.MQTopic = (*memoryMQ)(nil)
 
-func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int) mq.MQTopic {
+func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollectDuration time.Duration) mq.MQTopic {
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &memoryMQ{
@@ -35,17 +37,46 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int) mq.MQTopic {
 		for {
 			select {
 			case message := <-m.messageCh:
+				m.lock.Lock()
+				m.messages = append(m.messages, message)
+				m.lock.Unlock()
+			case <-ctx.Done():
+				close(m.doneCh)
+			}
+		}
+	}()
+
+	ticker := time.NewTicker(messageCollectDuration)
+	go func() {
+		defer ticker.Stop()
+
+		for range ticker.C {
+			m.lock.Lock()
+			cloneMessages := make([][]byte, len(m.messages))
+			copy(cloneMessages, m.messages)
+			m.messages = nil
+			m.lock.Unlock()
+
+			m.observerBatches.Range(func(key, value mq.Observer) bool {
+				if err := value.NotifyBatchWithManualCommit(cloneMessages, func() error {
+					return nil
+				}); err != nil {
+					value.ErrorHandler(err) // handle error then continue
+					return true
+				}
+				return true
+			})
+
+			for _, message := range cloneMessages {
 				m.observers.Range(func(key, value mq.Observer) bool {
 					if err := value.NotifyWithManualCommit(message, func() error {
 						return nil
 					}); err != nil {
-						fmt.Println(fmt.Sprintf("TODO: error: %+v", errors.Wrap(err, "notify failed")))
+						value.ErrorHandler(err) // handle error then continue
 						return true
 					}
 					return true
 				})
-			case <-ctx.Done():
-				close(m.doneCh)
 			}
 		}
 	}()
@@ -91,10 +122,31 @@ func (m *memoryMQ) Subscribe(key string, notify mq.Notify, options ...mq.Observe
 	return observer
 }
 
+func (m *memoryMQ) SubscribeBatch(key string, notifyBatch mq.NotifyBatch, options ...mq.ObserverOption) mq.Observer {
+	observer := createObserverBatch(key, func(messages [][]byte, commitFn func() error) error {
+		if err := notifyBatch(messages); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
+
+	m.observerBatches.Store(observer, observer)
+
+	return observer
+}
+
 func (m *memoryMQ) SubscribeWithManualCommit(key string, notify mq.NotifyWithManualCommit, options ...mq.ObserverOption) mq.Observer {
 	observer := createObserver(key, notify)
 
 	m.observers.Store(observer, observer)
+
+	return observer
+}
+
+func (m *memoryMQ) SubscribeBatchWithManualCommit(key string, notifyBatch mq.NotifyBatchWithManualCommit, options ...mq.ObserverOption) mq.Observer {
+	observer := createObserverBatch(key, notifyBatch)
+
+	m.observerBatches.Store(observer, observer)
 
 	return observer
 }
@@ -107,17 +159,14 @@ func (m *memoryMQ) UnSubscribe(observer mq.Observer) {
 type observer struct {
 	key             string
 	notify          mq.NotifyWithManualCommit
+	notifyBatch     mq.NotifyBatchWithManualCommit
 	unSubscribeHook func() error
+	errorHandler    func(error)
 }
 
 var _ mq.Observer = (*observer)(nil)
 
-func createObserver(key string, notify mq.NotifyWithManualCommit, options ...mq.ObserverOption) mq.Observer {
-	o := &observer{
-		key:    key,
-		notify: notify,
-	}
-
+func applyObserverOptions(o *observer, options []mq.ObserverOption) {
 	var observerOptionConfig mq.ObserverOptionConfig
 	for _, option := range options {
 		option(&observerOptionConfig)
@@ -125,6 +174,29 @@ func createObserver(key string, notify mq.NotifyWithManualCommit, options ...mq.
 	if observerOptionConfig.UnSubscribeHook != nil {
 		o.unSubscribeHook = observerOptionConfig.UnSubscribeHook
 	}
+	if observerOptionConfig.ErrorHandler != nil {
+		o.errorHandler = observerOptionConfig.ErrorHandler
+	}
+}
+
+func createObserver(key string, notify mq.NotifyWithManualCommit, options ...mq.ObserverOption) mq.Observer {
+	o := &observer{
+		key:    key,
+		notify: notify,
+	}
+
+	applyObserverOptions(o, options)
+
+	return o
+}
+
+func createObserverBatch(key string, notifyBatch mq.NotifyBatchWithManualCommit, options ...mq.ObserverOption) mq.Observer {
+	o := &observer{
+		key:         key,
+		notifyBatch: notifyBatch,
+	}
+
+	applyObserverOptions(o, options)
 
 	return o
 }
@@ -140,9 +212,22 @@ func (o *observer) NotifyWithManualCommit(message []byte, commitFn func() error)
 	return nil
 }
 
+func (o *observer) NotifyBatchWithManualCommit(messages [][]byte, commitFn func() error) error {
+	if err := o.notifyBatch(messages, commitFn); err != nil {
+		return errors.Wrap(err, "notify failed")
+	}
+	return nil
+}
+
 func (o *observer) UnSubscribeHook() {
 	if o.unSubscribeHook == nil {
 		return
 	}
 	o.unSubscribeHook()
+}
+
+func (o *observer) ErrorHandler(err error) {
+	if o.errorHandler != nil {
+		o.errorHandler(err)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -39,7 +40,6 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/matching"
 	"github.com/superj80820/system-design/exchange/usecase/order"
 	"github.com/superj80820/system-design/exchange/usecase/quotation"
-	"github.com/superj80820/system-design/exchange/usecase/sequencer"
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	httpKit "github.com/superj80820/system-design/kit/http"
@@ -171,19 +171,23 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		Options: options.Index().SetUnique(true),
 	})
 
-	sequenceMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	candleSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100000)
-	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	ickSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	matchingSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	messageChannelBuffer := 10
+	messageCollectDuration := 100 * time.Millisecond
+	sequenceMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
+	orderSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	candleSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tickSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	matchingSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
+	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	assert.Nil(t, err)
@@ -195,7 +199,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	assert.Nil(t, err)
 	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic, orderSaveMQTopic)
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic, candleSaveMQTopic)
-	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic, ickSaveMQTopic)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic, tickSaveMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingSaveMQTopic, matchingMQTopic, orderBookMQTopic)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
@@ -206,15 +210,14 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
-	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
 	accountUseCase, err := authUseCase.CreateAccountUseCase(mysqlDB, logger)
 	assert.Nil(t, err)
 	authUserUseCase, err := authUseCase.CreateAuthUseCase(mysqlDB, logger)
 	assert.Nil(t, err)
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -230,13 +233,13 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	}
 
 	cancelOrderServer := httptransport.NewServer(
-		authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase)),
+		authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase)),
 		httpDelivery.DecodeCancelOrderRequest,
 		httpDelivery.EncodeCancelOrderResponse,
 		options...,
 	)
 	createOrderServer := httptransport.NewServer(
-		authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase)),
+		authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingUseCase)),
 		httpGitbitexDelivery.DecodeCreateOrderRequest,
 		httpGitbitexDelivery.EncodeCreateOrderResponse,
 		options...,
@@ -272,7 +275,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		options...,
 	)
 	createUserServer := httptransport.NewServer(
-		httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingSequencerUseCase, currencyUseCase),
+		httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingUseCase, currencyUseCase),
 		httpGitbitexDelivery.DecodeAccountRegisterRequest,
 		httpGitbitexDelivery.EncodeAccountRegisterResponse,
 		options...,
@@ -421,5 +424,35 @@ func TestServer(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.scenario, testCase.fn)
+	}
+}
+
+func BenchmarkServer(b *testing.B) {
+	testSetup := testSetupFn(b)
+	// defer testSetup.teardownFn()
+
+	testSetup.createUserServer.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{"email":"%s","password":"%s"}`, userAEmail, userAPassword))))
+	loginRecorder := httptest.NewRecorder()
+	testSetup.userLoginServer.ServeHTTP(loginRecorder, httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{"email":"%s","password":"%s"}`, userAEmail, userAPassword))))
+
+	time.Sleep(1000 * time.Millisecond)
+
+	reqWithAuthFn := func(r *http.Request) *http.Request {
+		for _, cookie := range loginRecorder.Result().Cookies() {
+			r.AddCookie(cookie)
+		}
+		return r
+	}
+
+	direction := []string{"buy", "sell"}
+	for i := 0; i < b.N; i++ {
+		randNum := rand.Float64() * 10
+		testSetup.createOrderServer.ServeHTTP(httptest.NewRecorder(), reqWithAuthFn(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{
+			"productId": "BTC-USDT",
+			"side": "%s",
+			"type": "limit",
+			"price": %f,
+			"size": 3
+		}`, direction[i%2], randNum)))))
 	}
 }

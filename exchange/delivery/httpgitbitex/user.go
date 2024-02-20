@@ -32,31 +32,17 @@ var (
 	EncodeAccountRegisterResponse = httpTransportKit.EncodeJsonResponse
 )
 
-func MakeAccountRegisterEndpoint(svc domain.AccountService, tradingSequencerUseCase domain.TradingSequencerUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
+func MakeAccountRegisterEndpoint(svc domain.AccountService, tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(accountRegisterRequest)
 		account, err := svc.Register(req.Email, req.Password)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tradingSequencerUseCase.ProduceTradingEvent(ctx, &domain.TradingEvent{ // TODO: in production need deposit api
-			EventType: domain.TradingEventDepositType,
-			DepositEvent: &domain.DepositEvent{
-				ToUserID: int(account.ID),
-				AssetID:  currencyUseCase.GetBaseCurrencyID(),
-				Amount:   decimal.NewFromInt(10000000000),
-			},
-		}); err != nil {
+		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, int(account.ID), currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
-		if _, err := tradingSequencerUseCase.ProduceTradingEvent(ctx, &domain.TradingEvent{ // TODO: in production need deposit api
-			EventType: domain.TradingEventDepositType,
-			DepositEvent: &domain.DepositEvent{
-				ToUserID: int(account.ID),
-				AssetID:  currencyUseCase.GetQuoteCurrencyID(),
-				Amount:   decimal.NewFromInt(10000000000),
-			},
-		}); err != nil {
+		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, int(account.ID), currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return &accountRegisterResponse{

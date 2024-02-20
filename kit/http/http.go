@@ -136,11 +136,9 @@ func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.Respo
 			panic("encodeError with nil error")
 		}
 
-		ctx = CustomAfterCtx(ctx, w)
-
 		errorCode := code.CreateHTTPError(code.ParseErrorCode(err))
 
-		fmt.Println(fmt.Sprintf("%+v", err))
+		fmt.Printf("york debug: %+v\n", err)
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(errorCode.HTTPCode)

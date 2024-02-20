@@ -20,7 +20,7 @@ const (
 
 // TODO: abstract
 type TradingEvent struct {
-	ReferenceID int64
+	ReferenceID int
 
 	EventType  TradingEventTypeEnum
 	SequenceID int
@@ -37,6 +37,7 @@ type TradingEvent struct {
 
 type OrderRequestEvent struct {
 	UserID    int
+	OrderID   int
 	Direction DirectionEnum
 	Price     decimal.Decimal
 	Quantity  decimal.Decimal
@@ -111,13 +112,6 @@ type TradingResult struct {
 	MatchResult         *MatchResult
 }
 
-type TradingSequencerUseCase interface {
-	ConsumeTradingEventThenProduce(context.Context)
-	ProduceTradingEvent(context.Context, *TradingEvent) (int64, error)
-	Done() <-chan struct{}
-	Err() error
-}
-
 type SyncTradingUseCase interface {
 	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, error)
 	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) error
@@ -154,14 +148,13 @@ type TradingNotifyRequest struct {
 }
 
 type TradingUseCase interface {
-	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, error)
-	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) error
-	Transfer(ctx context.Context, tradingEvent *TradingEvent) error
+	ConsumeTradingEventThenProduce(context.Context)
+	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
+	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
+	ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TradingEvent, error)
 
-	Deposit(ctx context.Context, tradingEvent *TradingEvent) error
-
-	GetSequenceID() int
-	GetHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
+	GetHistoryMatchDetails(maxResults int) ([]*MatchOrderDetail, error)
+	GetUserHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)
 
 	GetLatestSnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(context.Context, *TradingSnapshot) error
@@ -171,6 +164,7 @@ type TradingUseCase interface {
 	Notify(ctx context.Context, userID int, stream endpoint.Stream[TradingNotifyRequest, any]) error
 
 	Done() <-chan struct{}
+	Err() error
 	Shutdown() error
 	// TODO
 	// NewOrder(order *OrderEntity) (*MatchResult, error)

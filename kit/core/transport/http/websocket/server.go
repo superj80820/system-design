@@ -151,13 +151,10 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 
 	g.Add(func() error {
-		for {
-			select {
-			case <-ctx.Done():
-				return nil
-			case out, ok := <-outCh:
-				if !ok {
-					return nil
+		for out := range outCh {
+			func() error { // if get error then do nothing but continue consume `outCh`(for not block send logic)
+				if err := ctx.Err(); err != nil {
+					return errors.Wrap(err, "context done")
 				}
 				msg, mt, err := s.enc(ctx, out)
 				if err != nil {
@@ -166,8 +163,10 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if err := ws.WriteMessage(int(mt), msg); err != nil {
 					return errors.Wrap(err, "send message failed")
 				}
-			}
+				return nil
+			}()
 		}
+		return nil
 	}, func(err error) {
 		interruptFunc(err)
 	})
@@ -184,7 +183,7 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	g.Run()
 
 	close(doneCh)
-	close(outCh)
+	// close(outCh) // TODO: maybe leak
 
 	fmt.Println("close all")
 }

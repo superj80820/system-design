@@ -73,18 +73,16 @@ func (*tickDBEntity) TableName() string {
 }
 
 type quotationRepo struct {
-	orm             *ormKit.DB
-	redisCache      *redisKit.Cache
-	tickMQTopic     mq.MQTopic
-	tickSaveMQTopic mq.MQTopic
+	orm         *ormKit.DB
+	redisCache  *redisKit.Cache
+	tickMQTopic mq.MQTopic
 }
 
-func CreateQuotationRepo(orm *ormKit.DB, redisCache *redisKit.Cache, tickMQTopic, tickSaveMQTopic mq.MQTopic) domain.QuotationRepo {
+func CreateQuotationRepo(orm *ormKit.DB, redisCache *redisKit.Cache, tickMQTopic mq.MQTopic) domain.QuotationRepo {
 	return &quotationRepo{
-		orm:             orm,
-		redisCache:      redisCache,
-		tickMQTopic:     tickMQTopic,
-		tickSaveMQTopic: tickSaveMQTopic,
+		orm:         orm,
+		redisCache:  redisCache,
+		tickMQTopic: tickMQTopic,
 	}
 }
 
@@ -168,7 +166,7 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (q *quotationRepo) ProduceTicksSaveMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
+func (q *quotationRepo) ProduceTicksMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
 	ticks := make([]*domain.TickEntity, len(matchResult.MatchDetails))
 	for _, matchDetail := range matchResult.MatchDetails {
 		ticks = append(ticks, &domain.TickEntity{
@@ -181,7 +179,7 @@ func (q *quotationRepo) ProduceTicksSaveMQByMatchResult(ctx context.Context, mat
 			CreatedAt:      matchResult.CreatedAt,
 		})
 	}
-	if err := q.tickSaveMQTopic.Produce(ctx, &mqMessage{
+	if err := q.tickMQTopic.Produce(ctx, &mqMessage{
 		sequenceID: matchResult.SequenceID,
 		ticks:      ticks,
 	}); err != nil {
@@ -190,31 +188,7 @@ func (q *quotationRepo) ProduceTicksSaveMQByMatchResult(ctx context.Context, mat
 	return nil
 }
 
-func (q *quotationRepo) ConsumeTicksSaveMQ(ctx context.Context, key string, notify func(sequenceID int, ticks []*domain.TickEntity) error) {
-	q.tickSaveMQTopic.Subscribe(key, func(message []byte) error {
-		var mqMessage mqMessage
-		err := json.Unmarshal(message, &mqMessage)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		if err := notify(mqMessage.sequenceID, mqMessage.ticks); err != nil {
-			return errors.Wrap(err, "notify failed")
-		}
-		return nil
-	})
-}
-
-func (q *quotationRepo) ProduceTicks(ctx context.Context, sequenceID int, ticks []*domain.TickEntity) error {
-	if err := q.tickMQTopic.Produce(ctx, &mqMessage{
-		sequenceID: sequenceID,
-		ticks:      ticks,
-	}); err != nil {
-		return errors.Wrap(err, "produce tick failed")
-	}
-	return nil
-}
-
-func (q *quotationRepo) ConsumeTicks(ctx context.Context, key string, notify func(sequenceID int, ticks []*domain.TickEntity) error) {
+func (q *quotationRepo) ConsumeTicksMQ(ctx context.Context, key string, notify func(sequenceID int, ticks []*domain.TickEntity) error) {
 	q.tickMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)

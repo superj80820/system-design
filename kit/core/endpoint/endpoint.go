@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+
+	"github.com/superj80820/system-design/kit/code"
 )
 
 type MessageType int
@@ -30,7 +32,7 @@ type ServerStream[IN, OUT any] struct { // TODO: think name
 func (s *ServerStream[IN, OUT]) Send(out OUT) error {
 	select {
 	case <-s.doneCh:
-		return errors.New("already close websocket")
+		return code.CreateErrorCode(http.StatusOK).AddErrorMetaData(errors.New("already close websocket"))
 	default:
 		s.outCh <- out
 		return nil

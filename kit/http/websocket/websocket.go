@@ -3,7 +3,6 @@ package websocket
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -48,7 +47,6 @@ func EncodeWSErrorResponse() func(ctx context.Context, err error, conn *websocke
 		if err == nil {
 			panic("encodeError with nil error")
 		}
-		fmt.Println("york", err)
 
 		errorCode := code.CreateWebsocketError(ctx, code.ParseErrorCode(err))
 		jsonData, err := json.Marshal(errorCode)
@@ -61,5 +59,9 @@ func EncodeWSErrorResponse() func(ctx context.Context, err error, conn *websocke
 			websocket.FormatCloseMessage(errorCode.WebsocketCode, string(jsonData)),
 			time.Now().Add(time.Second),
 		) // TODO: error handling
+
+		if errorCode.WebsocketCode != websocket.CloseNormalClosure {
+			// TODO: error handling
+		}
 	}
 }

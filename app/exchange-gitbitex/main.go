@@ -9,14 +9,18 @@ import (
 	"os/signal"
 	"time"
 
+	_ "net/http/pprof"
 	"path/filepath"
 	"syscall"
 
 	httptransport "github.com/go-kit/kit/transport/http"
 	"github.com/gorilla/mux"
+	"github.com/rs/cors"
 	"github.com/shopspring/decimal"
+	authMySQLRepo "github.com/superj80820/system-design/auth/repository"
 	"github.com/superj80820/system-design/auth/usecase"
 	"github.com/superj80820/system-design/domain"
+
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	httpGitbitexDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex"
@@ -31,6 +35,7 @@ import (
 	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"go.mongodb.org/mongo-driver/bson"
@@ -40,7 +45,6 @@ import (
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 
 	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
@@ -53,7 +57,7 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/matching"
 	"github.com/superj80820/system-design/exchange/usecase/order"
 	"github.com/superj80820/system-design/exchange/usecase/quotation"
-	"github.com/superj80820/system-design/exchange/usecase/sequencer"
+
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
@@ -80,6 +84,7 @@ func main() {
 		BaseScale:      6,
 		QuoteScale:     2,
 	}
+	enablePprofServer := true
 
 	ctx := context.Background()
 
@@ -205,7 +210,7 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Println("for debug: mysql port: ", mysqlDBPort.Port(), " mongo port: ", "mongodb://"+mongoHost+":"+mongoPort.Port())
+	fmt.Println("for debug: mysql port: ", mysqlDBPort.Port(), " mongo port: ", "mongodb://"+mongoHost+":"+mongoPort.Port(), " redis port: ", redisHost+":"+redisPort.Port())
 
 	eventsCollection := mongoDB.Database("exchange").Collection("events")
 	eventsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -225,18 +230,17 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	candleSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100000)
-	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	ickSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	matchingSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
-	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100)
+	messageChannelBuffer := 1000
+	messageCollectDuration := 100 * time.Millisecond
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
+	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	if err != nil {
@@ -250,10 +254,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic, orderSaveMQTopic)
-	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic, candleSaveMQTopic)
-	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic, ickSaveMQTopic)
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingSaveMQTopic, matchingMQTopic, orderBookMQTopic)
+	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic)
+	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, orderRepo, candleRepo, 100) // TODO: 100?
@@ -263,19 +267,19 @@ func main() {
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
-	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(logger, sequencerRepo, tradingRepo, tradingUseCase, 3000, 500*time.Millisecond)
-	accountUseCase, err := usecase.CreateAccountUseCase(mysqlDB, logger)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
+	authRepo := authMySQLRepo.CreateAccountRepo(mysqlDB)
+	accountUseCase, err := usecase.CreateAccountUseCase(authRepo, logger)
 	if err != nil {
 		panic(err)
 	}
-	authUseCase, err := usecase.CreateAuthUseCase(mysqlDB, logger)
+	authUseCase, err := usecase.CreateAuthUseCase(mysqlDB, authRepo, logger)
 	if err != nil {
 		panic(err)
 	}
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, tradingSequencerUseCase, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -289,31 +293,32 @@ func main() {
 		httptransport.ServerErrorEncoder(httpKit.EncodeHTTPErrorResponse()),
 	}
 	r := mux.NewRouter()
-	r.Methods("DELETE").Path("/api/orders/{orderID}").Handler(
+	api := r.PathPrefix("/api/").Subrouter()
+	api.Methods("DELETE").Path("/orders/{orderID}").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase)),
+			authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase)),
 			httpDelivery.DecodeCancelOrderRequest,
 			httpDelivery.EncodeCancelOrderResponse,
 			options...,
 		),
 	)
-	r.Methods("POST").Path("/api/orders").Handler(
+	api.Methods("POST").Path("/orders").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase)),
+			authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingUseCase)),
 			httpGitbitexDelivery.DecodeCreateOrderRequest,
 			httpGitbitexDelivery.EncodeCreateOrderResponse,
 			options...,
 		),
 	)
-	r.Methods("GET").Path("/api/products/{productID}/trades").Handler(
+	api.Methods("GET").Path("/products/{productID}/trades").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpGitbitexDelivery.MakerGetHistoryOrdersEndpoint(orderUseCase, currencyUseCase)),
+			httpGitbitexDelivery.MakerGetHistoryOrdersEndpoint(tradingUseCase, currencyUseCase),
 			httpGitbitexDelivery.DecodeGetHistoryOrdersRequest,
 			httpGitbitexDelivery.EncodeGetHistoryOrdersResponse,
 			options...,
 		),
 	)
-	r.Methods("GET").Path("/api/products").Handler(
+	api.Methods("GET").Path("/products").Handler(
 		httptransport.NewServer(
 			httpGitbitexDelivery.MakeGetProductsEndpoint(currencyUseCase),
 			httpGitbitexDelivery.DecodeGetProductsRequest,
@@ -321,7 +326,7 @@ func main() {
 			options...,
 		),
 	)
-	r.Methods("GET").Path("/api/products/{productID}/candles").Handler(
+	api.Methods("GET").Path("/products/{productID}/candles").Handler(
 		httptransport.NewServer(
 			httpGitbitexDelivery.MakeGetCandleEndpoint(candleUseCase, currencyUseCase),
 			httpGitbitexDelivery.DecodeGetCandlesRequest,
@@ -329,7 +334,7 @@ func main() {
 			options...,
 		),
 	)
-	r.Methods("GET").Path("/api/orders").Handler(
+	api.Methods("GET").Path("/orders").Handler(
 		httptransport.NewServer(
 			authMiddleware(httpGitbitexDelivery.MakeGetAccountOrdersEndpoint(orderUseCase, currencyUseCase)),
 			httpGitbitexDelivery.DecodeGetAccountOrdersRequest,
@@ -337,7 +342,7 @@ func main() {
 			options...,
 		),
 	)
-	r.Methods("GET").Path("/api/accounts").Handler(
+	api.Methods("GET").Path("/accounts").Handler(
 		httptransport.NewServer(
 			authMiddleware(httpGitbitexDelivery.MakeGetAccountAssetsEndpoint(userAssetUseCase, currencyUseCase)),
 			httpGitbitexDelivery.DecodeGetAccountAssetsRequest,
@@ -345,15 +350,15 @@ func main() {
 			options...,
 		),
 	)
-	r.Methods("POST").Path("/api/users").Handler(
+	api.Methods("POST").Path("/users").Handler(
 		httptransport.NewServer(
-			httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingSequencerUseCase, currencyUseCase),
+			httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingUseCase, currencyUseCase),
 			httpGitbitexDelivery.DecodeAccountRegisterRequest,
 			httpGitbitexDelivery.EncodeAccountRegisterResponse,
 			options...,
 		),
 	)
-	r.Methods("POST").Path("/api/users/accessToken").Handler(
+	api.Methods("POST").Path("/users/accessToken").Handler(
 		httptransport.NewServer(
 			httpGitbitexDelivery.MakeAuthLoginEndpoint(authUseCase),
 			httpGitbitexDelivery.DecodeAuthLoginRequest,
@@ -361,7 +366,16 @@ func main() {
 			options...,
 		),
 	)
-	r.Handle("/ws",
+	api.Methods("GET").Path("/users/self").Handler(
+		httptransport.NewServer(
+			authMiddleware(httpGitbitexDelivery.MakeSelfEndpoint(accountUseCase)),
+			httpGitbitexDelivery.DecodeGetSelfRequest,
+			httpGitbitexDelivery.EncodeGetSelfResponse,
+			options...,
+		),
+	)
+
+	r.PathPrefix("/ws").Handler(
 		wsTransport.NewServer(
 			wsMiddleware.CreateAuth[domain.TradingNotifyRequest, any](func(token string) (int64, error) {
 				return authUseCase.Verify(token)
@@ -369,20 +383,32 @@ func main() {
 			wsDelivery.DecodeStreamExchangeRequest,
 			wsKit.JsonEncodeResponse[any],
 			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
-			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer)),     // TODO
-			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()), // TODO: maybe to default
+			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))), // TODO
+			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),                                                   // TODO: maybe to default
 		),
 	)
+
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("./assets/")))) // TODO: move to static folder for safe
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {                           // TODO: move to static folder for safe
+		http.ServeFile(w, r, "./index.html")
+	})
 
 	httpSrv := http.Server{
 		Addr:    ":9090",
 		Handler: cors.Default().Handler(r),
 	}
 	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && errors.Is(err, http.ErrServerClosed) {
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal(fmt.Sprintf("http server get error, error: %+v", err))
 		}
 	}()
+	if enablePprofServer {
+		go func() {
+			if err := http.ListenAndServe(":9999", nil); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Fatal(fmt.Sprintf("pprof http server get error, error: %+v", err))
+			}
+		}()
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

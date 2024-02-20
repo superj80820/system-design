@@ -133,7 +133,7 @@ type OrderUseCase interface {
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	GetOrdersData() ([]*OrderEntity, error)
 	RecoverBySnapshot(*TradingSnapshot) error
-	ConsumeOrderResult(ctx context.Context, key string)
+	ConsumeOrderResultToSave(ctx context.Context, key string)
 }
 
 type OrderRepo interface {
@@ -141,9 +141,6 @@ type OrderRepo interface {
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	SaveHistoryOrdersWithIgnore([]*OrderEntity) error
 
-	ProduceOrderSaveMQ(ctx context.Context, order *OrderEntity) error
-	ConsumeOrderSaveMQ(ctx context.Context, key string, notify func(order *OrderEntity) error)
-
-	ProduceOrder(ctx context.Context, order *OrderEntity) error
-	ConsumeOrder(ctx context.Context, key string, notify func(order *OrderEntity) error)
+	ProduceOrderMQ(ctx context.Context, order *OrderEntity) error
+	ConsumeOrderMQBatch(ctx context.Context, key string, notify func(order []*OrderEntity) error)
 }

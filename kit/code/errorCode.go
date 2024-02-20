@@ -49,6 +49,7 @@ func CreateWebsocketError(ctx context.Context, err *errorCode) *websocketErrorCo
 }
 
 var generalCodeToWSCode = map[int]int{
+	httpPKG.StatusOK:                  websocket.CloseNormalClosure,
 	httpPKG.StatusTooManyRequests:     websocket.CloseInvalidFramePayloadData,
 	httpPKG.StatusNotFound:            websocket.CloseUnsupportedData,
 	httpPKG.StatusInternalServerError: websocket.CloseInternalServerErr,
@@ -99,6 +100,9 @@ const (
 )
 
 var errorCodes = map[int]map[int]string{
+	httpPKG.StatusOK: {
+		Default: "OK",
+	},
 	httpPKG.StatusTooManyRequests: {
 		Default:   "too many requests",
 		RateLimit: "rate limit error. expiry: %d",

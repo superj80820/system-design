@@ -79,7 +79,7 @@ func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID 
 		userOrders.Store(orderID, &order)
 	}
 
-	o.orderRepo.ProduceOrderSaveMQ(ctx, &order)
+	o.orderRepo.ProduceOrderMQ(ctx, &order)
 
 	return &order, nil
 }
@@ -120,21 +120,24 @@ func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
 		return errors.New("order not found in user orders")
 	}
 
-	o.orderRepo.ProduceOrderSaveMQ(ctx, removedOrder)
+	o.orderRepo.ProduceOrderMQ(ctx, removedOrder)
 
 	return nil
 }
 
-func (o *orderUseCase) ConsumeOrderResult(ctx context.Context, key string) {
-	o.orderRepo.ConsumeOrderSaveMQ(ctx, key, func(order *domain.OrderEntity) error {
-		if order.Status.IsFinalStatus() {
-			if err := o.orderRepo.SaveHistoryOrdersWithIgnore([]*domain.OrderEntity{order}); err != nil { // TODO: use batch
-				return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
+func (o *orderUseCase) ConsumeOrderResultToSave(ctx context.Context, key string) {
+	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(orders []*domain.OrderEntity) error {
+		var saveOrders []*domain.OrderEntity
+		for _, order := range orders {
+			if order.Status.IsFinalStatus() {
+				saveOrders = append(saveOrders, order)
 			}
 		}
-		if err := o.orderRepo.ProduceOrder(ctx, order); err != nil {
-			return errors.Wrap(err, "produce order failed")
+
+		if err := o.orderRepo.SaveHistoryOrdersWithIgnore(saveOrders); err != nil {
+			return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
 		}
+
 		return nil
 	})
 }

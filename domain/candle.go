@@ -26,19 +26,16 @@ type CandleBar struct {
 }
 
 type CandleRepo interface {
-	GetBar(ctx context.Context, timeType CandleTimeType, min, max string) ([]string, error)
+	GetBar(ctx context.Context, timeType CandleTimeType, start, stop string, sortOrderBy SortOrderByEnum) ([]string, error)
 	SaveBar(candleBar *CandleBar) error
 
-	ProduceCandleSaveMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
-	ConsumeCandleSaveMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
-
-	ProduceCandle(ctx context.Context, candleBar *CandleBar) error
-	ConsumeCandle(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
+	ProduceCandleMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
 }
 
 type CandleUseCase interface {
-	GetBar(ctx context.Context, timeType CandleTimeType, min, max string) ([]string, error)
-	ConsumeTradingResult(ctx context.Context, key string)
+	GetBar(ctx context.Context, timeType CandleTimeType, start, stop string, sortOrderBy SortOrderByEnum) ([]string, error)
+	ConsumeTradingResultToSave(ctx context.Context, key string)
 	Done() <-chan struct{}
 	Err() error
 }

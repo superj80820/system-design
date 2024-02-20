@@ -79,7 +79,7 @@ var (
 	DecodeGetUserOrdersRequest  = httpTransportKit.DecodeEmptyRequest
 	EncodeGetUserOrdersResponse = httpTransportKit.EncodeJsonResponse
 
-	EncodeCancelOrderResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeJsonResponse)
+	EncodeCancelOrderResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
 
 	DecodeCreateOrderRequest  = httpTransportKit.DecodeJsonRequest[createOrderRequest]
 	EncodeCreateOrderResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeEmptyResponse)
@@ -87,43 +87,28 @@ var (
 	EncodeGetOrderBookResponse = httpMiddlewareKit.EncodeResponseSetSuccessHTTPCode(httpTransportKit.EncodeJsonResponse)
 )
 
-func MakeCreateDepositEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+func MakeCreateDepositEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(createDepositRequest)
-		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
-			EventType: domain.TradingEventDepositType,
-			DepositEvent: &domain.DepositEvent{
-				ToUserID: userID,
-				AssetID:  req.AssetID,
-				Amount:   req.Amount,
-			},
-		}); err != nil {
+		if _, err := svc.ProduceDepositOrderTradingEvent(ctx, userID, req.AssetID, req.Amount); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return nil, nil
 	}
 }
 
-func MakeCreateOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+func MakeCreateOrderEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(createOrderRequest)
-		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
-			EventType: domain.TradingEventCreateOrderType,
-			OrderRequestEvent: &domain.OrderRequestEvent{
-				UserID:    userID,
-				Direction: req.Direction,
-				Price:     req.Price,
-				Quantity:  req.Quantity,
-			},
-		}); err != nil {
+		if _, err := svc.ProduceCreateOrderTradingEvent(ctx, userID, req.Direction, req.Price, req.Quantity); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return nil, nil
@@ -166,7 +151,7 @@ func MakeGetHistoryMatchOrderDetailsEndpoint(svc domain.TradingUseCase) endpoint
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(getHistoryMatchOrderDetailsRequest)
-		historyMatchDetails, err := svc.GetHistoryMatchDetails(userID, req.OrderID)
+		historyMatchDetails, err := svc.GetUserHistoryMatchDetails(userID, req.OrderID)
 		if err != nil {
 			return nil, errors.Wrap(err, "get history match details failed")
 		}
@@ -193,7 +178,7 @@ func MakeGetSecBarEndpoint(svc domain.CandleUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		end := time.Now().UnixMilli()
 		start := end - 3600*1000
-		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeSec, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10))
+		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeSec, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10), domain.ASCSortOrderByEnum)
 		if err != nil {
 			return nil, errors.Wrap(err, "get bar failed")
 		}
@@ -205,7 +190,7 @@ func MakeGetMinBarEndpoint(svc domain.CandleUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		end := time.Now().UnixMilli()
 		start := end - 1440*60000
-		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeMin, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10))
+		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeMin, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10), domain.ASCSortOrderByEnum)
 		if err != nil {
 			return nil, errors.Wrap(err, "get bar failed")
 		}
@@ -217,7 +202,7 @@ func MakeGetHourBarEndpoint(svc domain.CandleUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		end := time.Now().UnixMilli()
 		start := end - 720*3600000
-		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeHour, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10))
+		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeHour, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10), domain.ASCSortOrderByEnum)
 		if err != nil {
 			return nil, errors.Wrap(err, "get bar failed")
 		}
@@ -229,7 +214,7 @@ func MakeGetDayBarEndpoint(svc domain.CandleUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		end := time.Now().UnixMilli()
 		start := end - 366*86400000
-		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeDay, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10))
+		bars, err := svc.GetBar(ctx, domain.CandleTimeTypeDay, strconv.FormatInt(start, 10), strconv.FormatInt(end, 10), domain.ASCSortOrderByEnum)
 		if err != nil {
 			return nil, errors.Wrap(err, "get bar failed")
 		}
@@ -247,20 +232,14 @@ func MakeGetTickEndpoint(svc domain.QuotationUseCase) endpoint.Endpoint {
 	}
 }
 
-func MakeCancelOrderEndpoint(svc domain.TradingSequencerUseCase) endpoint.Endpoint {
+func MakeCancelOrderEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {
 			return nil, errors.New("not found user id") // TODO: delete
 		}
 		req := request.(cancelOrderRequest)
-		if _, err := svc.ProduceTradingEvent(ctx, &domain.TradingEvent{
-			EventType: domain.TradingEventCancelOrderType,
-			OrderCancelEvent: &domain.OrderCancelEvent{
-				UserID:  userID,
-				OrderId: req.OrderID,
-			},
-		}); err != nil {
+		if _, err := svc.ProduceCancelOrderTradingEvent(ctx, userID, req.OrderID); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return nil, nil

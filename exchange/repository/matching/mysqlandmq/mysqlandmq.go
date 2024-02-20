@@ -21,18 +21,16 @@ func (*matchOrderDetailDB) TableName() string {
 }
 
 type matchingRepo struct {
-	orm                 *ormKit.DB
-	matchingSaveMQTopic mq.MQTopic
-	matchingMQTopic     mq.MQTopic
-	orderBookMQTopic    mq.MQTopic
+	orm              *ormKit.DB
+	matchingMQTopic  mq.MQTopic
+	orderBookMQTopic mq.MQTopic
 }
 
-func CreateMatchingRepo(orm *ormKit.DB, matchingSaveMQTopic, matchingMQTopic, orderBookMQTopic mq.MQTopic) domain.MatchingRepo {
+func CreateMatchingRepo(orm *ormKit.DB, matchingMQTopic, orderBookMQTopic mq.MQTopic) domain.MatchingRepo {
 	return &matchingRepo{
-		orm:                 orm,
-		matchingSaveMQTopic: matchingSaveMQTopic,
-		matchingMQTopic:     matchingMQTopic,
-		orderBookMQTopic:    orderBookMQTopic,
+		orm:              orm,
+		matchingMQTopic:  matchingMQTopic,
+		orderBookMQTopic: orderBookMQTopic,
 	}
 }
 
@@ -75,7 +73,7 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (m *matchingRepo) ProduceMatchOrderSaveMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
+func (m *matchingRepo) ProduceMatchOrderMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
 	for _, matchDetail := range matchResult.MatchDetails {
 		takerOrderDetail := &domain.MatchOrderDetail{
 			SequenceID:     matchResult.SequenceID, // TODO: do not use taker sequence?
@@ -102,13 +100,13 @@ func (m *matchingRepo) ProduceMatchOrderSaveMQByMatchResult(ctx context.Context,
 			CreatedAt:      matchResult.CreatedAt,
 		}
 
-		if err := m.matchingSaveMQTopic.Produce(ctx, &mqMessage{
+		if err := m.matchingMQTopic.Produce(ctx, &mqMessage{
 			MatchOrderDetail: takerOrderDetail,
 		}); err != nil {
 			return errors.Wrap(err, "produce failed")
 		}
 
-		if err := m.matchingSaveMQTopic.Produce(ctx, &mqMessage{
+		if err := m.matchingMQTopic.Produce(ctx, &mqMessage{
 			MatchOrderDetail: makerOrderDetail,
 		}); err != nil {
 			return errors.Wrap(err, "produce failed")
@@ -118,41 +116,31 @@ func (m *matchingRepo) ProduceMatchOrderSaveMQByMatchResult(ctx context.Context,
 	return nil
 }
 
-func (m *matchingRepo) ConsumeMatchOrderSaveMQ(ctx context.Context, key string, notify func(*domain.MatchOrderDetail) error) {
-	m.matchingSaveMQTopic.Subscribe(key, func(message []byte) error {
-		var mqMessage mqMessage
-		err := json.Unmarshal(message, &mqMessage)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal failed")
+func (m *matchingRepo) ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*domain.MatchOrderDetail) error) {
+	m.matchingMQTopic.SubscribeBatch(key, func(messages [][]byte) error {
+		details := make([]*domain.MatchOrderDetail, len(messages))
+		for idx, message := range messages {
+			var mqMessage mqMessage
+			err := json.Unmarshal(message, &mqMessage)
+			if err != nil {
+				return errors.Wrap(err, "unmarshal failed")
+			}
+			details[idx] = mqMessage.MatchOrderDetail
 		}
-		if err := notify(mqMessage.MatchOrderDetail); err != nil {
+
+		if err := notify(details); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil
 	})
 }
 
-func (m *matchingRepo) ProduceMatchOrder(ctx context.Context, matchOrderDetail *domain.MatchOrderDetail) error {
-	if err := m.matchingMQTopic.Produce(ctx, &mqMessage{
-		MatchOrderDetail: matchOrderDetail,
-	}); err != nil {
-		return errors.Wrap(err, "produce failed")
+func (m *matchingRepo) GetMatchingHistory(maxResults int) ([]*domain.MatchOrderDetail, error) {
+	var matchOrderDetails []*domain.MatchOrderDetail
+	if err := m.orm.Model(&matchOrderDetailDB{}).Order("id DESC").Limit(maxResults).Find(&matchOrderDetails).Error; err != nil {
+		return nil, errors.Wrap(err, "query failed")
 	}
-	return nil
-}
-
-func (m *matchingRepo) ConsumeMatchOrder(ctx context.Context, key string, notify func(*domain.MatchOrderDetail) error) {
-	m.matchingMQTopic.Subscribe(key, func(message []byte) error {
-		var mqMessage mqMessage
-		err := json.Unmarshal(message, &mqMessage)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		if err := notify(mqMessage.MatchOrderDetail); err != nil {
-			return errors.Wrap(err, "notify failed")
-		}
-		return nil
-	})
+	return matchOrderDetails, nil
 }
 
 type mqOrderBookMessage struct {

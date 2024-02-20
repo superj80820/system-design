@@ -20,14 +20,12 @@ type MatchingRepo interface {
 	ProduceOrderBook(ctx context.Context, orderBook *OrderBookEntity) error
 	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookEntity) error)
 
-	ProduceMatchOrderSaveMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
-	ConsumeMatchOrderSaveMQ(ctx context.Context, key string, notify func(*MatchOrderDetail) error)
-
-	ProduceMatchOrder(ctx context.Context, matchOrderDetail *MatchOrderDetail) error
-	ConsumeMatchOrder(ctx context.Context, key string, notify func(*MatchOrderDetail) error)
+	ProduceMatchOrderMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
 
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
+	GetMatchingHistory(maxResults int) ([]*MatchOrderDetail, error)
 }
 
 type MatchingUseCase interface {
@@ -38,7 +36,7 @@ type MatchingUseCase interface {
 	GetMatchesData() (*MatchData, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
-	ConsumeMatchResult(ctx context.Context, key string)
+	ConsumeMatchResultToSave(ctx context.Context, key string)
 }
 
 type MatchType int
