@@ -148,7 +148,7 @@ func (q *quotationRepo) SaveTickStrings(ctx context.Context, sequenceID int, tic
 }
 
 type mqMessage struct {
-	sequenceID int
+	sequenceID int // TODO: maybe no need?
 	ticks      []*domain.TickEntity
 }
 

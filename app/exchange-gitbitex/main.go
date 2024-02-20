@@ -32,7 +32,6 @@ import (
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
-	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
@@ -377,11 +376,9 @@ func main() {
 
 	r.PathPrefix("/ws").Handler(
 		wsTransport.NewServer(
-			wsMiddleware.CreateAuth[domain.TradingNotifyRequest, any](func(token string) (int64, error) {
-				return authUseCase.Verify(token)
-			})(wsDelivery.MakeExchangeEndpoint(tradingUseCase)),
+			wsDelivery.MakeExchangeEndpoint(tradingUseCase, authUseCase),
 			wsDelivery.DecodeStreamExchangeRequest,
-			wsKit.JsonEncodeResponse[any],
+			wsDelivery.EncodeStreamExchangeResponse,
 			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
 			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))), // TODO
 			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),                                                   // TODO: maybe to default

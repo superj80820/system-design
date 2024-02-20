@@ -126,17 +126,26 @@ type SyncTradingUseCase interface {
 type ExchangeRequestType string
 
 const (
-	UnknownExchangeRequestType      ExchangeRequestType = ""
-	TickerExchangeRequestType       ExchangeRequestType = "ticker"
-	FoundsExchangeRequestType       ExchangeRequestType = "funds"
-	CandlesExchangeRequestType      ExchangeRequestType = "candles"
-	Candles60ExchangeRequestType    ExchangeRequestType = "candles_60"
-	Candles3600ExchangeRequestType  ExchangeRequestType = "candles_3600"
-	Candles86400ExchangeRequestType ExchangeRequestType = "candles_86400"
-	MatchExchangeRequestType        ExchangeRequestType = "match"
-	Level2ExchangeRequestType       ExchangeRequestType = "level2"
-	OrderExchangeRequestType        ExchangeRequestType = "order"
-	PingExchangeRequestType         ExchangeRequestType = "ping"
+	UnknownExchangeRequestType ExchangeRequestType = ""
+	TickerExchangeRequestType  ExchangeRequestType = "ticker"
+	AssetsExchangeRequestType  ExchangeRequestType = "assets"
+	CandlesExchangeRequestType ExchangeRequestType = "candles"
+	MatchExchangeRequestType   ExchangeRequestType = "match"
+	OrderExchangeRequestType   ExchangeRequestType = "order"
+	PingExchangeRequestType    ExchangeRequestType = "ping"
+)
+
+type ExchangeResponseType string
+
+const (
+	UnknownExchangeResponseType   ExchangeResponseType = ""
+	TickerExchangeResponseType    ExchangeResponseType = "ticker"
+	AssetExchangeResponseType     ExchangeResponseType = "asset"
+	MatchExchangeResponseType     ExchangeResponseType = "match"
+	OrderBookExchangeResponseType ExchangeResponseType = "order_book"
+	OrderExchangeResponseType     ExchangeResponseType = "order"
+	PongExchangeResponseType      ExchangeResponseType = "pong"
+	CandleExchangeResponseType    ExchangeResponseType = "candle"
 )
 
 type TradingNotifyRequest struct {
@@ -145,6 +154,23 @@ type TradingNotifyRequest struct {
 	CurrencyIDs []string            `json:"currency_ids,omitempty"`
 	Channels    []string            `json:"channels"`
 	Token       string              `json:"token"` // TODO: what this?
+}
+
+type TradingNotifyAsset struct {
+	*UserAsset
+	CurrencyName string
+}
+
+type TradingNotifyResponse struct {
+	Type      ExchangeResponseType `json:"type"`
+	ProductID string               `json:"product_id,omitempty"`
+
+	UserAsset        *TradingNotifyAsset `json:"user_asset,omitempty"`
+	Tick             *TickEntity         `json:"tick,omitempty"`
+	MatchOrderDetail *MatchOrderDetail   `json:"match_order_detail,omitempty"`
+	OrderBook        *OrderBookEntity    `json:"order_book,omitempty"`
+	Order            *OrderEntity        `json:"order,omitempty"`
+	CandleBar        *CandleBar          `json:"candle,omitempty"`
 }
 
 type TradingUseCase interface {
@@ -161,14 +187,10 @@ type TradingUseCase interface {
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
-	Notify(ctx context.Context, userID int, stream endpoint.Stream[TradingNotifyRequest, any]) error
+	NotifyForPublic(ctx context.Context, stream endpoint.Stream[TradingNotifyRequest, TradingNotifyResponse]) error
+	NotifyForUser(ctx context.Context, userID int, stream endpoint.Stream[TradingNotifyRequest, TradingNotifyResponse]) error
 
 	Done() <-chan struct{}
 	Err() error
 	Shutdown() error
-	// TODO
-	// NewOrder(order *OrderEntity) (*MatchResult, error)
-	// CancelOrder(ts time.Time, order *OrderEntity) error
-	// GetMarketPrice() decimal.Decimal
-	// GetLatestSequenceID() int
 }

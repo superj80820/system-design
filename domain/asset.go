@@ -25,6 +25,7 @@ var (
 )
 
 type UserAsset struct {
+	UserID    int
 	Available decimal.Decimal
 	Frozen    decimal.Decimal
 }

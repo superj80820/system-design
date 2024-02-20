@@ -38,7 +38,9 @@ func (a *assetRepo) InitAssets(userID int, assetID int) *domain.UserAsset {
 	var userAssets util.GenericSyncMap[int, *domain.UserAsset]
 	val, _ := a.userAssetsMap.LoadOrStore(userID, &userAssets)
 
-	var asset domain.UserAsset
+	asset := domain.UserAsset{
+		UserID: userID,
+	}
 	val.Store(assetID, &asset)
 
 	return &asset
@@ -74,6 +76,7 @@ func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, err
 		userAssetsMap := make(map[int]*domain.UserAsset)
 		assetsMap.Range(func(assetID int, asset *domain.UserAsset) bool {
 			userAssetsMap[assetID] = &domain.UserAsset{
+				UserID:    asset.UserID,
 				Available: asset.Available,
 				Frozen:    asset.Frozen,
 			}
