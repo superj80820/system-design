@@ -380,13 +380,13 @@ func main() {
 			wsDelivery.DecodeStreamExchangeRequest,
 			wsDelivery.EncodeStreamExchangeResponse,
 			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
-			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))), // TODO
-			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),                                                   // TODO: maybe to default
+			wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))),
+			wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()), // TODO: maybe to default
 		),
 	)
 
-	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("./assets/")))) // TODO: move to static folder for safe
-	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {                           // TODO: move to static folder for safe
+	r.PathPrefix("/assets/").Handler(http.StripPrefix("/assets/", http.FileServer(http.Dir("./assets/"))))
+	r.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./index.html")
 	})
 

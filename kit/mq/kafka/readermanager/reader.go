@@ -126,10 +126,9 @@ func (r *Reader) Run() {
 	go func() {
 		for ctx := range r.startCh {
 			if r.kafkaReader != nil {
-				fmt.Println("york already create")
 				r.kafkaReader.Close()
 			} else {
-				fmt.Println("york first create")
+				// TODO: log here
 			}
 			r.kafkaReader = r.kafkaReaderProvider()
 			r.readyCh <- struct{}{}
