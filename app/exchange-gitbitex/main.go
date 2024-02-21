@@ -36,6 +36,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
+	"github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -44,7 +45,6 @@ import (
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
 
 	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
@@ -105,34 +105,6 @@ func main() {
 		panic(err)
 	}
 
-	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/mysqlandredis/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysqlandmongo/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/mysql/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	candleSchemaSQL, err := os.ReadFile("../../exchange/repository/candle/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	sequencerSchemaSQL, err := os.ReadFile("../../exchange/repository/sequencer/kafkaandmysql/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	authSchemaSQL, err := os.ReadFile("../../auth/repository/schema.sql")
-	if err != nil {
-		panic(err)
-	}
-	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)+"\n"+string(authSchemaSQL)), 0644)
-	if err != nil {
-		panic(err)
-	}
 	mysqlDBName := "db"
 	mysqlDBUsername := "root"
 	mysqlDBPassword := "password"
@@ -143,10 +115,6 @@ func main() {
 		mysql.WithPassword(mysqlDBPassword),
 		mysql.WithScripts(filepath.Join(".", "schema.sql")),
 	)
-	if err != nil {
-		panic(err)
-	}
-	err = os.Remove("./schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -257,6 +225,8 @@ func main() {
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
+	authAccountRepo := authMySQLRepo.CreateAccountRepo(mysqlDB)
+	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, orderRepo, candleRepo, 100) // TODO: 100?
@@ -267,12 +237,11 @@ func main() {
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
-	authRepo := authMySQLRepo.CreateAccountRepo(mysqlDB)
-	accountUseCase, err := usecase.CreateAccountUseCase(authRepo, logger)
+	accountUseCase, err := usecase.CreateAccountUseCase(authAccountRepo, logger)
 	if err != nil {
 		panic(err)
 	}
-	authUseCase, err := usecase.CreateAuthUseCase(mysqlDB, authRepo, logger)
+	authUseCase, err := usecase.CreateAuthUseCase(authRepo, authAccountRepo, logger)
 	if err != nil {
 		panic(err)
 	}

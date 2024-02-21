@@ -12,7 +12,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/pkg/errors"
-	"github.com/superj80820/system-design/auth/repository"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/code"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
@@ -26,7 +25,7 @@ const (
 )
 
 type AuthService struct {
-	db          *ormKit.DB
+	authRepo    domain.AuthRepo
 	accountRepo domain.AccountRepo
 	logger      loggerKit.Logger
 
@@ -34,8 +33,8 @@ type AuthService struct {
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthUseCase(db *ormKit.DB, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
-	if db == nil || logger == nil {
+func CreateAuthUseCase(authRepo domain.AuthRepo, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
+	if logger == nil {
 		return nil, errors.New("create service failed")
 	}
 	accessTokenKey, err := parsePemKey(_ACCESS_TOKEN_KEY_PATH)
@@ -48,8 +47,8 @@ func CreateAuthUseCase(db *ormKit.DB, accountRepo domain.AccountRepo, logger log
 	}
 
 	return &AuthService{
-		db:              db,
 		logger:          logger,
+		authRepo:        authRepo,
 		accountRepo:     accountRepo,
 		accessTokenKey:  accessTokenKey,
 		refreshTokenKey: refreshTokenKey,
@@ -92,21 +91,8 @@ func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 		return nil, errors.Wrap(err, "signed access token failed")
 	}
 
-	uniqueIDGenerate, err := utilKit.GetUniqueIDGenerate()
+	_, err = a.authRepo.CreateToken(account.ID, signedRefreshToken, refreshTokenExpireAt, domain.REFRESH_TOKEN)
 	if err != nil {
-		return nil, errors.Wrap(err, "generate unique id failed")
-	}
-
-	if err := a.db.Create(&repository.AccountTokenEntity{
-		ID:        uniqueIDGenerate.Generate().GetInt64(),
-		Token:     signedRefreshToken,
-		Type:      domain.REFRESH_TOKEN,
-		UserID:    account.ID,
-		Status:    domain.ACTIVE,
-		ExpireAt:  refreshTokenExpireAt,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}).Error; err != nil {
 		return nil, errors.Wrap(err, "save refresh token failed")
 	}
 
@@ -135,14 +121,12 @@ func (a *AuthService) Logout(accessToken string) error {
 		return errors.Wrap(err, "get user id from token failed")
 	}
 
-	var refreshToken repository.AccountTokenEntity
-	if err := a.db.Last(&refreshToken, "user_id = ?", userID); err != nil { // TODO: check user_id name
+	refreshToken, err := a.authRepo.GetLastRefreshTokenByUserID(userID)
+	if err != nil {
 		return errors.Wrap(err, "get refresh token failed")
 	}
 
-	refreshToken.Status = domain.REVOKE
-	refreshToken.UpdatedAt = time.Now()
-	if err := a.db.Save(&refreshToken).Error; err != nil {
+	if err = a.authRepo.UpdateStatusToken(refreshToken.Token, domain.REVOKE); err != nil {
 		return errors.Wrap(err, "update refresh token failed")
 	}
 
@@ -167,8 +151,8 @@ func (a *AuthService) RefreshAccessToken(refreshTokenString string) (string, err
 		return "", errors.Wrap(err, "get user id from token failed")
 	}
 
-	var refreshToken repository.AccountTokenEntity
-	if err := a.db.Last(&refreshToken, "user_id = ?", userID); err != nil { // TODO: check user_id name
+	refreshToken, err := a.authRepo.GetLastRefreshTokenByUserID(userID)
+	if err != nil {
 		return "", errors.Wrap(err, "get refresh token failed")
 	}
 

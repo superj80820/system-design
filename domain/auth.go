@@ -35,6 +35,12 @@ type AccountToken struct {
 	UpdatedAt time.Time
 }
 
+type AuthRepo interface {
+	CreateToken(userID int64, token string, expireAt time.Time, tokenType AccountTokenEnum) (*AccountToken, error)
+	UpdateStatusToken(token string, status AccountTokenStatusEnum) error
+	GetLastRefreshTokenByUserID(userID int64) (*AccountToken, error)
+}
+
 type AuthUseCase interface {
 	Login(email, password string) (*Account, error)
 	Logout(accessToken string) error
