@@ -178,6 +178,7 @@ type TradingUseCase interface {
 	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
 	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
 	ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TradingEvent, error)
+	EnableBackupSnapshot(ctx context.Context, duration time.Duration)
 
 	GetHistoryMatchDetails(maxResults int) ([]*MatchOrderDetail, error)
 	GetUserHistoryMatchDetails(userID, orderID int) ([]*MatchOrderDetail, error)

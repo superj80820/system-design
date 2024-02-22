@@ -17,9 +17,12 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
 	"github.com/shopspring/decimal"
-	authMySQLRepo "github.com/superj80820/system-design/auth/repository"
-	"github.com/superj80820/system-design/auth/usecase"
+	accountMySQLRepo "github.com/superj80820/system-design/auth/repository/account/mysql"
+	authMySQLRepo "github.com/superj80820/system-design/auth/repository/auth/mysql"
+	"github.com/superj80820/system-design/auth/usecase/account"
+	"github.com/superj80820/system-design/auth/usecase/auth"
 	"github.com/superj80820/system-design/domain"
+	utilKit "github.com/superj80820/system-design/kit/util"
 
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
@@ -70,6 +73,18 @@ const (
 	SERVICE_NAME               = "exchange-service"
 )
 
+type testMQEntity struct {
+	data string
+}
+
+func (t *testMQEntity) GetKey() string {
+	return t.data
+}
+
+func (t *testMQEntity) Marshal() ([]byte, error) {
+	return []byte(t.data), nil
+}
+
 func main() {
 	currencyProduct := domain.CurrencyProduct{
 		ID:             "BTC-USDT",
@@ -84,6 +99,7 @@ func main() {
 		QuoteScale:     2,
 	}
 	enablePprofServer := true
+	backupSnapshotDuration := 10 * time.Minute
 
 	ctx := context.Background()
 
@@ -187,6 +203,16 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
+	testMQTopic, err := kafkaMQKit.CreateMQTopic(
+		ctx,
+		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
+		"TEST",
+		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
+		kafkaMQKit.CreateTopic(1, 1),
+	)
+	if err != nil {
+		panic(err)
+	}
 	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
 		ctx,
 		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
@@ -225,7 +251,7 @@ func main() {
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
-	authAccountRepo := authMySQLRepo.CreateAccountRepo(mysqlDB)
+	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
@@ -237,17 +263,17 @@ func main() {
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
-	accountUseCase, err := usecase.CreateAccountUseCase(authAccountRepo, logger)
+	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	if err != nil {
 		panic(err)
 	}
-	authUseCase, err := usecase.CreateAuthUseCase(authRepo, authAccountRepo, logger)
+	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
 	if err != nil {
 		panic(err)
 	}
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -262,6 +288,18 @@ func main() {
 	}
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/").Subrouter()
+	api.Methods("GET").Path("/kafkaWrite").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authUseCase.Verify("token")
+		utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+		utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+		testMQTopic.Produce(context.Background(), &testMQEntity{
+			data: "{ReferenceID:1760691780505833472,EventType:1,OrderRequestEvent:{UserID:1760691780505833472,OrderID:1760691780505833472,Direction:1,Price:231,Quantity:123}}",
+		})
+		w.Write([]byte("OK"))
+	})
+	api.Methods("GET").Path("/health").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("OK"))
+	})
 	api.Methods("DELETE").Path("/orders/{orderID}").Handler(
 		httptransport.NewServer(
 			authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase)),

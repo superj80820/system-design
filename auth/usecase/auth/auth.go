@@ -1,4 +1,4 @@
-package usecase
+package auth
 
 import (
 	"crypto/ecdsa"

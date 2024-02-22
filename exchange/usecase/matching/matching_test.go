@@ -1,6 +1,7 @@
 package matching
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 )
 
 func TestMatching(t *testing.T) {
+	ctx := context.Background()
+
 	testCases := []struct {
 		scenario string
 		fn       func(t *testing.T)
@@ -123,18 +126,18 @@ func TestMatching(t *testing.T) {
 					sellBook:    createOrderBook(domain.DirectionSell),
 					marketPrice: decimal.Zero, // TODO: check correct?
 				}
-				matchEngine.NewOrder(createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
-				matchEngine.NewOrder(createOrder(2, decimal.NewFromFloat32(2087.6), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
-				matchEngine.NewOrder(createOrder(3, decimal.NewFromFloat32(2087.8), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
-				matchEngine.NewOrder(createOrder(4, decimal.NewFromFloat32(2085.01), domain.DirectionBuy, decimal.NewFromInt(5)).OrderEntity)
-				matchEngine.NewOrder(createOrder(5, decimal.NewFromFloat32(2088.02), domain.DirectionSell, decimal.NewFromInt(3)).OrderEntity)
-				matchEngine.NewOrder(createOrder(6, decimal.NewFromFloat32(2087.60), domain.DirectionSell, decimal.NewFromInt(6)).OrderEntity)
-				matchEngine.NewOrder(createOrder(7, decimal.NewFromFloat32(2081.11), domain.DirectionBuy, decimal.NewFromInt(7)).OrderEntity)
-				matchEngine.NewOrder(createOrder(8, decimal.NewFromFloat32(2086.0), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
-				matchEngine.NewOrder(createOrder(9, decimal.NewFromFloat32(2088.33), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
-				matchEngine.NewOrder(createOrder(10, decimal.NewFromFloat32(2086.54), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
-				matchEngine.NewOrder(createOrder(11, decimal.NewFromFloat32(2086.55), domain.DirectionSell, decimal.NewFromInt(5)).OrderEntity)
-				matchEngine.NewOrder(createOrder(12, decimal.NewFromFloat32(2086.55), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(2, decimal.NewFromFloat32(2087.6), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(3, decimal.NewFromFloat32(2087.8), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(4, decimal.NewFromFloat32(2085.01), domain.DirectionBuy, decimal.NewFromInt(5)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(5, decimal.NewFromFloat32(2088.02), domain.DirectionSell, decimal.NewFromInt(3)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(6, decimal.NewFromFloat32(2087.60), domain.DirectionSell, decimal.NewFromInt(6)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(7, decimal.NewFromFloat32(2081.11), domain.DirectionBuy, decimal.NewFromInt(7)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(8, decimal.NewFromFloat32(2086.0), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(9, decimal.NewFromFloat32(2088.33), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(10, decimal.NewFromFloat32(2086.54), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(11, decimal.NewFromFloat32(2086.55), domain.DirectionSell, decimal.NewFromInt(5)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(12, decimal.NewFromFloat32(2086.55), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
 				assert.Equal(t, "2086.55", matchEngine.marketPrice.String())
 				assert.Equal(t, 12, matchEngine.sequenceID)
 				{
@@ -201,9 +204,9 @@ func TestMatching(t *testing.T) {
 					sellBook:    createOrderBook(domain.DirectionSell),
 					marketPrice: decimal.Zero, // TODO: check correct?
 				}
-				matchEngine.NewOrder(createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
-				matchEngine.NewOrder(createOrder(2, decimal.NewFromFloat32(2087.6), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
-				matchEngine.NewOrder(createOrder(3, decimal.NewFromFloat32(2087.8), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(1, decimal.NewFromFloat32(2082.34), domain.DirectionBuy, decimal.NewFromInt(3)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(2, decimal.NewFromFloat32(2087.6), domain.DirectionSell, decimal.NewFromInt(2)).OrderEntity)
+				matchEngine.NewOrder(ctx, createOrder(3, decimal.NewFromFloat32(2087.8), domain.DirectionBuy, decimal.NewFromInt(1)).OrderEntity)
 
 				// test fully canceled
 				buyOrder, found := matchEngine.buyBook.book.Get(&orderKey{sequenceId: 1, price: decimal.NewFromFloat32(2082.34)})

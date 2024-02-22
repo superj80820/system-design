@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -20,7 +19,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
-	authUseCase "github.com/superj80820/system-design/auth/usecase"
+	accountMySQLRepo "github.com/superj80820/system-design/auth/repository/account/mysql"
+	authMySQLRepo "github.com/superj80820/system-design/auth/repository/auth/mysql"
+	"github.com/superj80820/system-design/auth/usecase/account"
+	"github.com/superj80820/system-design/auth/usecase/auth"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
@@ -45,7 +47,6 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
-	wsMiddleware "github.com/superj80820/system-design/kit/http/websocket/middleware"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
@@ -96,23 +97,10 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		BaseScale:      6,
 		QuoteScale:     2,
 	}
+	backupSnapshotDuration := 10 * time.Minute
 
 	ctx := context.Background()
 
-	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/mysqlandredis/schema.sql")
-	assert.Nil(t, err)
-	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysqlandmongo/schema.sql")
-	assert.Nil(t, err)
-	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/mysql/schema.sql")
-	assert.Nil(t, err)
-	candleSchemaSQL, err := os.ReadFile("../../exchange/repository/candle/schema.sql")
-	assert.Nil(t, err)
-	sequencerSchemaSQL, err := os.ReadFile("../../exchange/repository/sequencer/kafkaandmysql/schema.sql")
-	assert.Nil(t, err)
-	authSchemaSQL, err := os.ReadFile("../../auth/repository/schema.sql")
-	assert.Nil(t, err)
-	err = os.WriteFile("./schema.sql", []byte(string(quotationSchemaSQL)+"\n"+string(tradingSchemaSQL)+"\n"+string(candleSchemaSQL)+"\n"+string(orderSchemaSQL)+"\n"+string(sequencerSchemaSQL)+"\n"+string(authSchemaSQL)), 0644)
-	assert.Nil(t, err)
 	mysqlDBName := "db"
 	mysqlDBUsername := "root"
 	mysqlDBPassword := "password"
@@ -123,8 +111,6 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		mysql.WithPassword(mysqlDBPassword),
 		mysql.WithScripts(filepath.Join(".", "schema.sql")),
 	)
-	assert.Nil(t, err)
-	err = os.Remove("./schema.sql")
 	assert.Nil(t, err)
 	mysqlDBHost, err := mysqlContainer.Host(ctx)
 	assert.Nil(t, err)
@@ -177,11 +163,6 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
-	orderSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	candleSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	tickSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	matchingSaveMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-
 	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
@@ -196,11 +177,15 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
 	assetRepo := assetMemoryRepo.CreateAssetRepo(assetMQTopic)
 	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
-	assert.Nil(t, err)
-	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic, orderSaveMQTopic)
-	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic, candleSaveMQTopic)
-	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic, tickSaveMQTopic)
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingSaveMQTopic, matchingMQTopic, orderBookMQTopic)
+	if err != nil {
+		panic(err)
+	}
+	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic)
+	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
+	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
+	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, orderRepo, candleRepo, 100) // TODO: 100?
@@ -211,19 +196,19 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
-	accountUseCase, err := authUseCase.CreateAccountUseCase(mysqlDB, logger)
+	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	assert.Nil(t, err)
-	authUserUseCase, err := authUseCase.CreateAuthUseCase(mysqlDB, logger)
+	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
 	assert.Nil(t, err)
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
 
 	authMiddleware := httpMiddlewareKit.CreateAuthMiddleware(func(ctx context.Context, token string) (userID int64, err error) {
-		return authUserUseCase.Verify(token)
+		return authUseCase.Verify(token)
 	})
 
 	options := []httptransport.ServerOption{
@@ -245,7 +230,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		options...,
 	)
 	getHistoryOrdersServer := httptransport.NewServer(
-		authMiddleware(httpGitbitexDelivery.MakerGetHistoryOrdersEndpoint(orderUseCase, currencyUseCase)),
+		authMiddleware(httpGitbitexDelivery.MakerGetHistoryOrdersEndpoint(tradingUseCase, currencyUseCase)),
 		httpGitbitexDelivery.DecodeGetHistoryOrdersRequest,
 		httpGitbitexDelivery.EncodeGetHistoryOrdersResponse,
 		options...,
@@ -281,17 +266,15 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		options...,
 	)
 	userLoginServer := httptransport.NewServer(
-		httpGitbitexDelivery.MakeAuthLoginEndpoint(authUserUseCase),
+		httpGitbitexDelivery.MakeAuthLoginEndpoint(authUseCase),
 		httpGitbitexDelivery.DecodeAuthLoginRequest,
 		httpGitbitexDelivery.EncodeAuthResponse,
 		options...,
 	)
 	wsServer := httptest.NewServer(wsTransport.NewServer(
-		wsMiddleware.CreateAuth[domain.TradingNotifyRequest, any](func(token string) (int64, error) {
-			return authUserUseCase.Verify(token)
-		})(wsDelivery.MakeExchangeEndpoint(tradingUseCase)),
+		wsDelivery.MakeExchangeEndpoint(tradingUseCase, authUseCase),
 		wsDelivery.DecodeStreamExchangeRequest,
-		wsKit.JsonEncodeResponse[any],
+		wsDelivery.EncodeStreamExchangeResponse,
 		wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
 		wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))), // TODO
 		wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),                                                   // TODO: maybe to default

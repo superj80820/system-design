@@ -1,4 +1,4 @@
-package usecase
+package account
 
 import (
 	"net/http"

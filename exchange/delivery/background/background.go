@@ -2,6 +2,7 @@ package background
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
@@ -14,8 +15,10 @@ func RunAsyncTradingSequencer(
 	orderUseCase domain.OrderUseCase,
 	tradingUseCase domain.TradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
+	backupSnapshotDuration time.Duration,
 ) error {
 	tradingUseCase.ConsumeTradingEventThenProduce(ctx)
+	tradingUseCase.EnableBackupSnapshot(ctx, backupSnapshotDuration)
 	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order")
 	quotationUseCase.ConsumeTickToSave(ctx, "global-save-quotation")
 	candleUseCase.ConsumeTradingResultToSave(ctx, "global-save-candle") // TODO: error handle

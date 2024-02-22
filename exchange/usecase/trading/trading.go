@@ -169,19 +169,64 @@ func CreateTradingUseCase(
 	return t
 }
 
-func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
-	var batchEvents batchEventsStruct
-	ticker := time.NewTicker(t.batchEventsDuration)
-	lock := new(sync.Mutex)
+func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time.Duration) {
 	setErrAndDone := func(err error) {
 		t.lock.Lock()
 		defer t.lock.Unlock()
-		fmt.Println(fmt.Sprintf("%+v", err))
-		ticker.Stop()
+		t.err = err
+		close(t.doneCh)
+	}
+
+	go func() {
+		ticker := time.NewTicker(duration)
+		defer ticker.Stop()
+
+		snapshotSequenceID := t.syncTradingUseCase.GetSequenceID()
+
+		for range ticker.C {
+			if err := t.sequencerRepo.Pause(); err != nil {
+				setErrAndDone(errors.Wrap(err, "pause failed"))
+				return
+			}
+			sequenceID := t.syncTradingUseCase.GetSequenceID()
+			if snapshotSequenceID == sequenceID {
+				if err := t.sequencerRepo.Continue(); err != nil {
+					setErrAndDone(errors.Wrap(err, "continue failed"))
+					return
+				}
+				continue
+			}
+			snapshot, err := t.GetLatestSnapshot(ctx)
+
+			if errors.Is(err, domain.ErrNoop) {
+				continue
+			} else if err != nil {
+				setErrAndDone(errors.Wrap(err, "get snapshot failed"))
+				return
+			}
+			if err := t.sequencerRepo.Continue(); err != nil {
+				setErrAndDone(errors.Wrap(err, "continue failed"))
+				return
+			}
+			if err = t.SaveSnapshot(ctx, snapshot); !errors.Is(err, domain.ErrDuplicate) && err != nil {
+				setErrAndDone(errors.Wrap(err, "continue failed"))
+				return
+			}
+			snapshotSequenceID = sequenceID
+		}
+	}()
+}
+
+func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
+	var batchEvents batchEventsStruct
+	setErrAndDone := func(err error) {
+		t.lock.Lock()
+		defer t.lock.Unlock()
 		t.err = err
 		close(t.doneCh)
 	}
 	eventsFullCh := make(chan struct{})
+	lock := new(sync.Mutex)
 	sequenceMessageFn := func(tradingEvent *domain.TradingEvent, commitFn func() error) {
 		timeNow := time.Now()
 		if timeNow.Before(t.lastTimestamp) {
@@ -234,45 +279,9 @@ func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
 	t.sequencerRepo.SubscribeTradeSequenceMessage(sequenceMessageFn)
 
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(t.batchEventsDuration)
 		defer ticker.Stop()
 
-		snapshotSequenceID := t.syncTradingUseCase.GetSequenceID()
-
-		for range ticker.C {
-			if err := t.sequencerRepo.Pause(); err != nil {
-				setErrAndDone(errors.Wrap(err, "pause failed"))
-				return
-			}
-			sequenceID := t.syncTradingUseCase.GetSequenceID()
-			if snapshotSequenceID == sequenceID {
-				if err := t.sequencerRepo.Continue(); err != nil {
-					setErrAndDone(errors.Wrap(err, "continue failed"))
-					return
-				}
-				continue
-			}
-			snapshot, err := t.GetLatestSnapshot(ctx)
-
-			if errors.Is(err, domain.ErrNoop) {
-				continue
-			} else if err != nil {
-				setErrAndDone(errors.Wrap(err, "get snapshot failed"))
-				return
-			}
-			if err := t.sequencerRepo.Continue(); err != nil {
-				setErrAndDone(errors.Wrap(err, "continue failed"))
-				return
-			}
-			if err = t.SaveSnapshot(ctx, snapshot); !errors.Is(err, domain.ErrDuplicate) && err != nil {
-				setErrAndDone(errors.Wrap(err, "continue failed"))
-				return
-			}
-			snapshotSequenceID = sequenceID
-		}
-	}()
-
-	go func() {
 		errContinue := errors.New("continue")
 		fn := func() error {
 			sequencerEventClone, tradingEventClone, latestCommitFn, err :=
@@ -799,7 +808,7 @@ func (t *tradingUseCase) Done() <-chan struct{} {
 func (t *tradingUseCase) Err() error {
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	return t.Err()
+	return t.err
 }
 
 func (t *tradingUseCase) Shutdown() error {

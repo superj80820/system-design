@@ -1,4 +1,4 @@
-package repository
+package mysql
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	accountMySQLRepo "github.com/superj80820/system-design/auth/repository/account/mysql"
 	"github.com/superj80820/system-design/domain"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"github.com/testcontainers/testcontainers-go"
@@ -46,7 +47,7 @@ func TestAuth(t *testing.T) {
 			)))
 	assert.Nil(t, err)
 
-	accountRepo := CreateAccountRepo(mysqlDB)
+	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
 	authRepo := CreateAuthRepo(mysqlDB)
 
 	email := "email@gmail.com"

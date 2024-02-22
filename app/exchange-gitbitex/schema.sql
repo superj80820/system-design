@@ -100,7 +100,6 @@ CREATE TABLE `account` (
   UNIQUE KEY `unique_email` (`email`),
   INDEX `index_email` (`email`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8;
-
 CREATE TABLE `account_token` (
   `id` bigint(20) NOT NULL,
   `token` varchar(255) NOT NULL,
