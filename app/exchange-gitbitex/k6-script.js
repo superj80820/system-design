@@ -57,7 +57,7 @@ export const options = {
 // about authoring k6 scripts.
 //
 export default function () {
-  const url = 'http://15.168.70.185/api/orders';
+  const url = 'http://localhost:9090/api/orders';
   const randomVal = Math.floor(Math.random() * 100)
   const direction = ["buy", "sell"][Math.floor(Math.random() * 2)]
   const payload = JSON.stringify({ "productId": "BTC-USDT", "side": direction, "price": 2.34 + randomVal, "size": randomVal, "type": "limit" });
@@ -65,7 +65,7 @@ export default function () {
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg2MzIzNTgsImlhdCI6MTcwODYyODc1OCwic3ViIjoiMTc2MDc0MjcxNDU3MzMyODM4NCJ9.cYXpu84ax45D9K6lGM5GzfQnBKnruUUnxi8_tj7Fueujj6UNsSj_PO567UsNC9S8YVbWqnZ-2gMC1SXA0HM1IQ',
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg2MzQ0MDMsImlhdCI6MTcwODYzMDgwMywic3ViIjoiMTc2MDc1MTE2Mzk1MjU5OTA0MCJ9.xBreUB8u7xIqm6mxrf-SauYwdhxQGDutdD4jhrQVshfHHWavZErw69jkmxoGWmm0XRUWYGzYxIntwnTfrhf-0g',
     },
   };
 
