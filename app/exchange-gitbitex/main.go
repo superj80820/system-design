@@ -22,7 +22,6 @@ import (
 	"github.com/superj80820/system-design/auth/usecase/account"
 	"github.com/superj80820/system-design/auth/usecase/auth"
 	"github.com/superj80820/system-design/domain"
-	utilKit "github.com/superj80820/system-design/kit/util"
 
 	"github.com/superj80820/system-design/exchange/delivery/background"
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
@@ -203,16 +202,6 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
-	testMQTopic, err := kafkaMQKit.CreateMQTopic(
-		ctx,
-		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
-		"TEST",
-		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
-		kafkaMQKit.CreateTopic(1, 1),
-	)
-	if err != nil {
-		panic(err)
-	}
 	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
 		ctx,
 		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
@@ -288,15 +277,6 @@ func main() {
 	}
 	r := mux.NewRouter()
 	api := r.PathPrefix("/api/").Subrouter()
-	api.Methods("GET").Path("/kafkaWrite").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authUseCase.Verify("token")
-		utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
-		utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
-		testMQTopic.Produce(context.Background(), &testMQEntity{
-			data: "{ReferenceID:1760691780505833472,EventType:1,OrderRequestEvent:{UserID:1760691780505833472,OrderID:1760691780505833472,Direction:1,Price:231,Quantity:123}}",
-		})
-		w.Write([]byte("OK"))
-	})
 	api.Methods("GET").Path("/health").HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("OK"))
 	})
