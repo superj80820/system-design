@@ -16,12 +16,6 @@ import (
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
-type batchEventsStruct struct {
-	tradingEvent   []*domain.TradingEvent
-	sequencerEvent []*domain.SequencerEvent
-	commitFns      []func() error
-}
-
 type tradingUseCase struct {
 	logger             loggerKit.Logger
 	userAssetUseCase   domain.UserAssetUseCase
@@ -37,13 +31,11 @@ type tradingUseCase struct {
 	matchingRepo       domain.MatchingRepo
 	orderRepo          domain.OrderRepo
 
-	batchEventsSize     int
-	batchEventsDuration time.Duration
-	lastTimestamp       time.Time
+	lastTimestamp time.Time
 
 	orderBookDepth int
 	cancel         context.CancelFunc
-	lock           *sync.Mutex
+	errLock        *sync.Mutex
 	doneCh         chan struct{}
 	err            error
 }
@@ -84,12 +76,9 @@ func CreateTradingUseCase(
 		userAssetUseCase:   userAssetUseCase,
 		currencyUseCase:    currencyUseCase,
 
-		batchEventsSize:     batchEventsSize,
-		batchEventsDuration: batchEventsDuration,
-
 		orderBookDepth: orderBookDepth,
 		cancel:         cancel,
-		lock:           new(sync.Mutex),
+		errLock:        new(sync.Mutex),
 		doneCh:         make(chan struct{}),
 	}
 
@@ -170,8 +159,8 @@ func CreateTradingUseCase(
 
 func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time.Duration) {
 	setErrAndDone := func(err error) {
-		t.lock.Lock()
-		defer t.lock.Unlock()
+		t.errLock.Lock()
+		defer t.errLock.Unlock()
 		t.err = err
 		close(t.doneCh)
 	}
@@ -217,172 +206,115 @@ func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time
 }
 
 func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
-	var batchEvents batchEventsStruct
 	setErrAndDone := func(err error) {
-		t.lock.Lock()
-		defer t.lock.Unlock()
+		t.errLock.Lock()
+		defer t.errLock.Unlock()
 		t.err = err
 		close(t.doneCh)
 	}
-	eventsFullCh := make(chan struct{})
-	lock := new(sync.Mutex)
-	sequenceMessageFn := func(tradingEvent *domain.TradingEvent, commitFn func() error) {
-		timeNow := time.Now()
-		if timeNow.Before(t.lastTimestamp) {
-			setErrAndDone(errors.New("now time is before last timestamp"))
-			return
-		}
-		t.lastTimestamp = timeNow
 
-		// sequence event
-		previousID := t.sequencerRepo.GetCurrentSequenceID()
-		previousIDInt, err := utilKit.SafeUint64ToInt(previousID)
-		if err != nil {
-			setErrAndDone(errors.Wrap(err, "uint64 to int overflow"))
-			return
-		}
-		sequenceID := t.sequencerRepo.GenerateNextSequenceID()
-		sequenceIDInt, err := utilKit.SafeUint64ToInt(sequenceID)
-		if err != nil {
-			setErrAndDone(errors.Wrap(err, "uint64 to int overflow"))
-			return
-		}
-		tradingEvent.PreviousID = previousIDInt
-		tradingEvent.SequenceID = sequenceIDInt
-		tradingEvent.CreatedAt = t.lastTimestamp
-
-		marshalData, err := json.Marshal(*tradingEvent)
-		if err != nil {
-			setErrAndDone(errors.Wrap(err, "marshal failed"))
-			return
+	t.sequencerRepo.SubscribeTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
+		sequencerEvents := make([]*domain.SequencerEvent, len(tradingEvents))
+		tradingEventsClone := make([]*domain.TradingEvent, len(tradingEvents))
+		for idx := range tradingEvents {
+			sequencerEvent, tradingEvent, err := t.sequenceMessage(tradingEvents[idx])
+			if err != nil {
+				setErrAndDone(errors.Wrap(err, "sequence message failed"))
+				return
+			}
+			sequencerEvents[idx] = sequencerEvent
+			tradingEventsClone[idx] = tradingEvent
 		}
 
-		lock.Lock()
-		batchEvents.sequencerEvent = append(batchEvents.sequencerEvent, &domain.SequencerEvent{
-			ReferenceID: int64(tradingEvent.ReferenceID),
-			SequenceID:  int64(tradingEvent.SequenceID),
-			PreviousID:  int64(tradingEvent.PreviousID),
-			Data:        string(marshalData),
-			CreatedAt:   time.Now(),
-		})
-		batchEvents.tradingEvent = append(batchEvents.tradingEvent, tradingEvent)
-		batchEvents.commitFns = append(batchEvents.commitFns, commitFn)
-		batchEventsLength := len(batchEvents.sequencerEvent)
-		lock.Unlock()
+		err := t.sequencerRepo.SaveEvents(sequencerEvents)
+		if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+			// TODO: test
+			// if duplicate, filter events then retry
+			filterEventsMap, err := t.sequencerRepo.GetFilterEventsMap(sequencerEvents)
+			if err != nil {
+				setErrAndDone(errors.Wrap(err, "get filter events map failed"))
+				return
+			}
+			var filterSequencerEventClone []*domain.SequencerEvent
+			for _, val := range sequencerEvents {
+				if filterEventsMap[val.ReferenceID] {
+					continue
+				}
+				filterSequencerEventClone = append(filterSequencerEventClone, val)
+			}
+			var filterTradingEventClone []*domain.TradingEvent
+			for _, val := range tradingEventsClone {
+				if filterEventsMap[int64(val.ReferenceID)] {
+					continue
+				}
+				filterTradingEventClone = append(filterTradingEventClone, val)
+			}
 
-		if batchEventsLength >= t.batchEventsSize {
-			eventsFullCh <- struct{}{}
+			if len(filterSequencerEventClone) == 0 || len(filterTradingEventClone) == 0 {
+				setErrAndDone(errors.Wrap(err, "filter duplicate events failed"))
+				return
+			}
+
+			if err := t.sequencerRepo.SaveEvents(sequencerEvents); err != nil {
+				setErrAndDone(errors.Wrap(err, "save event failed"))
+				return
+			}
+
+			if err := commitFn(); err != nil {
+				setErrAndDone(errors.Wrap(err, "commit latest message failed"))
+				return
+			}
+
+			t.tradingRepo.SendTradeEvent(ctx, tradingEventsClone)
+
+			return
+		} else if err != nil {
+			panic(errors.Wrap(err, "save event failed")) // TODO: use panic?
 		}
+
+		if err := commitFn(); err != nil {
+			setErrAndDone(errors.Wrap(err, "commit latest message failed"))
+			return
+		}
+
+		t.tradingRepo.SendTradeEvent(ctx, tradingEventsClone)
+	})
+}
+
+func (t *tradingUseCase) sequenceMessage(tradingEvent *domain.TradingEvent) (sequencerEvent *domain.SequencerEvent, tradingEventClone *domain.TradingEvent, err error) {
+	timeNow := time.Now()
+	if timeNow.Before(t.lastTimestamp) {
+		return nil, nil, errors.New("now time is before last timestamp")
+	}
+	t.lastTimestamp = timeNow
+
+	// sequence event
+	previousID := t.sequencerRepo.GetCurrentSequenceID()
+	previousIDInt, err := utilKit.SafeUint64ToInt(previousID)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "uint64 to int overflow")
+	}
+	sequenceID := t.sequencerRepo.GenerateNextSequenceID()
+	sequenceIDInt, err := utilKit.SafeUint64ToInt(sequenceID)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "uint64 to int overflow")
+	}
+	tradingEvent.PreviousID = previousIDInt
+	tradingEvent.SequenceID = sequenceIDInt
+	tradingEvent.CreatedAt = t.lastTimestamp
+
+	marshalData, err := json.Marshal(*tradingEvent)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "marshal failed")
 	}
 
-	t.sequencerRepo.SubscribeTradeSequenceMessage(sequenceMessageFn)
-
-	go func() {
-		ticker := time.NewTicker(t.batchEventsDuration)
-		defer ticker.Stop()
-
-		errContinue := errors.New("continue")
-		fn := func() error {
-			sequencerEventClone, tradingEventClone, latestCommitFn, err :=
-				func() ([]*domain.SequencerEvent, []*domain.TradingEvent, func() error, error) {
-					lock.Lock()
-					defer lock.Unlock()
-
-					if len(batchEvents.sequencerEvent) == 0 || len(batchEvents.tradingEvent) == 0 {
-						return nil, nil, nil, errors.Wrap(errContinue, "event length is zero")
-					}
-
-					if len(batchEvents.sequencerEvent) != len(batchEvents.tradingEvent) {
-						panic("except trading event and sequencer event length")
-					}
-					sequencerEventClone := make([]*domain.SequencerEvent, len(batchEvents.sequencerEvent))
-					copy(sequencerEventClone, batchEvents.sequencerEvent)
-					tradingEventClone := make([]*domain.TradingEvent, len(batchEvents.tradingEvent))
-					copy(tradingEventClone, batchEvents.tradingEvent)
-					latestCommitFn := batchEvents.commitFns[len(batchEvents.commitFns)-1]
-					batchEvents.sequencerEvent = nil // reset
-					batchEvents.tradingEvent = nil   // reset
-					batchEvents.commitFns = nil
-
-					return sequencerEventClone, tradingEventClone, latestCommitFn, nil
-				}()
-			if err != nil {
-				return errors.Wrap(err, "clone events failed")
-			}
-
-			err = t.sequencerRepo.SaveEvents(sequencerEventClone)
-			if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
-				// TODO: test
-				// if duplicate, filter events then retry
-				filterEventsMap, err := t.sequencerRepo.GetFilterEventsMap(sequencerEventClone)
-				if err != nil {
-					return errors.Wrap(err, "get filter events map failed")
-				}
-				var filterSequencerEventClone []*domain.SequencerEvent
-				for _, val := range sequencerEventClone {
-					if filterEventsMap[val.ReferenceID] {
-						continue
-					}
-					filterSequencerEventClone = append(filterSequencerEventClone, val)
-				}
-				var filterTradingEventClone []*domain.TradingEvent
-				for _, val := range tradingEventClone {
-					if filterEventsMap[int64(val.ReferenceID)] {
-						continue
-					}
-					filterTradingEventClone = append(filterTradingEventClone, val)
-				}
-
-				if len(filterSequencerEventClone) == 0 || len(filterTradingEventClone) == 0 {
-					return nil
-				}
-
-				if len(batchEvents.sequencerEvent) != len(batchEvents.tradingEvent) {
-					panic("except trading event and sequencer event length")
-				}
-
-				if err := t.sequencerRepo.SaveEvents(sequencerEventClone); err != nil {
-					panic(errors.Wrap(err, "save event failed")) // TODO: use panic?
-				}
-
-				if err := latestCommitFn(); err != nil {
-					return errors.Wrap(err, "commit latest message failed")
-				}
-
-				t.tradingRepo.SendTradeEvent(ctx, tradingEventClone)
-
-				return nil
-			} else if err != nil {
-				panic(errors.Wrap(err, "save event failed")) // TODO: use panic?
-			}
-
-			if err := latestCommitFn(); err != nil {
-				return errors.Wrap(err, "commit latest message failed")
-			}
-
-			t.tradingRepo.SendTradeEvent(ctx, tradingEventClone)
-
-			return nil
-		}
-		for {
-			select {
-			case <-ticker.C:
-				if err := fn(); errors.Is(err, errContinue) {
-					continue
-				} else if err != nil {
-					setErrAndDone(errors.Wrap(err, "clone event failed"))
-					return
-				}
-			case <-eventsFullCh:
-				if err := fn(); errors.Is(err, errContinue) {
-					continue
-				} else if err != nil {
-					setErrAndDone(errors.Wrap(err, "clone event failed"))
-					return
-				}
-			}
-		}
-	}()
+	return &domain.SequencerEvent{
+		ReferenceID: int64(tradingEvent.ReferenceID),
+		SequenceID:  int64(tradingEvent.SequenceID),
+		PreviousID:  int64(tradingEvent.PreviousID),
+		Data:        string(marshalData),
+		CreatedAt:   time.Now(),
+	}, tradingEvent, nil
 }
 
 func (t *tradingUseCase) ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*domain.TradingEvent, error) {
@@ -805,8 +737,8 @@ func (t *tradingUseCase) Done() <-chan struct{} {
 }
 
 func (t *tradingUseCase) Err() error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+	t.errLock.Lock()
+	defer t.errLock.Unlock()
 	return t.err
 }
 

@@ -22,15 +22,15 @@ type writer struct {
 
 func (w *writer) WriteMessages(ctx context.Context, msgs ...mq.Message) error {
 	kafkaMessages := make([]kafka.Message, len(msgs))
-	for _, msg := range msgs {
+	for idx, msg := range msgs {
 		marshalMessage, err := msg.Marshal()
 		if err != nil {
 			return errors.Wrap(err, "marshal message failed")
 		}
-		kafkaMessages = append(kafkaMessages, kafka.Message{
+		kafkaMessages[idx] = kafka.Message{
 			Key:   []byte(msg.GetKey()),
 			Value: marshalMessage,
-		})
+		}
 	}
 	w.kafkaWriter.WriteMessages(ctx, kafkaMessages...)
 	return nil

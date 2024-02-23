@@ -44,6 +44,10 @@ func (g *groupIDReaderManager) AddObserver(observer mq.Observer) bool {
 	return g.reader.AddObserver(observer)
 }
 
+func (g *groupIDReaderManager) AddObserverBatch(observer mq.Observer) bool {
+	return g.reader.AddObserverBatch(observer)
+}
+
 func (g *groupIDReaderManager) GetObserversLen() int {
 	return g.reader.GetObserversLen()
 }

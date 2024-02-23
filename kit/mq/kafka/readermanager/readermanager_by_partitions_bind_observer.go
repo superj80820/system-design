@@ -219,6 +219,10 @@ func (p *partitionBindObserverReaderManager) AddObserver(observer mq.Observer) b
 	return p.readers[util.GetConsistentHash(observer.GetKey(), len(p.topicPartitionInfo))].AddObserver(observer)
 }
 
+func (p *partitionBindObserverReaderManager) AddObserverBatch(observer mq.Observer) bool {
+	return p.readers[util.GetConsistentHash(observer.GetKey(), len(p.topicPartitionInfo))].AddObserverBatch(observer)
+}
+
 func (p *partitionBindObserverReaderManager) RemoveObserverWithHook(observer mq.Observer) bool {
 	p.lock.Lock()
 	defer p.lock.Unlock()

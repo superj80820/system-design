@@ -28,6 +28,7 @@ type WriterManager interface {
 
 type ReaderManager interface {
 	AddObserver(observer Observer) bool
+	AddObserverBatch(observer Observer) bool
 	SyncStartConsume(ctx context.Context) bool
 	StartConsume(ctx context.Context) bool
 	StopConsume() bool

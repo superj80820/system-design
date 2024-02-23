@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -50,12 +51,25 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollec
 	go func() {
 		defer ticker.Stop()
 
+		continueErr := errors.New("continue error")
 		for range ticker.C {
-			m.lock.Lock()
-			cloneMessages := make([][]byte, len(m.messages))
-			copy(cloneMessages, m.messages)
-			m.messages = nil
-			m.lock.Unlock()
+			cloneMessages, err := func() ([][]byte, error) {
+				m.lock.Lock()
+				defer m.lock.Unlock()
+				if len(m.messages) == 0 {
+					return nil, errors.Wrap(continueErr, "message length is 0")
+				}
+				cloneMessages := make([][]byte, len(m.messages))
+				copy(cloneMessages, m.messages)
+				m.messages = nil
+
+				return cloneMessages, nil
+			}()
+			if errors.Is(err, continueErr) {
+				continue
+			} else if err != nil {
+				panic(fmt.Sprintf("clone message get except error, error: %+v", err))
+			}
 
 			m.observerBatches.Range(func(key, value mq.Observer) bool {
 				if err := value.NotifyBatchWithManualCommit(cloneMessages, func() error {

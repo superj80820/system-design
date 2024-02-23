@@ -49,6 +49,10 @@ func (s *specPartitionReaderManager) AddObserver(observer mq.Observer) bool {
 	return s.reader.AddObserver(observer)
 }
 
+func (s *specPartitionReaderManager) AddObserverBatch(observer mq.Observer) bool {
+	return s.reader.AddObserverBatch(observer)
+}
+
 func (s *specPartitionReaderManager) GetObserversLen() int {
 	return s.reader.GetObserversLen()
 }

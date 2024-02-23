@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -29,10 +28,12 @@ type MQTopicConfig struct {
 	createTopicNumPartitions     int
 	createTopicReplicationFactor int
 
-	readerWay         readerManager.ReaderWay
-	readerGroupID     string
-	readerPartition   int
-	readerStartOffset int64
+	readerWay               readerManager.ReaderWay
+	readerGroupID           string
+	readerPartition         int
+	readerStartOffset       int64
+	readerDuration          time.Duration
+	readerMaxMessagesLength int
 }
 
 func ProduceWay(balancer writerManager.WriterBalancer) MQTopicOption {
@@ -76,22 +77,22 @@ type mqTopic struct {
 	readerManager mq.ReaderManager
 	writerManager mq.WriterManager
 
-	topicPartitionInfo []kafka.Partition
-
-	lock   sync.RWMutex
 	cancel context.CancelFunc
 	doneCh chan struct{}
 	errCh  chan error
 	err    error
 }
 
-func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, options ...MQTopicOption) (mq.MQTopic, error) {
+func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOption, readerMaxMessagesLength int, readerDuration time.Duration, options ...MQTopicOption) (mq.MQTopic, error) {
 	mqConfig := &MQTopicConfig{
 		topic:   topic,
 		url:     url,
 		brokers: strings.Split(url, ","),
 
 		writerBalancer: &kafka.RoundRobin{},
+
+		readerMaxMessagesLength: readerMaxMessagesLength,
+		readerDuration:          readerDuration,
 	}
 
 	consumeWay(mqConfig)
@@ -126,11 +127,14 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 		}
 	}
 	if err := func() error {
+		readerManagerConfigOptions := []readerManager.ReaderManagerConfigOption{
+			readerManager.SetReaderDuration(readerDuration),
+			readerManager.SetReaderMaxMessagesLength(readerMaxMessagesLength),
+			readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+		}
+
 		switch mqConfig.readerWay {
 		case readerManager.GroupIDReader:
-			readerManagerConfigOptions := []readerManager.ReaderManagerConfigOption{
-				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
-			}
 			if mqConfig.isManualCommit {
 				readerManagerConfigOptions = append(readerManagerConfigOptions, readerManager.ManualCommit)
 			}
@@ -151,7 +155,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 				mqConfig.readerStartOffset,
 				mqConfig.readerPartition,
 				mqConfig.brokers,
-				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+				readerManagerConfigOptions...,
 			)
 			if err != nil {
 				return errors.Wrap(err, "create reader manager failed")
@@ -163,7 +167,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 				mqConfig.readerStartOffset,
 				mqConfig.brokers,
 				mqConfig.topic,
-				readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+				readerManagerConfigOptions...,
 			)
 			if err != nil {
 				return errors.Wrap(err, "create reader manager failed")
@@ -205,7 +209,7 @@ func (m *mqTopic) Subscribe(key string, notify mq.Notify, options ...mq.Observer
 func (m *mqTopic) SubscribeBatch(key string, notifyBatch mq.NotifyBatch, options ...mq.ObserverOption) mq.Observer {
 	observer := readerManager.CreateObserverBatch(key, notifyBatch, options...)
 
-	m.readerManager.AddObserver(observer)
+	m.readerManager.AddObserverBatch(observer)
 	m.readerManager.StartConsume(context.Background())
 
 	return observer
@@ -223,7 +227,7 @@ func (m *mqTopic) SubscribeWithManualCommit(key string, notify mq.NotifyWithManu
 func (m *mqTopic) SubscribeBatchWithManualCommit(key string, notifyBatch mq.NotifyBatchWithManualCommit, options ...mq.ObserverOption) mq.Observer {
 	observer := readerManager.CreateObserverBatchWithManualCommit(key, notifyBatch, options...)
 
-	m.readerManager.AddObserver(observer)
+	m.readerManager.AddObserverBatch(observer)
 	m.readerManager.StartConsume(context.Background())
 
 	return observer

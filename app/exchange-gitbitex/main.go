@@ -242,6 +242,8 @@ func main() {
 			kafkaURI,
 			sequenceTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {

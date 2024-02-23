@@ -10,7 +10,7 @@ type SequencerRepo[T any] interface {
 	ResetSequence() error
 	GetCurrentSequenceID() uint64
 	GenerateNextSequenceID() uint64
-	SubscribeTradeSequenceMessage(notify func(any *T, commitFn func() error))
+	SubscribeTradeSequenceMessages(notify func(any []*T, commitFn func() error))
 	SendTradeSequenceMessages(context.Context, *T) error
 	SaveEvent(*SequencerEvent) error
 	SaveEvents([]*SequencerEvent) error

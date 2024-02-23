@@ -49,7 +49,7 @@ type tradingSequencerRepo struct {
 	continueCh chan struct{}
 
 	sequence  *atomic.Uint64
-	observers util.GenericSyncMap[*func(*domain.TradingEvent, func() error), func(*domain.TradingEvent, func() error)] // TODO: test key safe?
+	observers util.GenericSyncMap[*func([]*domain.TradingEvent, func() error), func([]*domain.TradingEvent, func() error)] // TODO: test key safe?
 }
 
 func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, orm *ormKit.DB) (domain.SequencerRepo[domain.TradingEvent], error) {
@@ -71,19 +71,23 @@ func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, o
 
 	sequence.Add(maxSequenceID)
 
-	t.sequenceMQ.SubscribeWithManualCommit("global-sequencer", func(message []byte, commitFn func() error) error {
+	t.sequenceMQ.SubscribeBatchWithManualCommit("global-sequencer", func(messages [][]byte, commitFn func() error) error {
 		select {
 		case <-t.pauseCh:
 			<-t.continueCh
 		default:
 		}
 
-		var tradingEvent domain.TradingEvent
-		if err := json.Unmarshal(message, &tradingEvent); err != nil {
-			return errors.Wrap(err, "json unmarshal failed")
+		tradingEvents := make([]*domain.TradingEvent, len(messages))
+		for idx := range messages {
+			var tradingEvent domain.TradingEvent
+			if err := json.Unmarshal(messages[idx], &tradingEvent); err != nil {
+				return errors.Wrap(err, "json unmarshal failed")
+			}
+			tradingEvents[idx] = &tradingEvent
 		}
-		t.observers.Range(func(key *func(*domain.TradingEvent, func() error), value func(*domain.TradingEvent, func() error)) bool {
-			value(&tradingEvent, commitFn)
+		t.observers.Range(func(key *func([]*domain.TradingEvent, func() error), value func([]*domain.TradingEvent, func() error)) bool {
+			value(tradingEvents, commitFn)
 			return true
 		})
 		return nil
@@ -153,7 +157,7 @@ func (t *tradingSequencerRepo) Shutdown() {
 	t.sequenceMQ.Shutdown() // TODO
 }
 
-func (t *tradingSequencerRepo) SubscribeTradeSequenceMessage(notify func(*domain.TradingEvent, func() error)) {
+func (t *tradingSequencerRepo) SubscribeTradeSequenceMessages(notify func([]*domain.TradingEvent, func() error)) {
 	t.observers.Store(&notify, notify)
 }
 

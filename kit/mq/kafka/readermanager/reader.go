@@ -47,12 +47,6 @@ func useMockReaderProvider(fn func() KafkaReader) ReaderManagerConfigOption {
 	}
 }
 
-func AddReaderPauseHookFn(fn func()) ReaderManagerConfigOption {
-	return func(rmc *readerManagerConfig) {
-		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.pauseHookFn = fn })
-	}
-}
-
 func AddKafkaReaderHookFn(fn func(kafkaReader KafkaReader)) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
@@ -72,6 +66,9 @@ type Reader struct {
 
 	messages     []*kafka.Message
 	messagesLock *sync.Mutex
+
+	runMaxMessagesLength int
+	runDuration          time.Duration
 
 	isManualCommit bool
 
@@ -99,14 +96,16 @@ func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 
 func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption) *Reader {
 	r := &Reader{
-		messagesLock:    new(sync.Mutex),
-		observers:       make(map[mq.Observer]mq.Observer),
-		observerBatches: make(map[mq.Observer]mq.Observer),
-		pauseCh:         make(chan context.CancelFunc, 1),
-		startCh:         make(chan context.Context),
-		readyCh:         make(chan struct{}),
-		pauseHookFn:     defaultPauseHookFn,
-		errorHandleFn:   defaultErrorHandleFn,
+		messagesLock:         new(sync.Mutex),
+		observers:            make(map[mq.Observer]mq.Observer),
+		observerBatches:      make(map[mq.Observer]mq.Observer),
+		pauseCh:              make(chan context.CancelFunc, 1),
+		startCh:              make(chan context.Context),
+		readyCh:              make(chan struct{}),
+		pauseHookFn:          defaultPauseHookFn,
+		errorHandleFn:        defaultErrorHandleFn,
+		runDuration:          100 * time.Millisecond,
+		runMaxMessagesLength: 1000,
 	}
 	for _, option := range options {
 		option(r)
@@ -122,7 +121,9 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 }
 
 func (r *Reader) Run() {
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(r.runDuration)
+	isMessagesFullCh := make(chan struct{})
+
 	go func() {
 		for ctx := range r.startCh {
 			if r.kafkaReader != nil {
@@ -152,23 +153,46 @@ func (r *Reader) Run() {
 
 				r.messagesLock.Lock()
 				r.messages = append(r.messages, &m)
+				messagesLength := len(r.messages)
 				r.messagesLock.Unlock()
+
+				if messagesLength >= r.runMaxMessagesLength {
+					isMessagesFullCh <- struct{}{}
+				}
 			}
 		}
 	}()
 	go func() {
 		defer ticker.Stop()
 
-		for range ticker.C {
-			latestKafkaMessage := new(kafka.Message)
-			r.messagesLock.Lock()
-			cloneMessages := make([][]byte, len(r.messages))
-			for idx, message := range r.messages {
-				cloneMessages[idx] = message.Value
-				latestKafkaMessage = message
+		fn := func() {
+			noopErr := errors.New("no op error")
+			cloneMessagesFn := func() ([][]byte, *kafka.Message, error) {
+				r.messagesLock.Lock()
+				defer r.messagesLock.Unlock()
+
+				if len(r.messages) == 0 {
+					return nil, nil, errors.Wrap(noopErr, "no messages")
+				}
+				latestKafkaMessage := new(kafka.Message)
+				cloneMessages := make([][]byte, len(r.messages))
+				for idx, message := range r.messages {
+					cloneValue := make([]byte, len(message.Value))
+					copy(cloneValue, message.Value)
+					cloneMessages[idx] = cloneValue
+					latestKafkaMessage = message
+				}
+				r.messages = nil
+
+				return cloneMessages, latestKafkaMessage, nil
 			}
-			r.messages = nil
-			r.messagesLock.Unlock()
+
+			cloneMessages, latestKafkaMessage, err := cloneMessagesFn()
+			if errors.Is(err, noopErr) {
+				return
+			} else if err != nil {
+				panic(fmt.Sprintf("kafka read messages get error, error: %+v", err)) // TODO: maybe not panic
+			}
 
 			r.RangeAllObserverBatches(func(_, observerBatch mq.Observer) bool {
 				if err := observerBatch.NotifyBatchWithManualCommit(cloneMessages, func() error {
@@ -194,6 +218,15 @@ func (r *Reader) Run() {
 					}
 					return true
 				})
+			}
+		}
+
+		for {
+			select {
+			case <-ticker.C:
+				fn()
+			case <-isMessagesFullCh:
+				fn()
 			}
 		}
 	}()
@@ -228,6 +261,18 @@ func (r *Reader) StopConsume() bool {
 	default:
 		return false
 	}
+}
+
+func (r *Reader) AddObserverBatch(observerBatch mq.Observer) bool {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+
+	if _, ok := r.observerBatches[observerBatch]; ok {
+		return false
+	}
+	r.observerBatches[observerBatch] = observerBatch
+
+	return true
 }
 
 func (r *Reader) AddObserver(observer mq.Observer) bool {

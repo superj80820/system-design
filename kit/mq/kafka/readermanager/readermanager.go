@@ -2,6 +2,7 @@ package readermanager
 
 import (
 	"fmt"
+	"time"
 )
 
 func defaultErrorHandleFn(err error) {
@@ -28,6 +29,28 @@ func AddErrorHandleFn(fn func(err error)) ReaderManagerConfigOption {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
 			r.errorHandleFn = fn
 		})
+	}
+}
+
+func SetReaderDuration(duration time.Duration) ReaderManagerConfigOption {
+	return func(rmc *readerManagerConfig) {
+		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
+			r.runDuration = duration
+		})
+	}
+}
+
+func SetReaderMaxMessagesLength(maxMessagesLength int) ReaderManagerConfigOption {
+	return func(rmc *readerManagerConfig) {
+		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
+			r.runMaxMessagesLength = maxMessagesLength
+		})
+	}
+}
+
+func AddReaderPauseHookFn(fn func()) ReaderManagerConfigOption {
+	return func(rmc *readerManagerConfig) {
+		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.pauseHookFn = fn })
 	}
 }
 
