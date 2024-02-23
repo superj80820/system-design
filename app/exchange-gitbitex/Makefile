@@ -15,8 +15,13 @@ push-docker:
 run-docker:
 	docker run --always -p 9090:9090 -v /var/run/docker.sock:/var/run/docker.sock superj80820/exchange-gitbitex
 run-preview-docker:
-	docker run --always -p 80:9090 \
+	docker run -d \
+	--restart unless-stopped \
+	-p 443:9090 \
+	-e ENABLE_HTTPS=true \
 	-e ENABLE_AUTO_PREVIEW_TRADING=true \
 	-e ENABLE_KAFKA_SEQUENCE_MQ=false \
 	-e ENABLE_BACKUP_SNAPSHOT=false \
+	-v ./fullchain.pem:/app/fullchain.pem \
+	-v ./privkey.pem:/app/privkey.pem \
 	-v /var/run/docker.sock:/var/run/docker.sock superj80820/exchange-gitbitex

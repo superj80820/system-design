@@ -70,6 +70,9 @@ import (
 
 func main() {
 	serviceName := utilKit.GetEnvString("SERVICE_NAME", "exchange-service")
+	enableHTTPS := utilKit.GetEnvBool("ENABLE_HTTPS", false)
+	httpsCertFilePath := utilKit.GetEnvString("HTTPS_CERT_FILE_PATH", "./fullchain.pem")
+	httpsPrivateKeyFilePath := utilKit.GetEnvString("HTTPS_PRIVATE_KEY_FILE_PATH", "./privkey.pem")
 	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE")
 	enableKafkaSequenceMQ := utilKit.GetEnvBool("ENABLE_KAFKA_SEQUENCE_MQ", true)
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
@@ -434,8 +437,14 @@ func main() {
 		Handler: cors.Default().Handler(r),
 	}
 	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Fatal(fmt.Sprintf("http server get error, error: %+v", err))
+		if enableHTTPS {
+			if err := httpSrv.ListenAndServeTLS(httpsCertFilePath, httpsPrivateKeyFilePath); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Fatal(fmt.Sprintf("https server get error, error: %+v", err))
+			}
+		} else {
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Fatal(fmt.Sprintf("http server get error, error: %+v", err))
+			}
 		}
 	}()
 	if enablePprofServer {
