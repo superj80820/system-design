@@ -204,7 +204,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	assert.Nil(t, err)
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()

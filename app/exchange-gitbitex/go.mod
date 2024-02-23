@@ -88,6 +88,7 @@ require (
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
 	github.com/superj80820/system-design/kit/code v0.0.0-20240131085738-3e79fbc2034c // indirect
+	github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838 // indirect
 	github.com/superj80820/system-design/kit/util v0.0.0-20240131085738-3e79fbc2034c // indirect
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect

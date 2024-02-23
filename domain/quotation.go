@@ -16,7 +16,7 @@ type QuotationRepo interface {
 }
 
 type QuotationUseCase interface {
-	ConsumeTickToSave(ctx context.Context, key string)
+	ConsumeTicksToSave(ctx context.Context, key string)
 	GetTickStrings(context.Context, int64, int64) ([]string, error)
 	Done() <-chan struct{}
 	Err() error

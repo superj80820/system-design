@@ -281,6 +281,8 @@ github.com/superj80820/system-design/kit/mq v0.0.0-20240131085738-3e79fbc2034c h
 github.com/superj80820/system-design/kit/mq v0.0.0-20240131085738-3e79fbc2034c/go.mod h1:CMAh4A8J3/V+qDdEe807OCDd8djN1PkUSvIwf2b1/Ao=
 github.com/superj80820/system-design/kit/orm v0.0.0-20240131085738-3e79fbc2034c h1:N0Aj/vMs8wdbyrx3pSCJG7V++6HTchdwALxl8NRuM1E=
 github.com/superj80820/system-design/kit/orm v0.0.0-20240131085738-3e79fbc2034c/go.mod h1:aMaL3Qtl9WSiJ1K/12fa1Xbh3IzcJPAz6YhEhjtj2/k=
+github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838 h1:pMKgDRzoVQ59tS3UR2KUjllIk7plJK8bVrsmdl2N4BM=
+github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838/go.mod h1:zVVInUHMaJq6yESFn9D1YDFB6AhO7v0hODN1gIoxpdk=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131085738-3e79fbc2034c h1:N3MT/KDtaIahrtfq0ibNbzRed+aHTCP9ADsL23BSNs4=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131085738-3e79fbc2034c/go.mod h1:mE/6H//akFwxeyXVJ7PYWaX8dgDB5woHk1Ovd82sYfQ=
 github.com/superj80820/system-design/kit/trace v0.0.0-20240131194024-fae5abbe99b2 h1:BCe5TEG8yXsXMiZ1AA+zNB0ztSoH8AGnWg+j57ItKnA=

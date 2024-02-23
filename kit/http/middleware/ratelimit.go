@@ -12,6 +12,12 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 )
 
+func CreateNoOpRateLimitMiddleware() endpoint.Middleware {
+	return func(e endpoint.Endpoint) endpoint.Endpoint {
+		return e
+	}
+}
+
 func CreateGlobalRateLimitMiddleware(key string, passFunc func(ctx context.Context, key string) (pass bool, lastRequests, curExpiry int, err error)) endpoint.Middleware {
 	return createRateLimitMiddleware(func(ctx context.Context) string {
 		return key

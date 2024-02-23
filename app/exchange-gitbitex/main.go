@@ -63,6 +63,7 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
+	redisRateLimitKit "github.com/superj80820/system-design/kit/ratelimit/redis"
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
@@ -75,6 +76,7 @@ func main() {
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
 	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
 	redisURI := utilKit.GetEnvString("REDIS_URI", "")
+	enableUserRateLimit := utilKit.GetEnvBool("ENABLE_USER_RATE_LIMIT", false)
 	enableBackupSnapshot := utilKit.GetEnvBool("ENABLE_BACKUP_SNAPSHOT", true)
 	backupSnapshotDuration := utilKit.GetEnvInt("BACKUP_SNAPSHOT_DURATION", 600)
 	enableAutoPreviewTrading := utilKit.GetEnvBool("ENABLE_AUTO_PREVIEW_TRADING", false)
@@ -314,7 +316,10 @@ func main() {
 	authMiddleware := httpMiddlewareKit.CreateAuthMiddleware(func(ctx context.Context, token string) (userID int64, err error) {
 		return authUseCase.Verify(token)
 	})
-	userRateLimitMiddleware := httpMiddlewareKit.CreateRateLimitMiddlewareWithSpecKey(false, true, true, utilKit.CreateCacheRateLimit(redisCache, 500, 60).Pass)
+	userRateLimitMiddleware := httpMiddlewareKit.CreateNoOpRateLimitMiddleware()
+	if enableUserRateLimit {
+		userRateLimitMiddleware = httpMiddlewareKit.CreateRateLimitMiddlewareWithSpecKey(false, true, true, redisRateLimitKit.CreateCacheRateLimit(redisCache, 500, 60).Pass)
+	}
 	options := []httptransport.ServerOption{
 		httptransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))),
 		httptransport.ServerAfter(httpKit.CustomAfterCtx),

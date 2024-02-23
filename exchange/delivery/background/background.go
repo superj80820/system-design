@@ -55,7 +55,7 @@ func AsyncTradingConsume(
 ) error {
 	tradingUseCase.ConsumeTradingEventThenProduce(ctx)
 	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order") // TODO: error handle
-	quotationUseCase.ConsumeTickToSave(ctx, "global-save-quotation")
+	quotationUseCase.ConsumeTicksToSave(ctx, "global-save-quotation")
 	candleUseCase.ConsumeTradingResultToSave(ctx, "global-save-candle")
 	matchingUseCase.ConsumeMatchResultToSave(ctx, "global-save-matching") // TODO: error handle
 
@@ -109,7 +109,7 @@ func AsyncAutoPreviewTrading(ctx context.Context, email, password string, durati
 					errCh <- errors.Wrap(err, "produce create order trading event failed")
 					return
 				}
-			case <-ctx.Done():
+			case <-tradingUseCase.Done():
 				close(doneCh)
 			}
 
