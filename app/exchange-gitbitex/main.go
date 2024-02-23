@@ -107,7 +107,7 @@ func main() {
 
 	ctx := context.Background()
 
-	if kafkaURI == "" {
+	if kafkaURI == "" && enableKafkaSequenceMQ {
 		kafkaContainer, err := kafka.RunContainer(
 			ctx,
 			testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
