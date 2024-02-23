@@ -65,7 +65,7 @@ export default function () {
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg2MzQ0MDMsImlhdCI6MTcwODYzMDgwMywic3ViIjoiMTc2MDc1MTE2Mzk1MjU5OTA0MCJ9.xBreUB8u7xIqm6mxrf-SauYwdhxQGDutdD4jhrQVshfHHWavZErw69jkmxoGWmm0XRUWYGzYxIntwnTfrhf-0g',
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg2NDI4MDksImlhdCI6MTcwODYzOTIwOSwic3ViIjoiMTc2MDc1NjY2NTA0MjM0MTg4OCJ9.XqhDQGlg0djpzw1wVjb8AfpLHFtlbiFNR780DVg8r7zKW707lcWV5Nzx3TJYuTdk-ZOJ3TK1Y_TPkeBx6bEAsQ',
     },
   };
 

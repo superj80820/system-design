@@ -47,3 +47,12 @@ func GetEnvInt64(env string, fallback int64) int64 {
 	}
 	return envInt64
 }
+
+func GetEnvFloat64(env string, fallback float64) float64 {
+	envString := os.Getenv(env)
+	envFloat64, err := strconv.ParseFloat(envString, 64)
+	if err != nil {
+		return fallback
+	}
+	return envFloat64
+}

@@ -2,7 +2,10 @@ test-all:
 	go clean -testcache && go test ./... -v -coverprofile=coverage.out -coverpkg=./../../exchange/...
 dev:
 	go run script/script.go
-	go run main.go
+	ENABLE_AUTO_PREVIEW_TRADING=true go run main.go
+preview:
+	go run script/script.go
+	ENABLE_AUTO_PREVIEW_TRADING=true ENABLE_KAFKA_SEQUENCE_MQ=false ENABLE_BACKUP_SNAPSHOT=false go run main.go
 mac-build-docker:
 	go run script/script.go
 	docker build -f ./Dockerfile ./../../.. --platform linux/amd64 -t superj80820/exchange-gitbitex

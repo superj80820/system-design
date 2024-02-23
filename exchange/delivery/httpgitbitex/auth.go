@@ -61,7 +61,7 @@ func MakeAuthLoginEndpoint(svc domain.AuthUseCase) endpoint.Endpoint {
 	}
 }
 
-func MakeSelfEndpoint(svc domain.AccountService) endpoint.Endpoint {
+func MakeSelfEndpoint(svc domain.AccountUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {

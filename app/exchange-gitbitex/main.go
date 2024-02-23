@@ -44,6 +44,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
+	"github.com/superj80820/system-design/kit/mq"
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
@@ -63,136 +64,164 @@ import (
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	redisKit "github.com/superj80820/system-design/kit/redis"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
-
-const (
-	KAFKA_SEQUENCE_TOPIC       = "SEQUENCE"
-	KAFKA_TRADING_EVENT_TOPIC  = "TRADING_EVENT"
-	KAFKA_TRADING_RESULT_TOPIC = "TRADING_RESULT"
-	SERVICE_NAME               = "exchange-service"
-)
-
-type testMQEntity struct {
-	data string
-}
-
-func (t *testMQEntity) GetKey() string {
-	return t.data
-}
-
-func (t *testMQEntity) Marshal() ([]byte, error) {
-	return []byte(t.data), nil
-}
 
 func main() {
+	serviceName := utilKit.GetEnvString("SERVICE_NAME", "exchange-service")
+	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE")
+	enableKafkaSequenceMQ := utilKit.GetEnvBool("ENABLE_KAFKA_SEQUENCE_MQ", true)
+	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
+	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
+	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
+	redisURI := utilKit.GetEnvString("REDIS_URI", "")
+	enableBackupSnapshot := utilKit.GetEnvBool("ENABLE_BACKUP_SNAPSHOT", true)
+	backupSnapshotDuration := utilKit.GetEnvInt("BACKUP_SNAPSHOT_DURATION", 600)
+	enableAutoPreviewTrading := utilKit.GetEnvBool("ENABLE_AUTO_PREVIEW_TRADING", false)
+	autoPreviewTradingEmail := utilKit.GetEnvString("AUTO_PREVIEW_TRADING_EMAIL", "guest@gmail.com")
+	autoPreviewTradingPassword := utilKit.GetEnvString("AUTO_PREVIEW_TRADING_PASSWORD", "123456789")
+	autoPreviewTradingDuration := utilKit.GetEnvInt("AUTO_PREVIEW_TRADING_DURATION", 1)
+	autoPreviewTradingMaxOrderPrice := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MAX_ORDER_PRICE", 3.5)
+	autoPreviewTradingMinOrderPrice := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MIN_ORDER_PRICE", 1.5)
+	autoPreviewTradingMaxQuantity := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MAX_ORDER_QUANTITY", 2)
+	autoPreviewTradingMinQuantity := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MIN_ORDER_QUANTITY", 1)
+	enablePprofServer := utilKit.GetEnvBool("ENABLE_PPROF_SERVER", false)
+	accessTokenKeyPath := utilKit.GetEnvString("ACCESS_TOKEN_KEY_PATH", "./access-private-key.pem")
+	refreshTokenKeyPath := utilKit.GetEnvString("REFRESH_TOKEN_KEY_PATH", "./refresh-private-key.pem")
+	baseCurrency := utilKit.GetEnvString("CURRENCY_BASE", "BTC")
+	quoteCurrency := utilKit.GetEnvString("CURRENCY_QUOTE", "USDT")
 	currencyProduct := domain.CurrencyProduct{
-		ID:             "BTC-USDT",
-		BaseCurrency:   "BTC",
-		QuoteCurrency:  "USDT",
+		ID:             fmt.Sprintf("%s-%s", baseCurrency, quoteCurrency),
+		BaseCurrency:   baseCurrency,
+		QuoteCurrency:  quoteCurrency,
 		QuoteIncrement: "0.0",
-		QuoteMaxSize:   decimal.NewFromInt(100000000).String(),
-		QuoteMinSize:   decimal.NewFromFloat(0.000001).String(),
-		BaseMaxSize:    decimal.NewFromInt(100000000).String(),
-		BaseMinSize:    decimal.NewFromFloat(0.000001).String(),
+		QuoteMaxSize:   decimal.NewFromInt(utilKit.GetEnvInt64("CURRENCY_QUOTE_MAX_SIZE", 100000000)).String(),
+		QuoteMinSize:   decimal.NewFromFloat(utilKit.GetEnvFloat64("CURRENCY_QUOTE_MIN_SIZE", 0.000001)).String(),
+		BaseMaxSize:    decimal.NewFromInt(utilKit.GetEnvInt64("CURRENCY_BASE_MAX_SIZE", 100000000)).String(),
+		BaseMinSize:    decimal.NewFromFloat(utilKit.GetEnvFloat64("CURRENCY_BASE_MIN_SIZE", 0.000001)).String(),
 		BaseScale:      6,
 		QuoteScale:     2,
 	}
-	enablePprofServer := true
-	backupSnapshotDuration := 10 * time.Minute
 
 	ctx := context.Background()
 
-	// TODO: for develop
-	kafkaContainer, err := kafka.RunContainer(
-		ctx,
-		testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
-		kafka.WithClusterID("test-cluster"),
-	)
-	if err != nil {
-		panic(err)
+	if kafkaURI == "" {
+		kafkaContainer, err := kafka.RunContainer(
+			ctx,
+			testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
+			kafka.WithClusterID("test-cluster"),
+		)
+		if err != nil {
+			panic(err)
+		}
+		defer kafkaContainer.Terminate(ctx)
+		kafkaHost, err := kafkaContainer.Host(ctx)
+		if err != nil {
+			panic(err)
+		}
+		kafkaPort, err := kafkaContainer.MappedPort(ctx, "9093") // TODO: is correct?
+		if err != nil {
+			panic(err)
+		}
+
+		kafkaURI = fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port())
+
+		fmt.Println("testcontainers kafka uri: ", kafkaURI)
 	}
-	kafkaHost, err := kafkaContainer.Host(ctx)
-	if err != nil {
-		panic(err)
+
+	if mysqlURI == "" {
+		mysqlDBName := "db"
+		mysqlDBUsername := "root"
+		mysqlDBPassword := "password"
+		mysqlContainer, err := mysql.RunContainer(ctx,
+			testcontainers.WithImage("mysql:8"),
+			mysql.WithDatabase(mysqlDBName),
+			mysql.WithUsername(mysqlDBUsername),
+			mysql.WithPassword(mysqlDBPassword),
+			mysql.WithScripts(filepath.Join(".", "schema.sql")),
+		)
+		if err != nil {
+			panic(err)
+		}
+		defer mysqlContainer.Terminate(ctx)
+		mysqlDBHost, err := mysqlContainer.Host(ctx)
+		if err != nil {
+			panic(err)
+		}
+		mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
+		if err != nil {
+			panic(err)
+		}
+
+		mysqlURI = fmt.Sprintf(
+			"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+			mysqlDBUsername,
+			mysqlDBPassword,
+			mysqlDBHost,
+			mysqlDBPort.Port(),
+			mysqlDBName,
+		)
+
+		fmt.Println("testcontainers mysql uri: ", mysqlURI)
 	}
-	kafkaPort, err := kafkaContainer.MappedPort(ctx, "9093") // TODO: is correct?
+
+	if mongoURI == "" {
+		mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
+		if err != nil {
+			panic(err)
+		}
+		defer mongodbContainer.Terminate(ctx)
+		mongoHost, err := mongodbContainer.Host(ctx)
+		if err != nil {
+			panic(err)
+		}
+		mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
+		if err != nil {
+			panic(err)
+		}
+
+		mongoURI = "mongodb://" + mongoHost + ":" + mongoPort.Port()
+
+		fmt.Println("testcontainers mongo uri: ", mongoURI)
+	}
+
+	if redisURI == "" {
+		redisContainer, err := redis.RunContainer(ctx,
+			testcontainers.WithImage("docker.io/redis:7"),
+			redis.WithLogLevel(redis.LogLevelVerbose),
+		)
+		if err != nil {
+			panic(err)
+		}
+		defer redisContainer.Terminate(ctx)
+		redisHost, err := redisContainer.Host(ctx)
+		if err != nil {
+			panic(err)
+		}
+		redisPort, err := redisContainer.MappedPort(ctx, "6379")
+		if err != nil {
+			panic(err)
+		}
+
+		redisURI = redisHost + ":" + redisPort.Port()
+
+		fmt.Println("testcontainers redis uri: ", redisURI)
+	}
+
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlURI))
 	if err != nil {
 		panic(err)
 	}
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join(".", "schema.sql")),
-	)
-	if err != nil {
-		panic(err)
-	}
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
-	if err != nil {
-		panic(err)
-	}
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	if err != nil {
-		panic(err)
-	}
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		panic(err)
 	}
 
-	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
+	redisCache, err := redisKit.CreateCache(redisURI, "", 0)
 	if err != nil {
 		panic(err)
 	}
-	mongoHost, err := mongodbContainer.Host(ctx)
-	if err != nil {
-		panic(err)
-	}
-	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
-	if err != nil {
-		panic(err)
-	}
-	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
-	if err != nil {
-		panic(err)
-	}
-
-	redisContainer, err := redis.RunContainer(ctx,
-		testcontainers.WithImage("docker.io/redis:7"),
-		redis.WithLogLevel(redis.LogLevelVerbose),
-	)
-	if err != nil {
-		panic(err)
-	}
-	redisHost, err := redisContainer.Host(ctx)
-	if err != nil {
-		panic(err)
-	}
-	redisPort, err := redisContainer.MappedPort(ctx, "6379")
-	if err != nil {
-		panic(err)
-	}
-	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("for debug: mysql port: ", mysqlDBPort.Port(), " mongo port: ", "mongodb://"+mongoHost+":"+mongoPort.Port(), " redis port: ", redisHost+":"+redisPort.Port())
 
 	eventsCollection := mongoDB.Database("exchange").Collection("events")
 	eventsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
@@ -202,18 +231,23 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
-	sequenceMQTopic, err := kafkaMQKit.CreateMQTopic(
-		ctx,
-		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
-		KAFKA_SEQUENCE_TOPIC,
-		kafkaMQKit.ConsumeByGroupID(SERVICE_NAME, true),
-		kafkaMQKit.CreateTopic(1, 1),
-	)
-	if err != nil {
-		panic(err)
-	}
 	messageChannelBuffer := 1000
 	messageCollectDuration := 100 * time.Millisecond
+	var sequenceMQTopic mq.MQTopic
+	if enableKafkaSequenceMQ {
+		sequenceMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			sequenceTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName, true),
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+	} else {
+		sequenceMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	}
 	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
@@ -256,13 +290,23 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
+	authUseCase, err := auth.CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath, authRepo, accountRepo, logger)
 	if err != nil {
 		panic(err)
 	}
 
 	go func() {
-		if err := background.RunAsyncTradingSequencer(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
+		if enableBackupSnapshot {
+			readyCh, errCh := background.AsyncBackupSnapshot(ctx, tradingUseCase, time.Duration(backupSnapshotDuration)*time.Second)
+			select {
+			case <-readyCh:
+			case err := <-errCh:
+				if err != nil {
+					logger.Fatal(fmt.Sprintf("backup snapshot get error, error: %+v", err)) // TODO: correct?
+				}
+			}
+		}
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -270,6 +314,7 @@ func main() {
 	authMiddleware := httpMiddlewareKit.CreateAuthMiddleware(func(ctx context.Context, token string) (userID int64, err error) {
 		return authUseCase.Verify(token)
 	})
+	userRateLimitMiddleware := httpMiddlewareKit.CreateRateLimitMiddlewareWithSpecKey(false, true, true, utilKit.CreateCacheRateLimit(redisCache, 500, 60).Pass)
 	options := []httptransport.ServerOption{
 		httptransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))),
 		httptransport.ServerAfter(httpKit.CustomAfterCtx),
@@ -282,7 +327,7 @@ func main() {
 	})
 	api.Methods("DELETE").Path("/orders/{orderID}").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase)),
+			userRateLimitMiddleware(authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase))),
 			httpDelivery.DecodeCancelOrderRequest,
 			httpDelivery.EncodeCancelOrderResponse,
 			options...,
@@ -290,7 +335,7 @@ func main() {
 	)
 	api.Methods("POST").Path("/orders").Handler(
 		httptransport.NewServer(
-			authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingUseCase)),
+			userRateLimitMiddleware(authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingUseCase))),
 			httpGitbitexDelivery.DecodeCreateOrderRequest,
 			httpGitbitexDelivery.EncodeCreateOrderResponse,
 			options...,
@@ -393,13 +438,29 @@ func main() {
 			}
 		}()
 	}
+	if enableAutoPreviewTrading {
+		go func() {
+			if err := background.AsyncAutoPreviewTrading(
+				ctx,
+				autoPreviewTradingEmail,
+				autoPreviewTradingPassword,
+				time.Duration(autoPreviewTradingDuration)*time.Second,
+				autoPreviewTradingMinOrderPrice,
+				autoPreviewTradingMaxOrderPrice,
+				autoPreviewTradingMinQuantity,
+				autoPreviewTradingMaxQuantity,
+				accountUseCase,
+				tradingUseCase,
+				currencyUseCase,
+			); err != nil {
+				logger.Fatal(fmt.Sprintf("auto preview trading get error, error: %+v", err))
+			}
+		}()
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	httpSrv.Shutdown(ctx)
-	kafkaContainer.Terminate(ctx)
-	mysqlContainer.Terminate(ctx)
-	redisContainer.Terminate(ctx)
 }

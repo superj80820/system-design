@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	"github.com/superj80820/system-design/kit/core/endpoint"
 )
 
 type TradingEventTypeEnum int
@@ -173,6 +172,11 @@ type TradingNotifyResponse struct {
 	CandleBar        *CandleBar          `json:"candle,omitempty"`
 }
 
+type TradingNotifyStream interface {
+	Send(out TradingNotifyResponse) error
+	Recv() (TradingNotifyRequest, error)
+}
+
 type TradingUseCase interface {
 	ConsumeTradingEventThenProduce(context.Context)
 	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
@@ -188,8 +192,8 @@ type TradingUseCase interface {
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
-	NotifyForPublic(ctx context.Context, stream endpoint.Stream[TradingNotifyRequest, TradingNotifyResponse]) error
-	NotifyForUser(ctx context.Context, userID int, stream endpoint.Stream[TradingNotifyRequest, TradingNotifyResponse]) error
+	NotifyForPublic(ctx context.Context, stream TradingNotifyStream) error
+	NotifyForUser(ctx context.Context, userID int, stream TradingNotifyStream) error
 
 	Done() <-chan struct{}
 	Err() error

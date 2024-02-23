@@ -20,7 +20,7 @@ type AccountRepo interface {
 	GetEmail(email string) (*Account, error)
 }
 
-type AccountService interface {
+type AccountUseCase interface {
 	Register(email, password string) (*Account, error)
 	Get(userID int) (*Account, error)
 }

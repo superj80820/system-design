@@ -11,7 +11,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
-	"github.com/superj80820/system-design/kit/core/endpoint"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
@@ -543,7 +542,7 @@ func (t *tradingUseCase) SaveSnapshot(ctx context.Context, tradingSnapshot *doma
 }
 
 // TODO: error handle when consume failed
-func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream endpoint.Stream[domain.TradingNotifyRequest, domain.TradingNotifyResponse]) error {
+func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream domain.TradingNotifyStream) error {
 	consumeKey := utilKit.GetSnowflakeIDString()
 
 	stream.Send(domain.TradingNotifyResponse{
@@ -658,7 +657,7 @@ func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream endpoint.St
 }
 
 // TODO: error handle when consume failed
-func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream endpoint.Stream[domain.TradingNotifyRequest, domain.TradingNotifyResponse]) error {
+func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream domain.TradingNotifyStream) error {
 	consumeKey := strconv.Itoa(userID) + "-" + utilKit.GetSnowflakeIDString()
 
 	stream.Send(domain.TradingNotifyResponse{

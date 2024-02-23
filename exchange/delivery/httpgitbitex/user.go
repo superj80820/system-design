@@ -10,6 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type accountRegisterRequest struct {
@@ -32,21 +33,25 @@ var (
 	EncodeAccountRegisterResponse = httpTransportKit.EncodeJsonResponse
 )
 
-func MakeAccountRegisterEndpoint(svc domain.AccountService, tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
+func MakeAccountRegisterEndpoint(svc domain.AccountUseCase, tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(accountRegisterRequest)
 		account, err := svc.Register(req.Email, req.Password)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, int(account.ID), currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+		userID, err := utilKit.SafeInt64ToInt(account.ID)
+		if err != nil {
+			return nil, errors.Wrap(err, "safe int64 to int failed")
+		}
+		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
-		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, int(account.ID), currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return &accountRegisterResponse{
-			ID:    strconv.FormatInt(account.ID, 10),
+			ID:    strconv.Itoa(userID),
 			Email: req.Email,
 		}, nil
 	}

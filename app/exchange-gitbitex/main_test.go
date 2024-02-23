@@ -85,6 +85,8 @@ var (
 )
 
 func testSetupFn(t assert.TestingT) *testSetup {
+	accessTokenKeyPath := "./access-private-key.pem"
+	refreshTokenKeyPath := "./refresh-private-key.pem"
 	currencyProduct := domain.CurrencyProduct{
 		ID:             "BTC-USDT",
 		BaseCurrency:   "BTC",
@@ -198,7 +200,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
 	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	assert.Nil(t, err)
-	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
+	authUseCase, err := auth.CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath, authRepo, accountRepo, logger)
 	assert.Nil(t, err)
 
 	go func() {

@@ -11,22 +11,22 @@ import (
 	ormKit "github.com/superj80820/system-design/kit/orm"
 )
 
-type accountService struct {
+type accountUseCase struct {
 	accountRepo domain.AccountRepo
 	logger      loggerKit.Logger
 }
 
-func CreateAccountUseCase(accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AccountService, error) {
+func CreateAccountUseCase(accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AccountUseCase, error) {
 	if logger == nil {
 		return nil, errors.New("create service failed")
 	}
-	return &accountService{
+	return &accountUseCase{
 		accountRepo: accountRepo,
 		logger:      logger,
 	}, nil
 }
 
-func (a *accountService) Register(email, password string) (*domain.Account, error) {
+func (a *accountUseCase) Register(email, password string) (*domain.Account, error) {
 	// TODO: verify email and password format
 
 	account, err := a.accountRepo.Create(email, password)
@@ -38,7 +38,7 @@ func (a *accountService) Register(email, password string) (*domain.Account, erro
 	return account, nil
 }
 
-func (a *accountService) Get(userID int) (*domain.Account, error) {
+func (a *accountUseCase) Get(userID int) (*domain.Account, error) {
 	account, err := a.accountRepo.Get(userID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get account failed")

@@ -19,11 +19,6 @@ import (
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
-const (
-	_ACCESS_TOKEN_KEY_PATH  = "./access-private-key.pem"
-	_REFRESH_TOKEN_KEY_PATH = "./refresh-private-key.pem"
-)
-
 type AuthService struct {
 	authRepo    domain.AuthRepo
 	accountRepo domain.AccountRepo
@@ -33,15 +28,15 @@ type AuthService struct {
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthUseCase(authRepo domain.AuthRepo, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
+func CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath string, authRepo domain.AuthRepo, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
 	if logger == nil {
 		return nil, errors.New("create service failed")
 	}
-	accessTokenKey, err := parsePemKey(_ACCESS_TOKEN_KEY_PATH)
+	accessTokenKey, err := parsePemKey(accessTokenKeyPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse pem key failed")
 	}
-	refreshTokenKey, err := parsePemKey(_REFRESH_TOKEN_KEY_PATH)
+	refreshTokenKey, err := parsePemKey(refreshTokenKeyPath)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse pem key failed")
 	}
