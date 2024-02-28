@@ -17,7 +17,7 @@ require (
 	github.com/superj80820/system-design/kit/orm v0.0.0-20240131085738-3e79fbc2034c
 	github.com/superj80820/system-design/kit/redis v0.0.0-20240131085738-3e79fbc2034c
 	github.com/superj80820/system-design/kit/trace v0.0.0-20240131194024-fae5abbe99b2
-	github.com/testcontainers/testcontainers-go v0.28.0
+	github.com/testcontainers/testcontainers-go v0.9.0
 	go.mongodb.org/mongo-driver v1.13.1
 )
 
@@ -25,12 +25,14 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20230124172434-306776ec8161 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
-	github.com/Microsoft/hcsshim v0.11.4 // indirect
+	github.com/Microsoft/hcsshim v0.10.0-rc.1 // indirect
+	github.com/acobaugh/osrelease v0.0.0-20181218015638-a93a0a55a249 // indirect
+	github.com/benweissmann/memongo v0.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bwmarrin/snowflake v0.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/containerd/containerd v1.7.13 // indirect
+	github.com/containerd/containerd v1.7.0-beta.2 // indirect
 	github.com/containerd/log v0.1.0 // indirect
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -87,6 +89,7 @@ require (
 	github.com/shirou/gopsutil/v3 v3.24.1 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/spf13/afero v1.2.1 // indirect
 	github.com/superj80820/system-design/kit/code v0.0.0-20240131085738-3e79fbc2034c // indirect
 	github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838 // indirect
 	github.com/superj80820/system-design/kit/util v0.0.0-20240131085738-3e79fbc2034c // indirect

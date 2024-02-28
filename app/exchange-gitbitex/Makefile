@@ -2,7 +2,7 @@ test-all:
 	go clean -testcache && go test ./... -v -coverprofile=coverage.out -coverpkg=./../../exchange/...
 dev:
 	go run script/script.go
-	ENABLE_AUTO_PREVIEW_TRADING=true go run main.go
+	ENABLE_BACKUP_SNAPSHOT=false ENABLE_KAFKA=false ENABLE_AUTO_PREVIEW_TRADING=true go run main.go
 mac-build-docker:
 	go run script/script.go
 	docker build -f ./Dockerfile ./../../.. --platform linux/amd64 -t superj80820/exchange-gitbitex
@@ -25,7 +25,7 @@ run-preview-docker:
 	-p 443:9090 \
 	-e ENABLE_HTTPS=true \
 	-e ENABLE_AUTO_PREVIEW_TRADING=true \
-	-e ENABLE_KAFKA_SEQUENCE_MQ=false \
+	-e ENABLE_KAFKA=false \
 	-e ENABLE_BACKUP_SNAPSHOT=false \
 	--name exchange-gitbitex \
 	-v ./fullchain.pem:/app/fullchain.pem \

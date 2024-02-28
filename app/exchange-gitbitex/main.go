@@ -34,12 +34,12 @@ import (
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
+	kafkaContainer "github.com/superj80820/system-design/kit/testing/kafka/container"
+	mongoDBContainer "github.com/superj80820/system-design/kit/testing/mongo/container"
+	mongoDBMemory "github.com/superj80820/system-design/kit/testing/mongo/memory"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
+	redisContainer "github.com/superj80820/system-design/kit/testing/redis/container"
 	traceKit "github.com/superj80820/system-design/kit/trace"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/kafka"
-	"github.com/testcontainers/testcontainers-go/modules/mongodb"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
-	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -74,10 +74,11 @@ func main() {
 	httpsCertFilePath := utilKit.GetEnvString("HTTPS_CERT_FILE_PATH", "./fullchain.pem")
 	httpsPrivateKeyFilePath := utilKit.GetEnvString("HTTPS_PRIVATE_KEY_FILE_PATH", "./privkey.pem")
 	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE")
-	enableKafkaSequenceMQ := utilKit.GetEnvBool("ENABLE_KAFKA_SEQUENCE_MQ", true)
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
 	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
+	enableMemoryMongo := utilKit.GetEnvBool("ENABLE_MEMORY_MONGO", false)
+	enableKafka := utilKit.GetEnvBool("ENABLE_KAFKA", true)
 	redisURI := utilKit.GetEnvString("REDIS_URI", "")
 	enableUserRateLimit := utilKit.GetEnvBool("ENABLE_USER_RATE_LIMIT", false)
 	enableBackupSnapshot := utilKit.GetEnvBool("ENABLE_BACKUP_SNAPSHOT", true)
@@ -110,105 +111,57 @@ func main() {
 
 	ctx := context.Background()
 
-	if kafkaURI == "" && enableKafkaSequenceMQ {
-		kafkaContainer, err := kafka.RunContainer(
-			ctx,
-			testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
-			kafka.WithClusterID("test-cluster"),
-		)
-		if err != nil {
-			panic(err)
+	if kafkaURI == "" {
+		if enableKafka {
+			kafkaContainer, err := kafkaContainer.CreateKafka(ctx)
+			if err != nil {
+				panic(err)
+			}
+			defer kafkaContainer.Terminate(ctx)
+			kafkaURI = kafkaContainer.GetURI()
 		}
-		defer kafkaContainer.Terminate(ctx)
-		kafkaHost, err := kafkaContainer.Host(ctx)
-		if err != nil {
-			panic(err)
-		}
-		kafkaPort, err := kafkaContainer.MappedPort(ctx, "9093") // TODO: is correct?
-		if err != nil {
-			panic(err)
-		}
-
-		kafkaURI = fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port())
 
 		fmt.Println("testcontainers kafka uri: ", kafkaURI)
 	}
 
 	if mysqlURI == "" {
-		mysqlDBName := "db"
-		mysqlDBUsername := "root"
-		mysqlDBPassword := "password"
-		mysqlContainer, err := mysql.RunContainer(ctx,
-			testcontainers.WithImage("mysql:8"),
-			mysql.WithDatabase(mysqlDBName),
-			mysql.WithUsername(mysqlDBUsername),
-			mysql.WithPassword(mysqlDBPassword),
-			mysql.WithScripts(filepath.Join(".", "schema.sql")),
-		)
+		mySQLContainer, err := mysqlContainer.CreateMySQL(ctx, filepath.Join(".", "schema.sql"))
 		if err != nil {
 			panic(err)
 		}
-		defer mysqlContainer.Terminate(ctx)
-		mysqlDBHost, err := mysqlContainer.Host(ctx)
-		if err != nil {
-			panic(err)
-		}
-		mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-		if err != nil {
-			panic(err)
-		}
-
-		mysqlURI = fmt.Sprintf(
-			"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-			mysqlDBUsername,
-			mysqlDBPassword,
-			mysqlDBHost,
-			mysqlDBPort.Port(),
-			mysqlDBName,
-		)
+		defer mySQLContainer.Terminate(ctx)
+		mysqlURI = mySQLContainer.GetURI()
 
 		fmt.Println("testcontainers mysql uri: ", mysqlURI)
 	}
 
 	if mongoURI == "" {
-		mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
-		if err != nil {
-			panic(err)
+		if enableMemoryMongo {
+			mongoDBMemory, err := mongoDBMemory.CreateMongoDB()
+			if err != nil {
+				panic(err)
+			}
+			defer mongoDBMemory.Terminate(ctx)
+			mongoURI = mongoDBMemory.GetURI()
+		} else {
+			mongoDBContainer, err := mongoDBContainer.CreateMongoDB(ctx)
+			if err != nil {
+				panic(err)
+			}
+			defer mongoDBContainer.Terminate(ctx)
+			mongoURI = mongoDBContainer.GetURI()
 		}
-		defer mongodbContainer.Terminate(ctx)
-		mongoHost, err := mongodbContainer.Host(ctx)
-		if err != nil {
-			panic(err)
-		}
-		mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
-		if err != nil {
-			panic(err)
-		}
-
-		mongoURI = "mongodb://" + mongoHost + ":" + mongoPort.Port()
 
 		fmt.Println("testcontainers mongo uri: ", mongoURI)
 	}
 
 	if redisURI == "" {
-		redisContainer, err := redis.RunContainer(ctx,
-			testcontainers.WithImage("docker.io/redis:7"),
-			redis.WithLogLevel(redis.LogLevelVerbose),
-		)
+		redisContainer, err := redisContainer.CreateRedis(ctx)
 		if err != nil {
 			panic(err)
 		}
 		defer redisContainer.Terminate(ctx)
-		redisHost, err := redisContainer.Host(ctx)
-		if err != nil {
-			panic(err)
-		}
-		redisPort, err := redisContainer.MappedPort(ctx, "6379")
-		if err != nil {
-			panic(err)
-		}
-
-		redisURI = redisHost + ":" + redisPort.Port()
+		redisURI = redisContainer.GetURI()
 
 		fmt.Println("testcontainers redis uri: ", redisURI)
 	}
@@ -239,7 +192,7 @@ func main() {
 	messageChannelBuffer := 1000
 	messageCollectDuration := 100 * time.Millisecond
 	var sequenceMQTopic mq.MQTopic
-	if enableKafkaSequenceMQ {
+	if enableKafka {
 		sequenceMQTopic, err = kafkaMQKit.CreateMQTopic(
 			ctx,
 			kafkaURI,
