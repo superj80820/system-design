@@ -36,7 +36,6 @@ import (
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
 	kafkaContainer "github.com/superj80820/system-design/kit/testing/kafka/container"
 	mongoDBContainer "github.com/superj80820/system-design/kit/testing/mongo/container"
-	mongoDBMemory "github.com/superj80820/system-design/kit/testing/mongo/memory"
 	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
 	redisContainer "github.com/superj80820/system-design/kit/testing/redis/container"
 	traceKit "github.com/superj80820/system-design/kit/trace"
@@ -77,7 +76,6 @@ func main() {
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
 	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
-	enableMemoryMongo := utilKit.GetEnvBool("ENABLE_MEMORY_MONGO", false)
 	enableKafka := utilKit.GetEnvBool("ENABLE_KAFKA", true)
 	redisURI := utilKit.GetEnvString("REDIS_URI", "")
 	enableUserRateLimit := utilKit.GetEnvBool("ENABLE_USER_RATE_LIMIT", false)
@@ -136,21 +134,12 @@ func main() {
 	}
 
 	if mongoURI == "" {
-		if enableMemoryMongo {
-			mongoDBMemory, err := mongoDBMemory.CreateMongoDB()
-			if err != nil {
-				panic(err)
-			}
-			defer mongoDBMemory.Terminate(ctx)
-			mongoURI = mongoDBMemory.GetURI()
-		} else {
-			mongoDBContainer, err := mongoDBContainer.CreateMongoDB(ctx)
-			if err != nil {
-				panic(err)
-			}
-			defer mongoDBContainer.Terminate(ctx)
-			mongoURI = mongoDBContainer.GetURI()
+		mongoDBContainer, err := mongoDBContainer.CreateMongoDB(ctx)
+		if err != nil {
+			panic(err)
 		}
+		defer mongoDBContainer.Terminate(ctx)
+		mongoURI = mongoDBContainer.GetURI()
 
 		fmt.Println("testcontainers mongo uri: ", mongoURI)
 	}
@@ -238,7 +227,7 @@ func main() {
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, orderRepo, candleRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo, tradingRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)

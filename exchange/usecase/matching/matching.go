@@ -35,7 +35,6 @@ type matchingUseCase struct {
 	matchingRepo       domain.MatchingRepo
 	quotationRepo      domain.QuotationRepo
 	candleRepo         domain.CandleRepo
-	orderRepo          domain.OrderRepo
 	isOrderBookChanged atomic.Bool
 
 	buyBook           *orderBook
@@ -45,12 +44,11 @@ type matchingUseCase struct {
 	orderBookMaxDepth int
 }
 
-func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, quotationRepo domain.QuotationRepo, orderRepo domain.OrderRepo, candleRepo domain.CandleRepo, orderBookMaxDepth int) domain.MatchingUseCase {
+func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, quotationRepo domain.QuotationRepo, candleRepo domain.CandleRepo, orderBookMaxDepth int) domain.MatchingUseCase {
 	m := &matchingUseCase{
 		quotationRepo:     quotationRepo,
 		matchingRepo:      matchingRepo,
 		candleRepo:        candleRepo,
-		orderRepo:         orderRepo,
 		buyBook:           createOrderBook(domain.DirectionBuy),
 		sellBook:          createOrderBook(domain.DirectionSell),
 		marketPrice:       decimal.Zero, // TODO: check correct?

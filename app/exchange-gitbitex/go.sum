@@ -274,6 +274,8 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/superj80820/system-design/auth v0.0.0-20240131194024-fae5abbe99b2 h1:34VBe4iu+ekShODam9dtvK6rsKtkIt8L2wAaY9vXMU4=
 github.com/superj80820/system-design/auth v0.0.0-20240131194024-fae5abbe99b2/go.mod h1:nAxGRvwilrNhbDSoBN75ZGL4LxsPBklcCGpq6ssT/iA=
+github.com/superj80820/system-design/auth v0.0.0-20240228174242-cf4e2e592ab9 h1:HOaEl8T6cuu00xRDRcJVMdJp1+gLNzVYAXTwqE47+t0=
+github.com/superj80820/system-design/auth v0.0.0-20240228174242-cf4e2e592ab9/go.mod h1:nAxGRvwilrNhbDSoBN75ZGL4LxsPBklcCGpq6ssT/iA=
 github.com/superj80820/system-design/domain v0.0.0-20240131085738-3e79fbc2034c h1:YGpuOuupxuG0O2h7/ezIO/U+WjAlgY266SogsNLXxKo=
 github.com/superj80820/system-design/domain v0.0.0-20240131085738-3e79fbc2034c/go.mod h1:Uy6SUAlEjwbx8OYWRcEplKHwgHBVT2sAP/nEpNlyGLQ=
 github.com/superj80820/system-design/exchange v0.0.0-20240216195215-3faf0afda4c7 h1:/bcPA0/RuQDBVhzBforkPYIHJHK2RQlqvVJW5dwCaOI=
@@ -294,6 +296,8 @@ github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4c
 github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838/go.mod h1:zVVInUHMaJq6yESFn9D1YDFB6AhO7v0hODN1gIoxpdk=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131085738-3e79fbc2034c h1:N3MT/KDtaIahrtfq0ibNbzRed+aHTCP9ADsL23BSNs4=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131085738-3e79fbc2034c/go.mod h1:mE/6H//akFwxeyXVJ7PYWaX8dgDB5woHk1Ovd82sYfQ=
+github.com/superj80820/system-design/kit/testing v0.0.0-20240228174242-cf4e2e592ab9 h1:ZWGLTeRJw8qoeTZd459nmG2oQTWbJgIgJZj6KLY8Z78=
+github.com/superj80820/system-design/kit/testing v0.0.0-20240228174242-cf4e2e592ab9/go.mod h1:XPZVfEvoZ3gNbhHIHRgsoRCjfHtVanLeS7cNUam3sKg=
 github.com/superj80820/system-design/kit/trace v0.0.0-20240131194024-fae5abbe99b2 h1:BCe5TEG8yXsXMiZ1AA+zNB0ztSoH8AGnWg+j57ItKnA=
 github.com/superj80820/system-design/kit/trace v0.0.0-20240131194024-fae5abbe99b2/go.mod h1:MzCjyDJ1Omo7I8hHi22Tma4EuMYw2ljCWwjiDvo/YZM=
 github.com/superj80820/system-design/kit/util v0.0.0-20240131085738-3e79fbc2034c h1:kHiCzPZe0TRDJWgNurLV2S1DBdNHR8N+hOV0g6VKMEM=

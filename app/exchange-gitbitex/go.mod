@@ -8,7 +8,7 @@ require (
 	github.com/gorilla/websocket v1.5.1
 	github.com/shopspring/decimal v1.3.1
 	github.com/stretchr/testify v1.8.4
-	github.com/superj80820/system-design/auth v0.0.0-20240131194024-fae5abbe99b2
+	github.com/superj80820/system-design/auth v0.0.0-20240228174242-cf4e2e592ab9
 	github.com/superj80820/system-design/domain v0.0.0-20240131085738-3e79fbc2034c
 	github.com/superj80820/system-design/kit/core v0.0.0-20240131081435-3a8096cad00b
 	github.com/superj80820/system-design/kit/http v0.0.0-20240131085738-3e79fbc2034c
@@ -92,6 +92,7 @@ require (
 	github.com/spf13/afero v1.2.1 // indirect
 	github.com/superj80820/system-design/kit/code v0.0.0-20240131085738-3e79fbc2034c // indirect
 	github.com/superj80820/system-design/kit/ratelimit v0.0.0-20240223084540-bea9e4cb7838 // indirect
+	github.com/superj80820/system-design/kit/testing v0.0.0-20240228174242-cf4e2e592ab9 // indirect
 	github.com/superj80820/system-design/kit/util v0.0.0-20240131085738-3e79fbc2034c // indirect
 	github.com/tklauser/go-sysconf v0.3.13 // indirect
 	github.com/tklauser/numcpus v0.7.0 // indirect
