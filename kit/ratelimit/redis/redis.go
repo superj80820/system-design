@@ -6,7 +6,7 @@ import (
 	"strconv"
 
 	"github.com/pkg/errors"
-	redisKit "github.com/superj80820/system-design/kit/redis"
+	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 )
 
 type CacheRateLimit struct {

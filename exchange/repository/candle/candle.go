@@ -8,9 +8,9 @@ import (
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
+	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	"github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	redisKit "github.com/superj80820/system-design/kit/redis"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
