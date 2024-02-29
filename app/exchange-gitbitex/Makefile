@@ -27,6 +27,8 @@ run-preview-docker:
 	-e ENABLE_AUTO_PREVIEW_TRADING=true \
 	-e ENABLE_KAFKA=false \
 	-e ENABLE_BACKUP_SNAPSHOT=false \
+	-e IS_CLEAR_DB=true \
+	-e MYSQL_URI="admin:admin@tcp(0.0.0.0:3306)/db?charset=utf8mb4&parseTime=True&loc=Local" \
 	--name exchange-gitbitex \
 	-v ./fullchain.pem:/app/fullchain.pem \
 	-v ./privkey.pem:/app/privkey.pem \
