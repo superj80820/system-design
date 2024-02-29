@@ -1,64 +1,35 @@
-package mysqlandredis
+package ormandredis
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/domain"
+	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
-	"github.com/testcontainers/testcontainers-go/modules/redis"
+	testingPostgresKit "github.com/superj80820/system-design/kit/testing/postgres/container"
+	testingRedisKit "github.com/superj80820/system-design/kit/testing/redis/container"
 )
 
 func TestQuotationRepo(t *testing.T) {
 	ctx := context.Background()
 
-	redisContainer, err := redis.RunContainer(ctx,
-		testcontainers.WithImage("docker.io/redis:7"),
-		redis.WithLogLevel(redis.LogLevelVerbose),
-	)
-	redisHost, err := redisContainer.Host(ctx)
+	redisContainer, err := testingRedisKit.CreateRedis(ctx)
 	assert.Nil(t, err)
-	redisPort, err := redisContainer.MappedPort(ctx, "6379")
-	assert.Nil(t, err)
-	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
+	postgres, err := testingPostgresKit.CreatePostgres(ctx, "postgres.schema.sql")
 	assert.Nil(t, err)
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join(".", "schema.sql")),
-	)
+	redisCache, err := redisKit.CreateCache(redisContainer.GetURI(), "", 0)
 	assert.Nil(t, err)
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
+	postgresDB, err := ormKit.CreateDB(ormKit.UsePostgres(postgres.GetURI()))
 	assert.Nil(t, err)
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	assert.Nil(t, err)
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
-	assert.Nil(t, err)
+	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
 
-	quotationRepo := CreateQuotationRepo(mysqlDB, redisCache)
+	quotationRepo := CreateQuotationRepo(postgresDB, redisCache, tickMQTopic)
 	timestamp := time.Unix(1706558738, 0)
 	assert.Nil(t, quotationRepo.SaveTickStrings(ctx, 1, []*domain.TickEntity{
 		{

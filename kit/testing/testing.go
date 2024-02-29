@@ -21,3 +21,8 @@ type KafkaContainer interface {
 	GetURI() string
 	Terminate(context.Context) error
 }
+
+type PostgresContainer interface {
+	GetURI() string
+	Terminate(context.Context) error
+}

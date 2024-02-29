@@ -6,6 +6,7 @@ import (
 	goMysql "github.com/go-sql-driver/mysql"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -16,6 +17,10 @@ var (
 	ErrRecordNotFound = gorm.ErrRecordNotFound // TODO: test found
 	ErrDuplicatedKey  = gorm.ErrDuplicatedKey
 )
+
+type postgresConfig struct {
+	dns string
+}
 
 type mySQLConfig struct {
 	dns string
@@ -30,8 +35,9 @@ type DB struct {
 
 	dbType dbType
 
-	mySQLConfig  *mySQLConfig
-	sqliteConfig *sqliteConfig
+	mySQLConfig    *mySQLConfig
+	sqliteConfig   *sqliteConfig
+	postgresConfig *postgresConfig
 }
 
 type (
@@ -45,6 +51,7 @@ const (
 	dbTypeNoop dbType = iota
 	dbTypeMySQL
 	dbTypeSQLite
+	dbTypePostgres
 )
 
 type Option func(*DB)
@@ -53,6 +60,15 @@ func UseMySQL(dns string) Option {
 	return func(db *DB) {
 		db.dbType = dbTypeMySQL
 		db.mySQLConfig = &mySQLConfig{
+			dns: dns,
+		}
+	}
+}
+
+func UsePostgres(dns string) Option {
+	return func(db *DB) {
+		db.dbType = dbTypePostgres
+		db.postgresConfig = &postgresConfig{
 			dns: dns,
 		}
 	}
@@ -89,6 +105,8 @@ func CreateDB(useDB Option, options ...Option) (*DB, error) {
 		dialector = mysql.Open(gormDB.mySQLConfig.dns)
 	case dbTypeSQLite:
 		dialector = sqlite.Open(gormDB.sqliteConfig.fileName)
+	case dbTypePostgres:
+		dialector = postgres.Open(gormDB.postgresConfig.dns)
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{

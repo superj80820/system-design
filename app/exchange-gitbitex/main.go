@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	_ "net/http/pprof"
-	"path/filepath"
 	"syscall"
 
 	httptransport "github.com/go-kit/kit/transport/http"
@@ -30,7 +30,7 @@ import (
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
-	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/ormandredis"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
 	httpMiddlewareKit "github.com/superj80820/system-design/kit/http/middleware"
 	wsKit "github.com/superj80820/system-design/kit/http/websocket"
@@ -48,7 +48,7 @@ import (
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 
-	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
+	orderORMReop "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
 	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
@@ -76,6 +76,7 @@ func main() {
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
 	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
+	isClearDB := utilKit.GetEnvBool("IS_CLEAR_DB", false)
 	enableKafka := utilKit.GetEnvBool("ENABLE_KAFKA", true)
 	redisURI := utilKit.GetEnvString("REDIS_URI", "")
 	enableUserRateLimit := utilKit.GetEnvBool("ENABLE_USER_RATE_LIMIT", false)
@@ -155,7 +156,7 @@ func main() {
 		fmt.Println("testcontainers redis uri: ", redisURI)
 	}
 
-	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlURI))
+	ormDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlURI))
 	if err != nil {
 		panic(err)
 	}
@@ -213,18 +214,57 @@ func main() {
 	}
 	tracer := traceKit.CreateNoOpTracer()
 
-	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
+	if isClearDB {
+		if err := ormDB.Exec("SET FOREIGN_KEY_CHECKS = 0").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE events").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE match_details").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE orders").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE ticks").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE sec_bars").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE min_bars").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE hour_bars").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE day_bars").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE account_token").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("TRUNCATE TABLE account").Error; err != nil {
+			panic(err)
+		}
+		if err := ormDB.Exec("SET FOREIGN_KEY_CHECKS = 1").Error; err != nil {
+			panic(err)
+		}
+	}
+
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, ormDB, tradingEventMQTopic, tradingResultMQTopic)
 	assetRepo := assetMemoryRepo.CreateAssetRepo(assetMQTopic)
-	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, ormDB)
 	if err != nil {
 		panic(err)
 	}
-	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic)
-	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
-	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
-	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
-	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
+	orderRepo := orderORMReop.CreateOrderRepo(ormDB, orderMQTopic)
+	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleMQTopic)
+	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic, orderBookMQTopic)
+	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
+	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?

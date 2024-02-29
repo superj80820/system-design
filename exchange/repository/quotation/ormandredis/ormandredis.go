@@ -1,4 +1,4 @@
-package mysqlandredis
+package ormandredis
 
 import (
 	"context"

@@ -7,7 +7,7 @@ func initSQLSchemaFile() {
 	if err != nil {
 		panic(err)
 	}
-	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/mysqlandredis/schema.sql")
+	quotationSchemaSQL, err := os.ReadFile("../../exchange/repository/quotation/ormandredis/schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -15,7 +15,7 @@ func initSQLSchemaFile() {
 	if err != nil {
 		panic(err)
 	}
-	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/mysql/schema.sql")
+	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/ormandmq/schema.sql")
 	if err != nil {
 		panic(err)
 	}

@@ -1,53 +1,28 @@
-package mysql
+package ormandmq
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/domain"
+	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
+	testingPostgresKit "github.com/superj80820/system-design/kit/testing/postgres/container"
 )
 
 func TestOrderRepo(t *testing.T) {
 	ctx := context.Background()
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(
-			filepath.Join(".", "schema.sql"), //TODO: workaround
-		),
-	)
+	postgres, err := testingPostgresKit.CreatePostgres(ctx, "postgres.schema.sql")
 	assert.Nil(t, err)
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
+	postgresDB, err := ormKit.CreateDB(ormKit.UsePostgres(postgres.GetURI()))
 	assert.Nil(t, err)
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	assert.Nil(t, err)
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
-	assert.Nil(t, err)
+	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
 
-	orderRepo := CreateOrderRepo(mysqlDB)
+	orderRepo := CreateOrderRepo(postgresDB, orderMQTopic)
 	assert.Nil(t, orderRepo.SaveHistoryOrdersWithIgnore([]*domain.OrderEntity{
 		{
 			ID:               1,
