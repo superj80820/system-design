@@ -48,7 +48,7 @@ import (
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 
-	orderORMReop "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
+	orderORMRepo "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
 	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
@@ -259,7 +259,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	orderRepo := orderORMReop.CreateOrderRepo(ormDB, orderMQTopic)
+	orderRepo := orderORMRepo.CreateOrderRepo(ormDB, orderMQTopic)
 	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic, orderBookMQTopic)

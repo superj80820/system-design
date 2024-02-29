@@ -16,8 +16,8 @@ import (
 	redisKit "github.com/superj80820/system-design/kit/redis"
 	traceKit "github.com/superj80820/system-design/kit/trace"
 	utilKit "github.com/superj80820/system-design/kit/util"
-	deliveryHTTP "github.com/superj80820/system-design/url-shorter/url/delivery/http"
-	"github.com/superj80820/system-design/url-shorter/url/usecase"
+	deliveryHTTP "github.com/superj80820/system-design/urlshorter/url/delivery/http"
+	"github.com/superj80820/system-design/urlshorter/url/usecase"
 	"go.opentelemetry.io/otel/trace"
 )
 

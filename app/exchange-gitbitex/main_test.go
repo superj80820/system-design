@@ -31,8 +31,8 @@ import (
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
-	orderMysqlReop "github.com/superj80820/system-design/exchange/repository/order/mysql"
-	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/mysqlandredis"
+	orderORMRepo "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
+	quotationRepoORMAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/ormandredis"
 	sequencerKafkaAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/sequencer/kafkaandmysql"
 	tradingMySQLAndMongoRepo "github.com/superj80820/system-design/exchange/repository/trading/mysqlandmongo"
 	"github.com/superj80820/system-design/exchange/usecase/asset"
@@ -51,11 +51,10 @@ import (
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	redisKit "github.com/superj80820/system-design/kit/redis"
+	mongoDBContainer "github.com/superj80820/system-design/kit/testing/mongo/container"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
+	redisContainer "github.com/superj80820/system-design/kit/testing/redis/container"
 	traceKit "github.com/superj80820/system-design/kit/trace"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/mongodb"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
-	"github.com/testcontainers/testcontainers-go/modules/redis"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -78,10 +77,6 @@ type testSetup struct {
 var (
 	userAEmail    = "a@gmail.com"
 	userAPassword = "asdfasdf"
-	currencyMap   = map[string]int{
-		"BTC":  1,
-		"USDT": 2,
-	}
 )
 
 func testSetupFn(t assert.TestingT) *testSetup {
@@ -99,56 +94,21 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		BaseScale:      6,
 		QuoteScale:     2,
 	}
-	backupSnapshotDuration := 10 * time.Minute
 
 	ctx := context.Background()
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join(".", "schema.sql")),
-	)
+	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, filepath.Join(".", "schema.sql"))
 	assert.Nil(t, err)
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
+	redisContainer, err := redisContainer.CreateRedis(ctx)
 	assert.Nil(t, err)
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	assert.Nil(t, err)
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
+	mongoDBContainer, err := mongoDBContainer.CreateMongoDB(ctx)
 	assert.Nil(t, err)
 
-	redisContainer, err := redis.RunContainer(ctx,
-		testcontainers.WithImage("docker.io/redis:7"),
-		redis.WithLogLevel(redis.LogLevelVerbose),
-	)
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
 	assert.Nil(t, err)
-	redisHost, err := redisContainer.Host(ctx)
+	redisCache, err := redisKit.CreateCache(redisContainer.GetURI(), "", 0)
 	assert.Nil(t, err)
-	redisPort, err := redisContainer.MappedPort(ctx, "6379")
-	assert.Nil(t, err)
-	redisCache, err := redisKit.CreateCache(redisHost+":"+redisPort.Port(), "", 0)
-	assert.Nil(t, err)
-
-	mongodbContainer, err := mongodb.RunContainer(ctx, testcontainers.WithImage("mongo:6"))
-	assert.Nil(t, err)
-	mongoHost, err := mongodbContainer.Host(ctx)
-	assert.Nil(t, err)
-	mongoPort, err := mongodbContainer.MappedPort(ctx, "27017")
-	assert.Nil(t, err)
-	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI("mongodb://"+mongoHost+":"+mongoPort.Port()))
+	mongoDB, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoDBContainer.GetURI()))
 	assert.Nil(t, err)
 
 	eventsCollection := mongoDB.Database("exchange").Collection("events")
@@ -182,15 +142,15 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	if err != nil {
 		panic(err)
 	}
-	orderRepo := orderMysqlReop.CreateOrderRepo(mysqlDB, orderMQTopic)
+	orderRepo := orderORMRepo.CreateOrderRepo(mysqlDB, orderMQTopic)
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
-	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
+	quotationRepo := quotationRepoORMAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
 	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, orderRepo, candleRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo, tradingRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
@@ -204,7 +164,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	assert.Nil(t, err)
 
 	go func() {
-		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase, backupSnapshotDuration); err != nil {
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -304,7 +264,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 			if err != nil {
 				panic(err)
 			}
-			err = mongodbContainer.Terminate(ctx)
+			err = mongoDBContainer.Terminate(ctx)
 			if err != nil {
 				panic(err)
 			}

@@ -1,4 +1,4 @@
-module github.com/superj80820/system-design/url-shorter
+module github.com/superj80820/system-design/urlshortener
 
 go 1.20
 
