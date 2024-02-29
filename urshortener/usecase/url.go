@@ -8,21 +8,21 @@ import (
 	"github.com/jxskiss/base62"
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
+	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	"github.com/superj80820/system-design/kit/code"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
-	mysqlKit "github.com/superj80820/system-design/kit/mysql"
-	redisKit "github.com/superj80820/system-design/kit/redis"
+	ormKit "github.com/superj80820/system-design/kit/orm"
 	utilKit "github.com/superj80820/system-design/kit/util"
-	"github.com/superj80820/system-design/url-shorter/repository"
+	"github.com/superj80820/system-design/urlshortener/repository"
 )
 
 type urlService struct {
-	db     *mysqlKit.DB
+	db     *ormKit.DB
 	cache  *redisKit.Cache
 	logger *loggerKit.Logger
 }
 
-func CreateURLService(db *mysqlKit.DB, cache *redisKit.Cache, logger *loggerKit.Logger) (*urlService, error) {
+func CreateURLService(db *ormKit.DB, cache *redisKit.Cache, logger *loggerKit.Logger) (*urlService, error) {
 	if db == nil || cache == nil || logger == nil {
 		return nil, errors.New("create service failed")
 	}
