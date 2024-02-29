@@ -116,7 +116,7 @@
 將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
 * 以event sourcing的方式實現
-* 撮合引擎維權記憶體計算，可達到100,000PRS
+* 撮合引擎以記憶體計算，可達到100,000PRS
 * 因為是有限狀態機，可以用熱備援多台server同時聽取event，來達到high availability
 * 預覽網頁(❗僅用最低效能運行預覽，不是production運作規格): https://preview.exchange.messfar.com
 
