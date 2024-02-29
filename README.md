@@ -24,14 +24,9 @@
 ├── domain
 ├── auth
 │   ├── delivery
-│   │   ├── grpc
-│   │   └── http
 │   ├── repository
 │   │   ├── account
-│   │   │   └── mysql
 │   │   └── auth
-│   │       ├── http
-│   │       └── mysql
 │   └── usecase
 │       ├── account
 │       └── auth
@@ -43,27 +38,16 @@
 │   └── usecase
 ├── config
 │   └── repository
-│       └── memory
 ├── exchange
 │   ├── delivery
-│   │   ├── background
-│   │   ├── http
-│   │   └── httpgitbitex
-│   │       └── ws
 │   ├── repository
 │   │   ├── asset
-│   │   │   └── memory
 │   │   ├── candle
 │   │   ├── matching
-│   │   │   └── mysqlandmq
 │   │   ├── order
-│   │   │   └── ormandmq
 │   │   ├── quotation
-│   │   │   └── ormandredis
 │   │   ├── sequencer
-│   │   │   └── kafkaandmysql
 │   │   └── trading
-│   │       └── mysqlandmongo
 │   └── usecase
 │       ├── asset
 │       ├── candle
@@ -77,7 +61,6 @@
 │   └── repository
 ├── urshortener
 │   ├── delivery
-│   │   └── http
 │   ├── repository
 │   └── usecase
 ├── kit
@@ -92,11 +75,11 @@
 │   │   ├── middleware
 │   │   ├── transport
 │   │   └── websocket
-│   │       ├── middleware
+│   │       └── middleware
 │   ├── logger
 │   ├── mq
 │   │   ├── kafka
-│   │   ├── memory
+│   │   └── memory
 │   ├── orm
 │   ├── ratelimit
 │   │   ├── memory
@@ -111,8 +94,8 @@
 │   │   │   └── container
 │   │   ├── postgres
 │   │   │   └── container
-│   │   ├── redis
-│   │   │   └── container
+│   │   └── redis
+│   │       └── container
 │   ├── trace
 │   └── util
 └── instrumenting
