@@ -110,16 +110,24 @@
 * 高reuse，application可以從組合不同domain，來完成產品需求，例如`app/exchange`是組合`auth`與`exchange`domain
 * monorepo，所有applications的底層使用`kit`，更新方便，如果套件需要版本控制也可用`git tag`處理
 
-## exchange
+## exchange-gitbitex
+
+將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
+
+* 以event sourcing的方式實現
+* 撮合引擎維權記憶體計算，可達到100,000PRS
+* 因為是有限狀態機，可以用熱備援多台server同時聽取event，來達到High availability
+* 預覽網頁(❗僅用最低效能運行預覽，不是production運作規格): https://preview.exchange.messfar.com
 
 ![](https://i.imgur.com/KKnKXUi.png)
 
-![](https://i.imgur.com/V7KFvvC.png)
+### 壓測
 
-* 壓測:
+![](https://i.imgur.com/V7KFvvC.png)
   * 機器: EC2 c5.18xlarge
   * RPS (max): 102,988.52
-* 預覽網頁(❗僅用最低效能運行預覽，不是production運作規格): https://preview.exchange.messfar.com
+
+### 系統架構
 
 ```
 ┌─────────────┐                                                                 
@@ -186,3 +194,11 @@
                                           │             │        │             │
                                           └─────────────┘        └─────────────┘
 ```
+
+## urlshortener
+
+短網址服務
+
+## chat
+
+聊天服務
