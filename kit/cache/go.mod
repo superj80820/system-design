@@ -1,10 +1,10 @@
-module github.com/superj80820/system-design/kit/redis
+module github.com/superj80820/system-design/kit/cache
 
 go 1.20
 
 require (
 	github.com/pkg/errors v0.9.1
-	github.com/redis/go-redis/v9 v9.4.0
+	github.com/redis/go-redis/v9 v9.5.1
 )
 
 require (

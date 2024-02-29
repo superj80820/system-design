@@ -60,10 +60,10 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/quotation"
 
 	"github.com/superj80820/system-design/exchange/usecase/trading"
+	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	redisRateLimitKit "github.com/superj80820/system-design/kit/ratelimit/redis"
-	redisKit "github.com/superj80820/system-design/kit/redis"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
