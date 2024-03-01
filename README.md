@@ -145,17 +145,18 @@
 撮合系統。將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
 * 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
-* 以event sourcing的方式實現
+* 以event sourcing的方式實現，儲存event後，撮合引擎為讀取event的有限狀態機，可熱備援用多台server同時聽取event，來達到high availability
 * 撮合引擎以記憶體計算，可達到100,000PRS
-* 因為是有限狀態機，可以用熱備援多台server同時聽取event，來達到high availability
 * 預覽網頁(❗僅用最低效能運行預覽，不是production運作規格): https://preview.exchange.messfar.com
 
 ### 壓測
 
+使用k6進行
+
 ![](https://i.imgur.com/V7KFvvC.png)
-  * 機器: EC2 c5.18xlarge
+  * exchange機器: EC2 c5.18xlarge
+  * k6機器: EC2 m5.8xlarge
   * RPS (max): 102,988.52
-  * 軟體: k6
   * 情境: 單機啟動server、mysql、kafka、redis、mongodb，並進行買賣單搓合，如果將mysql或kafka等服務獨立出來，理論上可用更便宜的機器
 
 ### 系統架構
