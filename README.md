@@ -113,6 +113,41 @@
 
 ## exchange-gitbitex
 
+```
+.
+├── app
+│   ├── exchange-gitbitex
+├── domain
+├── auth
+│   ├── delivery
+│   ├── repository
+│   │   ├── account
+│   │   └── auth
+│   └── usecase
+│       ├── account
+│       └── auth
+├── exchange
+│   ├── delivery
+│   ├── repository
+│   │   ├── asset
+│   │   ├── candle
+│   │   ├── matching
+│   │   ├── order
+│   │   ├── quotation
+│   │   ├── sequencer
+│   │   └── trading
+│   └── usecase
+│       ├── asset
+│       ├── candle
+│       ├── clearing
+│       ├── currency
+│       ├── matching
+│       ├── order
+│       ├── quotation
+│       └── trading
+└── kit
+```
+
 撮合系統。將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
 * 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
