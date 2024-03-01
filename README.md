@@ -121,21 +121,13 @@
 ├── auth
 │   ├── delivery
 │   ├── repository
-│   │   ├── account
-│   │   └── auth
 │   └── usecase
 │       ├── account
 │       └── auth
 ├── exchange
 │   ├── delivery
 │   ├── repository
-│   │   ├── asset
-│   │   ├── candle
-│   │   ├── matching
-│   │   ├── order
-│   │   ├── quotation
 │   │   ├── sequencer
-│   │   └── trading
 │   └── usecase
 │       ├── asset
 │       ├── candle
