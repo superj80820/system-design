@@ -116,7 +116,7 @@
 ```
 .
 ├── app
-│   ├── exchange-gitbitex
+│   └── exchange-gitbitex
 ├── domain
 ├── auth
 │   ├── delivery
