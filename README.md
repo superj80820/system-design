@@ -132,7 +132,7 @@
 
 ### 系統架構
 
-![](https://github.com/superj80820/system-designt/raw/master/exchange-arch.png)
+![](https://github.com/superj80820/system-design/raw/master/exchange-arch.png)
 
 ### 參考
 
