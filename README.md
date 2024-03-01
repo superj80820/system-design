@@ -113,7 +113,7 @@
 
 ## exchange-gitbitex
 
-將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
+撮合系統。將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
 * 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
 * 以event sourcing的方式實現
