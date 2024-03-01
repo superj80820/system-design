@@ -113,6 +113,8 @@
 
 ## exchange-gitbitex
 
+![](https://i.imgur.com/KKnKXUi.png)
+
 ```
 .
 ├── app
@@ -148,18 +150,29 @@
 * 因為是有限狀態機，可以用熱備援多台server同時聽取event，來達到high availability
 * 預覽網頁(❗僅用最低效能運行預覽，不是production運作規格): https://preview.exchange.messfar.com
 
-![](https://i.imgur.com/KKnKXUi.png)
-
 ### 壓測
 
 ![](https://i.imgur.com/V7KFvvC.png)
   * 機器: EC2 c5.18xlarge
   * RPS (max): 102,988.52
   * 軟體: k6
+  * 情境: 單機啟動server、mysql、kafka、redis、mongodb，並進行買賣單搓合，如果將mysql或kafka等服務獨立出來，理論上可用更便宜的機器
 
 ### 系統架構
 
 ![](https://github.com/superj80820/system-design/raw/master/exchange-arch.png)
+
+### 運行
+
+* require:
+  * golang v1.20
+  * docker
+
+* development:
+  ```
+  $ cd app/exchange-gitbitex
+  $ make dev
+  ```
 
 ### 參考
 
