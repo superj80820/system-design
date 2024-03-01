@@ -34,7 +34,6 @@ type tradingUseCase struct {
 	lastTimestamp time.Time
 
 	orderBookDepth int
-	cancel         context.CancelFunc
 	errLock        *sync.Mutex
 	doneCh         chan struct{}
 	err            error
@@ -59,9 +58,7 @@ func CreateTradingUseCase(
 	batchEventsSize int,
 	batchEventsDuration time.Duration,
 ) domain.TradingUseCase {
-	ctx, cancel := context.WithCancel(ctx)
-
-	t := &tradingUseCase{
+	return &tradingUseCase{
 		logger:             logger,
 		tradingRepo:        tradingRepo,
 		matchingRepo:       matchingRepo,
@@ -77,84 +74,9 @@ func CreateTradingUseCase(
 		currencyUseCase:    currencyUseCase,
 
 		orderBookDepth: orderBookDepth,
-		cancel:         cancel,
 		errLock:        new(sync.Mutex),
 		doneCh:         make(chan struct{}),
 	}
-
-	t.tradingRepo.SubscribeTradeEvent("global-trader", func(te *domain.TradingEvent) {
-		switch te.EventType {
-		case domain.TradingEventCreateOrderType:
-			matchResult, err := syncTradingUseCase.CreateOrder(ctx, te)
-			if errors.Is(err, domain.LessAmountErr) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-
-			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
-				TradingResultStatus: domain.TradingResultStatusCreate,
-				TradingEvent:        te,
-				MatchResult:         matchResult,
-			})
-			if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-		case domain.TradingEventCancelOrderType:
-			err := syncTradingUseCase.CancelOrder(ctx, te)
-			if errors.Is(err, domain.LessAmountErr) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if errors.Is(err, domain.ErrNoOrder) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-
-			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
-				TradingResultStatus: domain.TradingResultStatusCancel,
-				TradingEvent:        te,
-			})
-			if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-		case domain.TradingEventTransferType:
-			err := syncTradingUseCase.Transfer(ctx, te)
-			if errors.Is(err, domain.LessAmountErr) {
-				t.logger.Info(fmt.Sprintf("%+v", err))
-				return
-			} else if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-
-			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
-				TradingResultStatus: domain.TradingResultStatusTransfer,
-				TradingEvent:        te,
-			})
-			if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-		case domain.TradingEventDepositType:
-			err := syncTradingUseCase.Deposit(ctx, te)
-			if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-
-			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
-				TradingResultStatus: domain.TradingResultStatusDeposit,
-				TradingEvent:        te,
-			})
-			if err != nil {
-				panic(fmt.Sprintf("process message get error: %+v", err))
-			}
-		default:
-			panic(errors.New("unknown event type"))
-		}
-	})
-
-	return t
 }
 
 func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time.Duration) {
@@ -205,7 +127,81 @@ func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time
 	}()
 }
 
-func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
+func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
+	t.tradingRepo.SubscribeTradeEvent(key, func(te *domain.TradingEvent) {
+		switch te.EventType {
+		case domain.TradingEventCreateOrderType:
+			matchResult, err := t.syncTradingUseCase.CreateOrder(ctx, te)
+			if errors.Is(err, domain.LessAmountErr) {
+				t.logger.Info(fmt.Sprintf("%+v", err))
+				return
+			} else if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusCreate,
+				TradingEvent:        te,
+				MatchResult:         matchResult,
+			})
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+		case domain.TradingEventCancelOrderType:
+			err := t.syncTradingUseCase.CancelOrder(ctx, te)
+			if errors.Is(err, domain.LessAmountErr) {
+				t.logger.Info(fmt.Sprintf("%+v", err))
+				return
+			} else if errors.Is(err, domain.ErrNoOrder) {
+				t.logger.Info(fmt.Sprintf("%+v", err))
+				return
+			} else if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusCancel,
+				TradingEvent:        te,
+			})
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+		case domain.TradingEventTransferType:
+			err := t.syncTradingUseCase.Transfer(ctx, te)
+			if errors.Is(err, domain.LessAmountErr) {
+				t.logger.Info(fmt.Sprintf("%+v", err))
+				return
+			} else if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusTransfer,
+				TradingEvent:        te,
+			})
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+		case domain.TradingEventDepositType:
+			err := t.syncTradingUseCase.Deposit(ctx, te)
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+
+			err = t.tradingRepo.SendTradingResult(ctx, &domain.TradingResult{
+				TradingResultStatus: domain.TradingResultStatusDeposit,
+				TradingEvent:        te,
+			})
+			if err != nil {
+				panic(fmt.Sprintf("process message get error: %+v", err))
+			}
+		default:
+			panic(errors.New("unknown event type"))
+		}
+	})
+}
+
+func (t *tradingUseCase) ConsumeGlobalSequencer(ctx context.Context) {
 	setErrAndDone := func(err error) {
 		t.errLock.Lock()
 		defer t.errLock.Unlock()
@@ -213,7 +209,7 @@ func (t *tradingUseCase) ConsumeTradingEventThenProduce(ctx context.Context) {
 		close(t.doneCh)
 	}
 
-	t.sequencerRepo.SubscribeTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
+	t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
 		sequencerEvents := make([]*domain.SequencerEvent, len(tradingEvents))
 		tradingEventsClone := make([]*domain.TradingEvent, len(tradingEvents))
 		for idx := range tradingEvents {
@@ -743,7 +739,7 @@ func (t *tradingUseCase) Err() error {
 }
 
 func (t *tradingUseCase) Shutdown() error {
-	t.cancel()
+	panic("need ctx implement")
 	<-t.doneCh
 	return t.err
 }

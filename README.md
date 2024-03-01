@@ -107,7 +107,7 @@
   * usecase方面: usecase使用repository依照domain interface使用，如果要`memory`替換成`mysql`，只需實作出符合interface的repository
   * delivery方面: delivery使用usecase依照domain interface使用，如果要`gin`替換成`go-kit` server，不會修改到業務邏輯
 * 切出每個domain的邊界，可先以monolithic部署，如果未來有horizontal scaling需求，再以domain來deliver給不同microservice，避免一開始就使用microservice過度設計
-* 高reuse，application可以從組合不同domain，來完成產品需求，例如`app/exchange`是組合`auth`與`exchange`domain
+* 高reuse，application可以從組合不同domain，來完成產品需求，例如`app/exchange-gitbitex`是組合`auth`與`exchange`domain
 * monorepo，所有applications的底層使用`kit`，更新方便，如果套件需要版本控制也可用`git tag`處理
 * 以testcontainers測試，更貼近真實情境進行測試
 
@@ -115,6 +115,7 @@
 
 將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
+* 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
 * 以event sourcing的方式實現
 * 撮合引擎以記憶體計算，可達到100,000PRS
 * 因為是有限狀態機，可以用熱備援多台server同時聽取event，來達到high availability
@@ -131,71 +132,12 @@
 
 ### 系統架構
 
-```
-+-------------+                                                                 
-|             |                                                                 
-|             |                                                                 
-|             |                                                                 
-| order event +-------------+                                                   
-|             |             |                                                   
-|             |             |                                                   
-|             |             |                                                   
-+-------------+             |                                                   
-                            v                                                   
-+-------------+      +-------------+      +-------------+                       
-|             |      |             |      |             |                       
-|             |      |             |      |             |                       
-|             |      |             |      |             |                       
-|deposit event+----->|  sequencer  +----->|   trading   |                       
-|             |      |             |      |             |                       
-|             |      |             |      |             |                       
-|             |      |             |      |             |                       
-+-------------+      +-------------+      +------+------+                       
-                            ^                    |                              
-+-------------+             |                    v                              
-|             |             |             +-------------+        +-------------+
-|             |             |             |             |        |             |
-|             |             |             |             |        |             |
-|   transfer  +-------------+             |             |        |             |
-|    event    |                           |    asset    +------->|  asset mq   |
-|             |                           |             |        |             |
-|             |                           |             |        |             |
-+-------------+                           |             |        |             |
-                                          +------+------+        +-------------+
-                                                 |                              
-                                                 v                              
-                                          +-------------+        +-------------+
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |    order    |        |  ordes mq   |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          +------+------+        +-------------+
-                                                 |                              
-                                                 v                              
-                                          +-------------+        +-------------+
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |   matching  |        | matching mq |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          +------+------+        +-------------+
-                                                 |                              
-                                                 v                              
-                                          +-------------+        +-------------+
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |   clearing  |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          |             |        |             |
-                                          +-------------+        +-------------+
-```
+![](https://github.com/superj80820/system-designt/raw/master/exchange-arch.png)
+
+### 參考
+
+* [廖雪峰-设计交易引擎](https://www.liaoxuefeng.com/wiki/1252599548343744/1491662232616993)
+* [gitbitex](https://github.com/gitbitex)
 
 ## urlshortener
 

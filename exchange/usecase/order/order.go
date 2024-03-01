@@ -2,7 +2,6 @@ package order
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -14,32 +13,23 @@ import (
 type orderUseCase struct {
 	assetUseCase domain.UserAssetUseCase
 	orderRepo    domain.OrderRepo
-	tradingRepo  domain.TradingRepo
 
 	baseCurrencyID  int
 	quoteCurrencyID int
 
 	activeOrders  util.GenericSyncMap[int, *domain.OrderEntity]
 	userOrdersMap util.GenericSyncMap[int, *util.GenericSyncMap[int, *domain.OrderEntity]]
-
-	historyClosedOrdersLock     *sync.Mutex
-	historyClosedOrders         []*domain.OrderEntity
-	isHistoryClosedOrdersFullCh chan struct{}
 }
 
 func CreateOrderUseCase(
 	assetUseCase domain.UserAssetUseCase,
-	tradingRepo domain.TradingRepo,
 	orderRepo domain.OrderRepo,
 ) domain.OrderUseCase {
 	o := &orderUseCase{
-		tradingRepo:                 tradingRepo,
-		assetUseCase:                assetUseCase,
-		orderRepo:                   orderRepo,
-		baseCurrencyID:              int(domain.BaseCurrencyType),
-		quoteCurrencyID:             int(domain.QuoteCurrencyType),
-		historyClosedOrdersLock:     new(sync.Mutex),
-		isHistoryClosedOrdersFullCh: make(chan struct{}),
+		assetUseCase:    assetUseCase,
+		orderRepo:       orderRepo,
+		baseCurrencyID:  int(domain.BaseCurrencyType),
+		quoteCurrencyID: int(domain.QuoteCurrencyType),
 	}
 
 	return o

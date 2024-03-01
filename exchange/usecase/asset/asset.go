@@ -9,14 +9,12 @@ import (
 )
 
 type userAsset struct {
-	assetRepo   domain.UserAssetRepo
-	tradingRepo domain.TradingRepo
+	assetRepo domain.UserAssetRepo
 }
 
-func CreateUserAssetUseCase(assetRepo domain.UserAssetRepo, tradingRepo domain.TradingRepo) domain.UserAssetUseCase {
+func CreateUserAssetUseCase(assetRepo domain.UserAssetRepo) domain.UserAssetUseCase {
 	return &userAsset{
-		assetRepo:   assetRepo,
-		tradingRepo: tradingRepo,
+		assetRepo: assetRepo,
 	}
 }
 

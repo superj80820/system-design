@@ -12,7 +12,6 @@ import (
 	"github.com/superj80820/system-design/domain"
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/superj80820/system-design/kit/util"
 )
 
 type sequencerEventDBEntity struct {
@@ -48,18 +47,19 @@ type tradingSequencerRepo struct {
 	pauseCh    chan struct{}
 	continueCh chan struct{}
 
-	sequence  *atomic.Uint64
-	observers util.GenericSyncMap[*func([]*domain.TradingEvent, func() error), func([]*domain.TradingEvent, func() error)] // TODO: test key safe?
+	sequence    *atomic.Uint64
+	isSubscribe *atomic.Bool
 }
 
 func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, orm *ormKit.DB) (domain.SequencerRepo[domain.TradingEvent], error) {
 	var sequence atomic.Uint64
 	t := &tradingSequencerRepo{
-		orm:        orm,
-		sequenceMQ: sequenceMQ,
-		pauseCh:    make(chan struct{}),
-		continueCh: make(chan struct{}),
-		sequence:   &sequence,
+		orm:         orm,
+		sequenceMQ:  sequenceMQ,
+		pauseCh:     make(chan struct{}),
+		continueCh:  make(chan struct{}),
+		sequence:    &sequence,
+		isSubscribe: new(atomic.Bool),
 	}
 
 	maxSequenceID, err := t.GetMaxSequenceID()
@@ -70,28 +70,6 @@ func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, o
 	}
 
 	sequence.Add(maxSequenceID)
-
-	t.sequenceMQ.SubscribeBatchWithManualCommit("global-sequencer", func(messages [][]byte, commitFn func() error) error {
-		select {
-		case <-t.pauseCh:
-			<-t.continueCh
-		default:
-		}
-
-		tradingEvents := make([]*domain.TradingEvent, len(messages))
-		for idx := range messages {
-			var tradingEvent domain.TradingEvent
-			if err := json.Unmarshal(messages[idx], &tradingEvent); err != nil {
-				return errors.Wrap(err, "json unmarshal failed")
-			}
-			tradingEvents[idx] = &tradingEvent
-		}
-		t.observers.Range(func(key *func([]*domain.TradingEvent, func() error), value func([]*domain.TradingEvent, func() error)) bool {
-			value(tradingEvents, commitFn)
-			return true
-		})
-		return nil
-	})
 
 	return t, nil
 }
@@ -157,8 +135,28 @@ func (t *tradingSequencerRepo) Shutdown() {
 	t.sequenceMQ.Shutdown() // TODO
 }
 
-func (t *tradingSequencerRepo) SubscribeTradeSequenceMessages(notify func([]*domain.TradingEvent, func() error)) {
-	t.observers.Store(&notify, notify)
+func (t *tradingSequencerRepo) SubscribeGlobalTradeSequenceMessages(notify func([]*domain.TradingEvent, func() error)) {
+	if !t.isSubscribe.CompareAndSwap(false, true) {
+		return
+	}
+	t.sequenceMQ.SubscribeBatchWithManualCommit("global-sequencer", func(messages [][]byte, commitFn func() error) error {
+		select {
+		case <-t.pauseCh:
+			<-t.continueCh
+		default:
+		}
+
+		tradingEvents := make([]*domain.TradingEvent, len(messages))
+		for idx := range messages {
+			var tradingEvent domain.TradingEvent
+			if err := json.Unmarshal(messages[idx], &tradingEvent); err != nil {
+				return errors.Wrap(err, "json unmarshal failed")
+			}
+			tradingEvents[idx] = &tradingEvent
+		}
+		notify(tradingEvents, commitFn)
+		return nil
+	})
 }
 
 func (t *tradingSequencerRepo) GenerateNextSequenceID() uint64 {
