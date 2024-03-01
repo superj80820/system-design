@@ -29,7 +29,7 @@ type CandleRepo interface {
 	GetBar(ctx context.Context, timeType CandleTimeType, start, stop string, sortOrderBy SortOrderByEnum) ([]string, error)
 	SaveBar(candleBar *CandleBar) error
 
-	ProduceCandleMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ProduceCandleMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
 }
 

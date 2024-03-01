@@ -38,20 +38,30 @@ type UserAssetRepo interface {
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
-	ProduceUserAsset(ctx context.Context, userID, assetID int, userAsset *UserAsset)
+	ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *UserAsset) error)
 }
 
 type UserAssetUseCase interface {
-	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) error
+	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 
-	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) error
-	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error
-	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) error
+	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)
 
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error
+}
+
+type TransferResult struct {
+	TransferUserAssets []*TransferUserAsset
+}
+
+type TransferUserAsset struct {
+	UserID    int
+	AssetID   int
+	UserAsset *UserAsset
 }

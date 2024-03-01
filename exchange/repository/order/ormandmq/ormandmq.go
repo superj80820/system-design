@@ -67,13 +67,14 @@ func (o *orderRepo) SaveHistoryOrdersWithIgnore(orders []*domain.OrderEntity) er
 }
 
 type mqMessage struct {
-	*domain.OrderEntity
+	SequenceID int
+	Orders     []*domain.OrderEntity
 }
 
 var _ mq.Message = (*mqMessage)(nil)
 
 func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.OrderEntity.ID)
+	return strconv.Itoa(m.SequenceID)
 }
 
 func (m *mqMessage) Marshal() ([]byte, error) {
@@ -84,29 +85,47 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (o *orderRepo) ProduceOrderMQ(ctx context.Context, order *domain.OrderEntity) error {
-	if err := o.orderMQTopic.Produce(ctx, &mqMessage{
-		OrderEntity: order,
-	}); err != nil {
-		return errors.Wrap(err, "produce failed")
+func (o *orderRepo) ProduceOrderMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	sequenceID := tradingResult.SequenceID
+
+	switch tradingResult.TradingResultStatus {
+	case domain.TradingResultStatusCreate:
+		orders := []*domain.OrderEntity{
+			tradingResult.MatchResult.TakerOrder,
+		}
+		for _, order := range tradingResult.MatchResult.MatchDetails {
+			orders = append(orders, order.MakerOrder)
+		}
+		if err := o.orderMQTopic.Produce(ctx, &mqMessage{
+			SequenceID: sequenceID,
+			Orders:     orders,
+		}); err != nil {
+			return errors.Wrap(err, "produce failed")
+		}
+	case domain.TradingResultStatusCancel:
+		if err := o.orderMQTopic.Produce(ctx, &mqMessage{
+			SequenceID: sequenceID,
+			Orders:     []*domain.OrderEntity{tradingResult.CancelOrderResult},
+		}); err != nil {
+			return errors.Wrap(err, "produce failed")
+		}
 	}
+
 	return nil
 }
 
-func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify func(orders []*domain.OrderEntity) error) {
+func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity) error) {
 	o.orderMQTopic.SubscribeBatch(key, func(messages [][]byte) error {
-		orders := make([]*domain.OrderEntity, len(messages))
-		for idx, message := range messages {
+		for _, message := range messages {
 			var mqMessage mqMessage
 			err := json.Unmarshal(message, &mqMessage)
 			if err != nil {
 				return errors.Wrap(err, "unmarshal failed")
 			}
-			orders[idx] = mqMessage.OrderEntity
-		}
 
-		if err := notify(orders); err != nil {
-			return errors.Wrap(err, "notify failed")
+			if err := notify(mqMessage.SequenceID, mqMessage.Orders); err != nil {
+				return errors.Wrap(err, "notify failed")
+			}
 		}
 		return nil
 	})

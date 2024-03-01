@@ -148,14 +148,14 @@ func (q *quotationRepo) SaveTickStrings(ctx context.Context, sequenceID int, tic
 }
 
 type mqMessage struct {
-	sequenceID int // TODO: maybe no need?
-	ticks      []*domain.TickEntity
+	SequenceID int // TODO: maybe no need?
+	Ticks      []*domain.TickEntity
 }
 
 var _ mq.Message = (*mqMessage)(nil)
 
 func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.sequenceID)
+	return strconv.Itoa(m.SequenceID)
 }
 
 func (m *mqMessage) Marshal() ([]byte, error) {
@@ -166,22 +166,26 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (q *quotationRepo) ProduceTicksMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
-	ticks := make([]*domain.TickEntity, len(matchResult.MatchDetails))
-	for _, matchDetail := range matchResult.MatchDetails {
-		ticks = append(ticks, &domain.TickEntity{
-			SequenceID:     matchResult.SequenceID,
+func (q *quotationRepo) ProduceTicksMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+		return nil
+	}
+
+	ticks := make([]*domain.TickEntity, len(tradingResult.MatchResult.MatchDetails))
+	for idx, matchDetail := range tradingResult.MatchResult.MatchDetails {
+		ticks[idx] = &domain.TickEntity{
+			SequenceID:     tradingResult.SequenceID,
 			TakerOrderID:   matchDetail.TakerOrder.ID,
 			MakerOrderID:   matchDetail.MakerOrder.ID,
 			Price:          matchDetail.Price,
 			Quantity:       matchDetail.Quantity,
 			TakerDirection: matchDetail.TakerOrder.Direction,
-			CreatedAt:      matchResult.CreatedAt,
-		})
+			CreatedAt:      tradingResult.MatchResult.CreatedAt,
+		}
 	}
 	if err := q.tickMQTopic.Produce(ctx, &mqMessage{
-		sequenceID: matchResult.SequenceID,
-		ticks:      ticks,
+		SequenceID: tradingResult.SequenceID,
+		Ticks:      ticks,
 	}); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
@@ -195,7 +199,7 @@ func (q *quotationRepo) ConsumeTicksMQ(ctx context.Context, key string, notify f
 		if err != nil {
 			return errors.Wrap(err, "unmarshal failed")
 		}
-		if err := notify(mqMessage.sequenceID, mqMessage.ticks); err != nil {
+		if err := notify(mqMessage.SequenceID, mqMessage.Ticks); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil

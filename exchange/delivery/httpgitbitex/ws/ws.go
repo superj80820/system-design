@@ -11,7 +11,6 @@ import (
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/core/endpoint"
 	httpKit "github.com/superj80820/system-design/kit/http"
-	wsKit "github.com/superj80820/system-design/kit/http/websocket"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -144,8 +143,6 @@ type tradingPongNotify struct {
 	Type string `json:"type"`
 }
 
-var DecodeStreamExchangeRequest = wsKit.JsonDecodeRequest[domain.TradingNotifyRequest]
-
 func MakeExchangeEndpoint(tradingUseCase domain.TradingUseCase, authUseCase domain.AuthUseCase) endpoint.BiStream[domain.TradingNotifyRequest, domain.TradingNotifyResponse] {
 	return func(ctx context.Context, s endpoint.Stream[domain.TradingNotifyRequest, domain.TradingNotifyResponse]) error {
 		userIDInt64, err := authUseCase.Verify(httpKit.GetToken(ctx))
@@ -161,6 +158,20 @@ func MakeExchangeEndpoint(tradingUseCase domain.TradingUseCase, authUseCase doma
 	}
 }
 
+var DecodeStreamExchangeRequest = func(ctx context.Context, messageType endpoint.MessageType, data []byte) (domain.TradingNotifyRequest, error) {
+	var req domain.TradingNotifyRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		var noop domain.TradingNotifyRequest
+		return noop, errors.Wrap(err, "json unmarshal failed")
+	}
+	for idx := range req.Channels {
+		if req.Channels[idx] == "funds" {
+			req.Channels[idx] = string(domain.AssetsExchangeRequestType)
+		}
+	}
+	return req, nil
+}
+
 func EncodeStreamExchangeResponse(ctx context.Context, resp domain.TradingNotifyResponse) ([]byte, endpoint.MessageType, error) {
 	var response any
 	switch resp.Type {
@@ -169,7 +180,7 @@ func EncodeStreamExchangeResponse(ctx context.Context, resp domain.TradingNotify
 			Available:    resp.UserAsset.Available.String(),
 			CurrencyCode: resp.UserAsset.CurrencyName,
 			Hold:         resp.UserAsset.Frozen.String(),
-			Type:         string(domain.AssetsExchangeRequestType),
+			Type:         "funds",
 			UserID:       strconv.Itoa(resp.UserAsset.UserID),
 		}
 	case domain.TickerExchangeResponseType:

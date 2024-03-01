@@ -73,10 +73,14 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (m *matchingRepo) ProduceMatchOrderMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
-	for _, matchDetail := range matchResult.MatchDetails {
+func (m *matchingRepo) ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+		return nil
+	}
+
+	for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
 		takerOrderDetail := &domain.MatchOrderDetail{
-			SequenceID:     matchResult.SequenceID, // TODO: do not use taker sequence?
+			SequenceID:     tradingResult.SequenceID, // TODO: do not use taker sequence?
 			OrderID:        matchDetail.TakerOrder.ID,
 			CounterOrderID: matchDetail.MakerOrder.ID,
 			UserID:         matchDetail.TakerOrder.UserID,
@@ -85,10 +89,10 @@ func (m *matchingRepo) ProduceMatchOrderMQByMatchResult(ctx context.Context, mat
 			Price:          matchDetail.Price,
 			Quantity:       matchDetail.Quantity,
 			Type:           domain.MatchTypeTaker,
-			CreatedAt:      matchResult.CreatedAt,
+			CreatedAt:      tradingResult.MatchResult.CreatedAt,
 		}
 		makerOrderDetail := &domain.MatchOrderDetail{
-			SequenceID:     matchResult.SequenceID, // TODO: do not use maker sequence?
+			SequenceID:     tradingResult.SequenceID, // TODO: do not use maker sequence?
 			OrderID:        matchDetail.MakerOrder.ID,
 			CounterOrderID: matchDetail.TakerOrder.ID,
 			UserID:         matchDetail.MakerOrder.UserID,
@@ -97,7 +101,7 @@ func (m *matchingRepo) ProduceMatchOrderMQByMatchResult(ctx context.Context, mat
 			Price:          matchDetail.Price,
 			Quantity:       matchDetail.Quantity,
 			Type:           domain.MatchTypeMaker,
-			CreatedAt:      matchResult.CreatedAt,
+			CreatedAt:      tradingResult.MatchResult.CreatedAt,
 		}
 
 		if err := m.matchingMQTopic.Produce(ctx, &mqMessage{

@@ -78,9 +78,6 @@ type TradingRepo interface {
 	SubscribeTradeEvent(key string, notify func(*TradingEvent))
 	SendTradeEvent(context.Context, []*TradingEvent)
 
-	SubscribeTradingResult(key string, notify func(*TradingResult))
-	SendTradingResult(context.Context, *TradingResult) error
-
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*UserAsset, ordersData []*OrderEntity, matchesData *MatchData) error
 
@@ -106,17 +103,20 @@ type TradingSnapshot struct { // TODO: minify
 }
 
 type TradingResult struct {
+	SequenceID          int
 	TradingResultStatus TradingResultStatus
 	TradingEvent        *TradingEvent
 	MatchResult         *MatchResult
+	CancelOrderResult   *OrderEntity
+	TransferResults     []*TransferResult
 }
 
 type SyncTradingUseCase interface {
-	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, error)
-	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) error
-	Transfer(ctx context.Context, tradingEvent *TradingEvent) error
+	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, []*TransferResult, error)
+	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) (*OrderEntity, *TransferResult, error)
+	Transfer(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
 
-	Deposit(ctx context.Context, tradingEvent *TradingEvent) error
+	Deposit(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
 
 	GetSequenceID() int
 	RecoverBySnapshot(*TradingSnapshot) error

@@ -104,8 +104,8 @@
 * 不同層依照domain interface進行DIP
 * 對底層進行抽象，可輕易LSP
   * repository方面: repository使用mq時，可採用`kit/mq/kafka`或`kit/mq/memory`，以應付不同場景或減低測試成本
-  * usecase方面: usecase使用repository依照domain interface使用，如果要`memory`替換成`mysql`，只需實作出符合interface的repository
-  * delivery方面: delivery使用usecase依照domain interface使用，如果要`gin`替換成`go-kit` server，不會修改到業務邏輯
+  * usecase方面: usecase使用repository依照domain interface操作，如果要`memory`替換成`mysql`，只需實作出符合interface的repository
+  * delivery方面: delivery使用usecase依照domain interface操作，如果要`gin`替換成`go-kit` server，不會修改到業務邏輯
 * 切出每個domain的邊界，可先以monolithic部署，如果未來有horizontal scaling需求，再以domain來deliver給不同microservice，避免一開始就使用microservice過度設計
 * 高reuse，application可以從組合不同domain，來完成產品需求，例如`app/exchange-gitbitex`是組合`auth`與`exchange`domain
 * monorepo，所有applications的底層使用`kit`，更新方便，如果套件需要版本控制也可用`git tag`處理
@@ -162,6 +162,95 @@
 ### 系統架構
 
 ![](https://github.com/superj80820/system-design/raw/master/exchange-arch.png)
+
+撮合系統主要由Sequence(定序模組)、Asset(資產模組)、Order(訂單模組)、Matching(撮合模組)、Clearing(清算模組)組成。
+
+由於需要快速計算撮合內容，計算都會直接在memory完成，過程中不會persistent data，但如果撮合系統崩潰，memory資料都會遺失，所以定序模組需將訂單event都儲存好，再進入撮合系統，如此一來，如果系統崩潰也可以靠已儲存的event來recover撮合系統。
+
+### Sequence 定序模組
+
+如何快速儲存event是影響系統寫入速度的關鍵，kafka是可考慮的選項之一。
+
+kafka為append-only logs，不需像RDBMS在需查找與更新索引會增加磁碟I/O操作，並且使用zero-copy快速寫入磁碟來persistent。
+
+create order API只需將snowflake的`orderID`、`referenceID`(全局參考ID)等metadata帶入event，並傳送給kafka sequence topic，即完成了創建訂單的事項，可回傳`200 OK`給客戶端。
+
+```go
+func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) (*domain.TradingEvent, error) {
+	referenceID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+	orderID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+
+	tradingEvent := &domain.TradingEvent{
+		ReferenceID: referenceID,
+		EventType:   domain.TradingEventCreateOrderType,
+		OrderRequestEvent: &domain.OrderRequestEvent{
+			UserID:    userID,
+			OrderID:   orderID,
+			Direction: direction,
+			Price:     price,
+			Quantity:  quantity,
+		},
+	}
+
+	if err := t.sequencerRepo.SendTradeSequenceMessages(ctx, tradingEvent); err != nil {
+		return nil, errors.Wrap(err, "send trade sequence messages failed")
+	}
+
+	return tradingEvent, nil
+}
+```
+
+#### Explicit Commit
+
+kafka sequence topic的consume到event後，需為event定序，將一批已經定序events的透過`sequencerRepo.SaveEvents()`儲存，儲存過程中有可能會有失敗，如失敗就不對kafka進行commit，下次consume會消費到同批events重試，直到成功在commit。
+
+如果是`sequencerRepo.SaveEvents()`儲存成功，但commit失敗，下次consume也會消費到同批events，這時需ignore掉已儲存的events，只儲存新的events，在用最新的event進行commit。
+
+```go
+t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
+  sequencerEvents := make([]*domain.SequencerEvent, len(tradingEvents))
+  tradingEventsClone := make([]*domain.TradingEvent, len(tradingEvents))
+  for idx := range tradingEvents {
+    sequencerEvent, tradingEvent, err := t.sequenceMessage(tradingEvents[idx])
+    if err != nil {
+      setErrAndDone(errors.Wrap(err, "sequence message failed"))
+      return
+    }
+    sequencerEvents[idx] = sequencerEvent
+    tradingEventsClone[idx] = tradingEvent
+  }
+
+  err := t.sequencerRepo.SaveEvents(sequencerEvents)
+  if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+    // if duplicate, filter events then retry
+    // code in https://github.com/superj80820/system-design/blob/7342610e010c4fcf15e1b4215007ec7666a1e58f/exchange/usecase/trading/trading.go#L229-L264
+    return
+  } else if err != nil {
+    panic(errors.Wrap(err, "save event failed"))
+  }
+
+  if err := commitFn(); err != nil {
+    setErrAndDone(errors.Wrap(err, "commit latest message failed"))
+    return
+  }
+
+  t.tradingRepo.SendTradeEvent(ctx, tradingEventsClone)
+})
+```
+
+### Asset 資產模組
+
+
+
+### Order 訂單模組
+### Matching 撮合模組
+### Clearing 清算模組
 
 ### 運行
 

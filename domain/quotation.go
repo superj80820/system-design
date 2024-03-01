@@ -11,7 +11,7 @@ type QuotationRepo interface {
 	GetTickStrings(ctx context.Context, start int64, stop int64) ([]string, error)
 	SaveTickStrings(ctx context.Context, sequenceID int, ticks []*TickEntity) error
 
-	ProduceTicksMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ProduceTicksMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeTicksMQ(ctx context.Context, key string, notify func(sequenceID int, ticks []*TickEntity) error)
 }
 

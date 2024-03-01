@@ -20,7 +20,7 @@ type MatchingRepo interface {
 	ProduceOrderBook(ctx context.Context, orderBook *OrderBookEntity) error
 	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookEntity) error)
 
-	ProduceMatchOrderMQByMatchResult(ctx context.Context, matchResult *MatchResult) error
+	ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
 
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error

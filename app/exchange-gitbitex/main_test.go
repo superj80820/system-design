@@ -151,10 +151,10 @@ func testSetupFn(t assert.TestingT) *testSetup {
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?
-	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo, tradingRepo)
+	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
-	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, tradingRepo, orderRepo)
+	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
 	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?

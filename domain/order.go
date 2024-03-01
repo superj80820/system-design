@@ -125,7 +125,7 @@ type OrderEntity struct {
 }
 
 type OrderUseCase interface {
-	CreateOrder(ctx context.Context, sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, error)
+	CreateOrder(ctx context.Context, sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, *TransferResult, error)
 	RemoveOrder(ctx context.Context, orderID int) error
 	GetOrder(orderID int) (*OrderEntity, error)
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
@@ -141,6 +141,6 @@ type OrderRepo interface {
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	SaveHistoryOrdersWithIgnore([]*OrderEntity) error
 
-	ProduceOrderMQ(ctx context.Context, order *OrderEntity) error
-	ConsumeOrderMQBatch(ctx context.Context, key string, notify func(order []*OrderEntity) error)
+	ProduceOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
+	ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, order []*OrderEntity) error)
 }

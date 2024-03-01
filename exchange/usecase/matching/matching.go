@@ -190,9 +190,6 @@ func (m *matchingUseCase) processOrder(ctx context.Context, takerOrder *order, m
 		anotherBook.add(takerOrder)
 	}
 
-	m.quotationRepo.ProduceTicksMQByMatchResult(ctx, &matchResult.MatchResult)
-	m.matchingRepo.ProduceMatchOrderMQByMatchResult(ctx, &matchResult.MatchResult)
-	m.candleRepo.ProduceCandleMQByMatchResult(ctx, &matchResult.MatchResult)
 	m.isOrderBookChanged.Store(true)
 
 	return matchResult, nil

@@ -108,12 +108,17 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (a *assetRepo) ProduceUserAsset(ctx context.Context, userID int, assetID int, userAsset *domain.UserAsset) { // TODO: maybe save to db?
-	a.assetMQTopic.Produce(ctx, &mqMessage{
-		UserID:    userID,
-		AssetID:   assetID,
-		UserAsset: userAsset,
-	})
+func (a *assetRepo) ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	for _, transferResults := range tradingResult.TransferResults {
+		for _, transferResult := range transferResults.TransferUserAssets {
+			a.assetMQTopic.Produce(ctx, &mqMessage{
+				UserID:    transferResult.UserID,
+				AssetID:   transferResult.AssetID,
+				UserAsset: transferResult.UserAsset,
+			})
+		}
+	}
+	return nil
 }
 
 func (a *assetRepo) ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *domain.UserAsset) error) { // TODO: maybe need collect

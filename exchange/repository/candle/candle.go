@@ -261,9 +261,13 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (c *candleRepo) ProduceCandleMQByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
+func (c *candleRepo) ProduceCandleMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+		return nil
+	}
+
 	if err := c.candleMQTopic.Produce(ctx, &mqMessage{
-		MatchResult: matchResult,
+		MatchResult: tradingResult.MatchResult,
 	}); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}

@@ -50,12 +50,12 @@ func (t *syncTradingUseCase) checkEventSequence(tradingEvent *domain.TradingEven
 	return nil
 }
 
-func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, error) {
+func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, []*domain.TransferResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return nil, errors.Wrap(err, "check event sequence failed")
+		return nil, nil, errors.Wrap(err, "check event sequence failed")
 	}
 
-	order, err := t.orderUseCase.CreateOrder(
+	order, transferResult, err := t.orderUseCase.CreateOrder(
 		ctx,
 		tradingEvent.SequenceID,
 		tradingEvent.OrderRequestEvent.OrderID,
@@ -66,75 +66,82 @@ func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *doma
 		tradingEvent.CreatedAt,
 	)
 	if err != nil {
-		return nil, errors.Wrap(err, "create order failed")
+		return nil, nil, errors.Wrap(err, "create order failed")
 	}
 	matchResult, err := t.matchingUseCase.NewOrder(ctx, order)
 	if err != nil {
-		return nil, errors.Wrap(err, "matching order failed")
+		return nil, nil, errors.Wrap(err, "matching order failed")
 	}
-	if err := t.clearingUseCase.ClearMatchResult(ctx, matchResult); err != nil {
-		return nil, errors.Wrap(err, "clear match order failed")
+	transferResults, err := t.clearingUseCase.ClearMatchResult(ctx, matchResult)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "clear match order failed")
 	}
 
-	return matchResult, nil
+	if len(transferResults) > 0 {
+		return matchResult, transferResults, nil
+	}
+	return matchResult, []*domain.TransferResult{transferResult}, nil
 }
 
-func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.OrderEntity, *domain.TransferResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return errors.Wrap(err, "check event sequence failed")
+		return nil, nil, errors.Wrap(err, "check event sequence failed")
 	}
 
 	order, err := t.orderUseCase.GetOrder(tradingEvent.OrderCancelEvent.OrderId)
 	if err != nil {
-		return errors.Wrap(err, fmt.Sprintf("get order failed, order id: %d", tradingEvent.OrderCancelEvent.OrderId))
+		return nil, nil, errors.Wrap(err, fmt.Sprintf("get order failed, order id: %d", tradingEvent.OrderCancelEvent.OrderId))
 	}
 	if order.UserID != tradingEvent.OrderCancelEvent.UserID {
-		return errors.New("order does not belong to this user")
+		return nil, nil, errors.New("order does not belong to this user")
 	}
 	if err := t.matchingUseCase.CancelOrder(tradingEvent.CreatedAt, order); err != nil {
-		return errors.Wrap(err, "cancel order failed")
+		return nil, nil, errors.Wrap(err, "cancel order failed")
 	}
-	if err := t.clearingUseCase.ClearCancelOrder(ctx, order); err != nil {
-		return errors.Wrap(err, "clear cancel order failed")
+	transferResult, err := t.clearingUseCase.ClearCancelOrder(ctx, order)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "clear cancel order failed")
 	}
 
-	return nil
+	return order, transferResult, nil
 }
 
-func (t *syncTradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+func (t *syncTradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.TransferResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
-		return errors.Wrap(err, "check event sequence failed")
+		return nil, errors.Wrap(err, "check event sequence failed")
 	}
 
-	if err := t.userAssetUseCase.Transfer(
+	transferResult, err := t.userAssetUseCase.Transfer(
 		ctx,
 		domain.AssetTransferAvailableToAvailable,
 		tradingEvent.TransferEvent.FromUserID,
 		tradingEvent.TransferEvent.ToUserID,
 		tradingEvent.TransferEvent.AssetID,
 		tradingEvent.TransferEvent.Amount,
-	); err != nil {
-		return errors.Wrap(err, "transfer error")
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "transfer error")
 	}
 
-	return nil
+	return transferResult, nil
 }
 
-func (s *syncTradingUseCase) Deposit(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+func (s *syncTradingUseCase) Deposit(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.TransferResult, error) {
 	if err := s.checkEventSequence(tradingEvent); err != nil {
-		return errors.Wrap(err, "check event sequence failed")
+		return nil, errors.Wrap(err, "check event sequence failed")
 	}
 
-	if err := s.userAssetUseCase.LiabilityUserTransfer(
+	transferResult, err := s.userAssetUseCase.LiabilityUserTransfer(
 		ctx,
 		tradingEvent.DepositEvent.ToUserID,
 		tradingEvent.DepositEvent.AssetID,
 		tradingEvent.DepositEvent.Amount,
-	); err != nil {
-		return errors.Wrap(err, "liability user transfer failed")
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "liability user transfer failed")
 	}
 
-	return nil
+	return transferResult, nil
 }
 
 func (s *syncTradingUseCase) GetSequenceID() int {

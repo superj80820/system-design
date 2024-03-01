@@ -80,26 +80,6 @@ func CreateTradingRepo(
 	}
 }
 
-func (t *tradingRepo) SendTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	if err := t.tradingResultMQTopic.Produce(ctx, &tradingResultStruct{
-		TradingResult: tradingResult,
-	}); err != nil {
-		return errors.Wrap(err, "produce trading result failed")
-	}
-	return nil
-}
-
-func (t *tradingRepo) SubscribeTradingResult(key string, notify func(*domain.TradingResult)) {
-	t.tradingResultMQTopic.Subscribe(key, func(message []byte) error {
-		var tradingResult domain.TradingResult
-		if err := json.Unmarshal(message, &tradingResult); err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		notify(&tradingResult)
-		return nil
-	})
-}
-
 func (t *tradingRepo) SendTradeEvent(ctx context.Context, tradingEvents []*domain.TradingEvent) {
 	for _, tradingEvent := range tradingEvents {
 		t.tradingEventMQTopic.Produce(ctx, &tradingEventStruct{

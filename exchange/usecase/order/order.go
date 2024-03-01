@@ -35,18 +35,23 @@ func CreateOrderUseCase(
 	return o
 }
 
-func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID int, userID int, direction domain.DirectionEnum, price decimal.Decimal, quantity decimal.Decimal, ts time.Time) (*domain.OrderEntity, error) {
+func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID int, userID int, direction domain.DirectionEnum, price decimal.Decimal, quantity decimal.Decimal, ts time.Time) (*domain.OrderEntity, *domain.TransferResult, error) {
+	var err error
+	transferResult := new(domain.TransferResult)
+
 	switch direction {
 	case domain.DirectionSell:
-		if err := o.assetUseCase.Freeze(ctx, userID, o.baseCurrencyID, quantity); err != nil {
-			return nil, errors.Wrap(err, "freeze base currency failed")
+		transferResult, err = o.assetUseCase.Freeze(ctx, userID, o.baseCurrencyID, quantity)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "freeze base currency failed")
 		}
 	case domain.DirectionBuy:
-		if err := o.assetUseCase.Freeze(ctx, userID, o.quoteCurrencyID, price.Mul(quantity)); err != nil {
-			return nil, errors.Wrap(err, "freeze base currency failed")
+		transferResult, err = o.assetUseCase.Freeze(ctx, userID, o.quoteCurrencyID, price.Mul(quantity))
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "freeze base currency failed")
 		}
 	default:
-		return nil, errors.New("unknown direction")
+		return nil, nil, errors.New("unknown direction")
 	}
 
 	order := domain.OrderEntity{
@@ -69,9 +74,7 @@ func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID 
 		userOrders.Store(orderID, &order)
 	}
 
-	o.orderRepo.ProduceOrderMQ(ctx, &order)
-
-	return &order, nil
+	return &order, transferResult, nil
 }
 
 func (o *orderUseCase) GetOrder(orderID int) (*domain.OrderEntity, error) {
@@ -110,13 +113,12 @@ func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
 		return errors.New("order not found in user orders")
 	}
 
-	o.orderRepo.ProduceOrderMQ(ctx, removedOrder)
-
 	return nil
 }
 
 func (o *orderUseCase) ConsumeOrderResultToSave(ctx context.Context, key string) {
-	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(orders []*domain.OrderEntity) error {
+	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(sequenceID int, orders []*domain.OrderEntity) error {
+		// TODO: york 冪等性
 		var saveOrders []*domain.OrderEntity
 		for _, order := range orders {
 			if order.Status.IsFinalStatus() {
