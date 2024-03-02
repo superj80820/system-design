@@ -2,12 +2,12 @@ package order
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
-	"github.com/superj80820/system-design/kit/util"
 )
 
 type orderUseCase struct {
@@ -17,8 +17,9 @@ type orderUseCase struct {
 	baseCurrencyID  int
 	quoteCurrencyID int
 
-	activeOrders  util.GenericSyncMap[int, *domain.OrderEntity]
-	userOrdersMap util.GenericSyncMap[int, *util.GenericSyncMap[int, *domain.OrderEntity]]
+	lock          *sync.RWMutex
+	activeOrders  map[int]*domain.OrderEntity
+	userOrdersMap map[int]map[int]*domain.OrderEntity
 }
 
 func CreateOrderUseCase(
@@ -30,6 +31,7 @@ func CreateOrderUseCase(
 		orderRepo:       orderRepo,
 		baseCurrencyID:  int(domain.BaseCurrencyType),
 		quoteCurrencyID: int(domain.QuoteCurrencyType),
+		lock:            new(sync.RWMutex),
 	}
 
 	return o
@@ -67,51 +69,62 @@ func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID 
 		UpdatedAt:        ts,
 	}
 
-	o.activeOrders.Store(orderID, &order) // TODO: test performance
-	var userOrders util.GenericSyncMap[int, *domain.OrderEntity]
-	userOrders.Store(orderID, &order)
-	if userOrders, loaded := o.userOrdersMap.LoadOrStore(userID, &userOrders); loaded {
-		userOrders.Store(orderID, &order)
+	o.lock.Lock()
+	o.activeOrders[orderID] = &order
+	if _, ok := o.userOrdersMap[userID]; !ok {
+		o.userOrdersMap[userID] = make(map[int]*domain.OrderEntity)
 	}
+	o.userOrdersMap[userID][orderID] = &order
+	o.lock.Unlock()
 
 	return &order, transferResult, nil
 }
 
 func (o *orderUseCase) GetOrder(orderID int) (*domain.OrderEntity, error) {
-	order, ok := o.activeOrders.Load(orderID)
+	o.lock.RLock()
+	defer o.lock.RUnlock()
+
+	order, ok := o.activeOrders[orderID]
 	if !ok {
-		return nil, domain.ErrNoOrder
+		return nil, errors.Wrap(domain.ErrNoOrder, "not found order")
 	}
-	return order, nil
+	return cloneOrder(order), nil
 }
 
-// TODO: is clone logic correct?
 func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, error) {
-	userOrders, ok := o.userOrdersMap.Load(userId)
+	o.lock.RLock()
+	defer o.lock.RUnlock()
+
+	userOrders, ok := o.userOrdersMap[userId]
 	if !ok {
 		return nil, errors.New("get user orders failed")
 	}
-	userOrdersClone := make(map[int]*domain.OrderEntity)
-	userOrders.Range(func(key int, value *domain.OrderEntity) bool {
-		userOrdersClone[key] = value
-		return true
-	})
+	userOrdersClone := make(map[int]*domain.OrderEntity, len(userOrders))
+	for orderID, order := range userOrders {
+		userOrdersClone[orderID] = cloneOrder(order)
+	}
 	return userOrdersClone, nil
 }
 
 func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
-	removedOrder, loaded := o.activeOrders.LoadAndDelete(orderID)
-	if !loaded {
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	removedOrder, ok := o.activeOrders[orderID]
+	if !ok {
 		return errors.New("order not found in active orders")
 	}
-	userOrders, ok := o.userOrdersMap.Load(removedOrder.UserID)
+	delete(o.activeOrders, orderID)
+
+	userOrders, ok := o.userOrdersMap[removedOrder.UserID]
 	if !ok {
 		return errors.New("user orders not found")
 	}
-	_, loaded = userOrders.LoadAndDelete(orderID)
-	if !loaded {
+	_, ok = userOrders[orderID]
+	if !ok {
 		return errors.New("order not found in user orders")
 	}
+	delete(userOrders, orderID)
 
 	return nil
 }
@@ -156,36 +169,44 @@ func (o *orderUseCase) GetHistoryOrders(orderID, maxResults int) ([]*domain.Orde
 }
 
 func (o *orderUseCase) GetOrdersData() ([]*domain.OrderEntity, error) {
-	var cloneOrders []*domain.OrderEntity
-	o.activeOrders.Range(func(orderID int, order *domain.OrderEntity) bool {
-		cloneOrders = append(cloneOrders, &domain.OrderEntity{
-			ID:         order.ID,
-			SequenceID: order.SequenceID,
-			UserID:     order.UserID,
+	o.lock.RLock()
+	defer o.lock.RUnlock()
 
-			Price:     order.Price,
-			Direction: order.Direction,
-			Status:    order.Status,
+	cloneOrders := make([]*domain.OrderEntity, 0, len(o.activeOrders))
+	for _, order := range o.activeOrders {
+		cloneOrders = append(cloneOrders, cloneOrder(order))
+	}
 
-			Quantity:         order.Quantity,
-			UnfilledQuantity: order.UnfilledQuantity,
-
-			CreatedAt: order.CreatedAt,
-			UpdatedAt: order.UpdatedAt,
-		})
-		return true
-	})
 	return cloneOrders, nil
 }
 
 func (o *orderUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
-	for _, order := range tradingSnapshot.Orders { // TODO: test performance
-		o.activeOrders.Store(order.ID, order)
-		var userOrders util.GenericSyncMap[int, *domain.OrderEntity]
-		userOrders.Store(order.ID, order)
-		if userOrders, loaded := o.userOrdersMap.LoadOrStore(order.UserID, &userOrders); loaded {
-			userOrders.Store(order.ID, order)
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	for _, order := range tradingSnapshot.Orders {
+		cloneOrderInstance := cloneOrder(order)
+		o.activeOrders[order.ID] = cloneOrderInstance
+		userOrders, ok := o.userOrdersMap[order.UserID]
+		if !ok {
+			o.userOrdersMap = make(map[int]map[int]*domain.OrderEntity)
 		}
+		userOrders[order.ID] = cloneOrderInstance
 	}
 	return nil
+}
+
+func cloneOrder(order *domain.OrderEntity) *domain.OrderEntity {
+	return &domain.OrderEntity{
+		ID:               order.ID,
+		SequenceID:       order.SequenceID,
+		UserID:           order.UserID,
+		Price:            order.Price,
+		Direction:        order.Direction,
+		Status:           order.Status,
+		Quantity:         order.Quantity,
+		UnfilledQuantity: order.UnfilledQuantity,
+		CreatedAt:        order.CreatedAt,
+		UpdatedAt:        order.UpdatedAt,
+	}
 }

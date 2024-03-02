@@ -177,7 +177,7 @@
 
 由於需要快速計算撮合內容，計算都會直接在memory完成，過程中不會persistent data，但如果撮合系統崩潰，memory資料都會遺失，所以才需定序模組將訂單event都儲存好，再進入撮合系統，如此一來，如果系統崩潰也可以靠已儲存的event來recover撮合系統。
 
-下游服務都須考慮idempotency 冪等性，可透過sequence id來判斷event是否重複或超前，如果重複就拋棄，超前就必須讀取先前的event。
+下游服務都須考慮idempotency冪等性，可透過sequence id來判斷event是否重複或超前，如果重複就拋棄，超前就必須讀取先前的event。
 
 ### Sequence 定序模組
 
@@ -225,6 +225,8 @@ func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, use
 kafka sequence topic的consume到event後，需為event定序，將一批已經定序events的透過`sequencerRepo.SaveEvents()`儲存，儲存過程中有可能會有失敗，如失敗就不對kafka進行commit，下次consume會消費到同批events重試，直到成功在commit。
 
 如果是`sequencerRepo.SaveEvents()`儲存成功，但commit失敗，下次consume也會消費到同批events，這時需ignore掉已儲存的events，只儲存新的events，在用最新的event進行commit。
+
+雖然沒辦法保證每次consume都成功處理，但我們可以確保consume失敗後會重試直到成功再commit。
 
 ```go
 t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
@@ -281,6 +283,7 @@ type UserAsset struct {
 type assetRepo struct {
 	usersAssetsMap map[int]map[int]*domain.UserAsset
 	lock           *sync.RWMutex
+
 	// ...another fields
 }
 ```
@@ -300,16 +303,16 @@ type UserAssetUseCase interface {
 }
 ```
 
-如果liability user id為1，用戶A user id為100，其他用戶在系統已存入10btc與100000usdt。
+如果liability user id為1、用戶A user id為100、btc id為1、usdt id為2，其他用戶在系統已存入10btc與100000usdt。
 
 此時用戶A對系統deposit儲值100000 usdt，並下了1顆btc價格為62000usdt的買單，此時需凍結62000usdt，將資產直接展開成一個二維表顯示如下:
 
 |user id|asset id|available|frozen|
 |---|---|---|---|
-|1|btc|-10|0|
-|1|usdt|-200000|0|
-|100|btc|0|0|
-|100|usdt|38000|62000|
+|1|1|-10|0|
+|1|2|-200000|0|
+|100|1|0|0|
+|100|2|38000|62000|
 |...其他用戶||||
 
 在deposit時會呼叫`LiabilityUserTransfer()`，`assetRepo`呼叫`GetAssetWithInit()`，如果用戶資產存在則返回，不存在則初始化創建，資產模組在需要使用用戶資產時才創建他，不需先預載用戶資料表，也因為如此，在進入撮合系統前的auth非常重要，必須是認證過的用戶才能進入資產模組。
@@ -402,6 +405,172 @@ func (u *userAsset) TransferAvailableToAvailable(ctx context.Context, fromUserID
 ```
 
 ### Order 訂單模組
+
+![](./order.jpg)
+
+活動訂單需由訂單模組管理，可以用hash table以`orderID: order`儲存所有活動訂單，在需要以用戶ID取得相關活動訂單時，可用兩層hash table以`userID: orderID: order`取得訂單。
+
+由於在撮合時也有機會透過API讀取memory的活動訂單，所以須用read-write-lock保護。
+
+```go
+type orderUseCase struct {
+	lock          *sync.RWMutex
+	activeOrders  map[int]*domain.OrderEntity
+	userOrdersMap map[int]map[int]*domain.OrderEntity
+
+  // ...another fields
+}
+```
+
+活動訂單的欄位介紹如下:
+
+```go
+type OrderEntity struct {
+	ID         int // 訂單ID
+	SequenceID int // 訂單由定序模組所定的ID
+	UserID     int // 用戶ID
+
+	Price     decimal.Decimal // 價格
+	Direction DirectionEnum   // 買單還是賣單
+
+	// 狀態，分別是:
+	// 完全成交(Fully Filled)、
+	// 部分成交(Partial Filled)、
+	// 等待成交(Pending)、
+	// 完全取消(Fully Canceled)、
+	// 部分取消(Partial Canceled)
+	Status    OrderStatusEnum 
+
+	Quantity         decimal.Decimal // 數量
+	UnfilledQuantity decimal.Decimal // 未成交數量
+
+	CreatedAt time.Time // 創建時間
+	UpdatedAt time.Time // 更新時間
+}
+```
+
+訂單模組主要的use case有創建訂單`CreateOrder()`、刪除訂單`RemoveOrder()`、取得訂單`GetUserOrders()`，由於在創建時需要凍結資產、刪除時需要解凍資產，所以須引入資產模組`UserAssetUseCase`。
+
+```go
+type OrderUseCase interface {
+	CreateOrder(ctx context.Context, sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, *TransferResult, error)
+	RemoveOrder(ctx context.Context, orderID int) error
+	GetUserOrders(userID int) (map[int]*OrderEntity, error)
+
+  // another functions...
+}
+```
+
+資產模組在此處的命名為`o.assetUseCase`。
+
+在創建訂單時呼叫`CreateOrder()`，需先判斷買賣單凍結用戶資產`o.assetUseCase.Freeze()`，之後創建`order`存入`o.activeOrders`與`o.userOrdersMap`，由於過程中有資產的變化，所以除了`order`以外，也需將`transferResult`回應給下游服務。
+
+```go
+func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID int, userID int, direction domain.DirectionEnum, price decimal.Decimal, quantity decimal.Decimal, ts time.Time) (*domain.OrderEntity, *domain.TransferResult, error) {
+	var err error
+	transferResult := new(domain.TransferResult)
+
+	switch direction {
+	case domain.DirectionSell:
+		transferResult, err = o.assetUseCase.Freeze(ctx, userID, o.baseCurrencyID, quantity)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "freeze base currency failed")
+		}
+	case domain.DirectionBuy:
+		transferResult, err = o.assetUseCase.Freeze(ctx, userID, o.quoteCurrencyID, price.Mul(quantity))
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "freeze base currency failed")
+		}
+	default:
+		return nil, nil, errors.New("unknown direction")
+	}
+
+	order := domain.OrderEntity{
+		ID:               orderID,
+		SequenceID:       sequenceID,
+		UserID:           userID,
+		Direction:        direction,
+		Price:            price,
+		Quantity:         quantity,
+		UnfilledQuantity: quantity,
+		Status:           domain.OrderStatusPending,
+		CreatedAt:        ts,
+		UpdatedAt:        ts,
+	}
+
+	o.lock.Lock()
+	o.activeOrders[orderID] = &order
+	if _, ok := o.userOrdersMap[userID]; !ok {
+		o.userOrdersMap[userID] = make(map[int]*domain.OrderEntity)
+	}
+	o.userOrdersMap[userID][orderID] = &order
+	o.lock.Unlock()
+
+	return &order, transferResult, nil
+}
+```
+
+在撮合訂單完全成交、取消訂單時會呼叫`RemoveOrder()`，`o.activeOrders`刪除訂單，而`o.userOrdersMap`透過訂單的userID查找也刪除訂單。
+
+```go
+func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	removedOrder, ok := o.activeOrders[orderID]
+	if !ok {
+		return errors.New("order not found in active orders")
+	}
+	delete(o.activeOrders, orderID)
+
+	userOrders, ok := o.userOrdersMap[removedOrder.UserID]
+	if !ok {
+		return errors.New("user orders not found")
+	}
+	_, ok = userOrders[orderID]
+	if !ok {
+		return errors.New("order not found in user orders")
+	}
+	delete(userOrders, orderID)
+
+	return nil
+}
+```
+
+API取得訂單會呼叫`GetUserOrders()`，為了避免race-condition，查找到訂單後需將訂單clone再回傳。
+
+```go
+func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, error) {
+	o.lock.RLock()
+	defer o.lock.RUnlock()
+
+	userOrders, ok := o.userOrdersMap[userId]
+	if !ok {
+		return nil, errors.New("get user orders failed")
+	}
+	userOrdersClone := make(map[int]*domain.OrderEntity, len(userOrders))
+	for orderID, order := range userOrders {
+		userOrdersClone[orderID] = cloneOrder(order)
+	}
+	return userOrdersClone, nil
+}
+
+func cloneOrder(order *domain.OrderEntity) *domain.OrderEntity {
+	return &domain.OrderEntity{
+		ID:               order.ID,
+		SequenceID:       order.SequenceID,
+		UserID:           order.UserID,
+		Price:            order.Price,
+		Direction:        order.Direction,
+		Status:           order.Status,
+		Quantity:         order.Quantity,
+		UnfilledQuantity: order.UnfilledQuantity,
+		CreatedAt:        order.CreatedAt,
+		UpdatedAt:        order.UpdatedAt,
+	}
+}
+```
+
 ### Matching 撮合模組
 ### Clearing 清算模組
 

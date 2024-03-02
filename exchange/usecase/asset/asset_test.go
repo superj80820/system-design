@@ -8,7 +8,6 @@ import (
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
-	"github.com/superj80820/system-design/domain"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 )
@@ -38,7 +37,7 @@ func TestAssetUseCase(t *testing.T) {
 					go func() {
 						defer wg.Done()
 
-						userAssetUseCase.Transfer(ctx, domain.AssetTransferAvailableToAvailable, 2, 3, 1, decimal.NewFromInt(1))
+						userAssetUseCase.TransferAvailableToAvailable(ctx, 2, 3, 1, decimal.NewFromInt(1))
 					}()
 				}
 				wg.Add(1500)
@@ -46,7 +45,7 @@ func TestAssetUseCase(t *testing.T) {
 					go func() {
 						defer wg.Done()
 
-						userAssetUseCase.Transfer(ctx, domain.AssetTransferAvailableToAvailable, 3, 2, 1, decimal.NewFromInt(1))
+						userAssetUseCase.TransferAvailableToAvailable(ctx, 3, 2, 1, decimal.NewFromInt(1))
 					}()
 				}
 				wg.Wait()
