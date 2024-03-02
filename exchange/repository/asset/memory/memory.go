@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"sync"
 
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/mq"
-	"github.com/superj80820/system-design/kit/util"
 )
 
 var assetNameToIDMap = map[string]int{
@@ -17,13 +18,16 @@ var assetNameToIDMap = map[string]int{
 }
 
 type assetRepo struct {
-	userAssetsMap util.GenericSyncMap[int, *util.GenericSyncMap[int, *domain.UserAsset]]
-	assetMQTopic  mq.MQTopic
+	usersAssetsMap map[int]map[int]*domain.UserAsset
+	assetMQTopic   mq.MQTopic
+	lock           *sync.RWMutex
 }
 
 func CreateAssetRepo(assetMQTopic mq.MQTopic) domain.UserAssetRepo {
 	return &assetRepo{
-		assetMQTopic: assetMQTopic,
+		assetMQTopic:   assetMQTopic,
+		usersAssetsMap: make(map[int]map[int]*domain.UserAsset),
+		lock:           new(sync.RWMutex),
 	}
 }
 
@@ -34,36 +38,30 @@ func (*assetRepo) GetAssetIDByName(assetName string) (int, error) {
 	return 0, errors.New("not found asset id by name")
 }
 
-func (a *assetRepo) InitAssets(userID int, assetID int) *domain.UserAsset {
-	var userAssets util.GenericSyncMap[int, *domain.UserAsset]
-	val, _ := a.userAssetsMap.LoadOrStore(userID, &userAssets)
-
-	asset := domain.UserAsset{
-		UserID:  userID,
-		AssetID: assetID,
-	}
-	val.Store(assetID, &asset)
-
-	return &asset
-}
-
-// TODO: is best way?
 func (a *assetRepo) GetAssets(userID int) (map[int]*domain.UserAsset, error) {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+
 	userAssetsClone := make(map[int]*domain.UserAsset)
-	if userAssets, ok := a.userAssetsMap.Load(userID); ok {
-		userAssets.Range(func(key int, value *domain.UserAsset) bool {
-			userAssetsClone[key] = value
-			return true
-		})
-	} else {
-		return nil, domain.NotFoundUserAssetsErr
+	if userAssets, ok := a.usersAssetsMap[userID]; ok {
+		for assetID, asset := range userAssets {
+			userAssetsClone[assetID] = &domain.UserAsset{
+				UserID:    asset.UserID,
+				AssetID:   asset.AssetID,
+				Available: asset.Available,
+				Frozen:    asset.Frozen,
+			}
+		}
 	}
 	return userAssetsClone, nil
 }
 
 func (a *assetRepo) GetAsset(userID int, assetID int) (*domain.UserAsset, error) {
-	if userAssets, ok := a.userAssetsMap.Load(userID); ok {
-		if asset, ok := userAssets.Load(assetID); ok {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+
+	if userAssets, ok := a.usersAssetsMap[userID]; ok {
+		if asset, ok := userAssets[assetID]; ok {
 			return asset, nil
 		}
 		return nil, domain.NotFoundUserAssetErr
@@ -71,23 +69,75 @@ func (a *assetRepo) GetAsset(userID int, assetID int) (*domain.UserAsset, error)
 	return nil, domain.NotFoundUserAssetErr
 }
 
+func (a *assetRepo) GetAssetWithInit(userID int, assetID int) (*domain.UserAsset, error) {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	if userAssets, ok := a.usersAssetsMap[userID]; ok {
+		if asset, ok := userAssets[assetID]; ok {
+			return asset, nil
+		}
+	} else {
+		a.usersAssetsMap[userID] = make(map[int]*domain.UserAsset)
+	}
+	asset := &domain.UserAsset{
+		UserID:  userID,
+		AssetID: assetID,
+	}
+	a.usersAssetsMap[userID][assetID] = asset
+	return asset, nil
+}
+
 func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, error) {
+	a.lock.RLock()
+	defer a.lock.RUnlock()
+
 	usersAssetsClone := make(map[int]map[int]*domain.UserAsset)
-	a.userAssetsMap.Range(func(userID int, assetsMap *util.GenericSyncMap[int, *domain.UserAsset]) bool {
+	for userID, userAssets := range a.usersAssetsMap {
 		userAssetsMap := make(map[int]*domain.UserAsset)
-		assetsMap.Range(func(assetID int, asset *domain.UserAsset) bool {
+		for assetID, userAsset := range userAssets {
 			userAssetsMap[assetID] = &domain.UserAsset{
-				UserID:    asset.UserID,
-				AssetID:   asset.AssetID,
-				Available: asset.Available,
-				Frozen:    asset.Frozen,
+				UserID:    userAsset.UserID,
+				AssetID:   userAsset.AssetID,
+				Available: userAsset.Available,
+				Frozen:    userAsset.Frozen,
 			}
-			return true
-		})
+		}
 		usersAssetsClone[userID] = userAssetsMap
-		return true
-	})
+	}
 	return usersAssetsClone, nil
+}
+
+func (a *assetRepo) AddAssetAvailable(userAsset *domain.UserAsset, amount decimal.Decimal) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	userAsset.Available = userAsset.Available.Add(amount)
+	return nil
+}
+
+func (a *assetRepo) AddAssetFrozen(userAsset *domain.UserAsset, amount decimal.Decimal) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	userAsset.Frozen = userAsset.Frozen.Add(amount)
+	return nil
+}
+
+func (a *assetRepo) SubAssetAvailable(userAsset *domain.UserAsset, amount decimal.Decimal) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	userAsset.Available = userAsset.Available.Sub(amount)
+	return nil
+}
+
+func (a *assetRepo) SubAssetFrozen(userAsset *domain.UserAsset, amount decimal.Decimal) error {
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	userAsset.Frozen = userAsset.Frozen.Sub(amount)
+	return nil
 }
 
 type mqMessage struct {
@@ -132,12 +182,17 @@ func (a *assetRepo) ConsumeUserAsset(ctx context.Context, key string, notify fun
 }
 
 func (a *assetRepo) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
-	for userID, assetsMap := range tradingSnapshot.UsersAssets { //TODO: test user id unmarshal correct?
-		var storeAssetsMap util.GenericSyncMap[int, *domain.UserAsset]
-		for assetID, asset := range assetsMap {
-			storeAssetsMap.Store(assetID, asset)
+	a.lock.Lock()
+	defer a.lock.Unlock()
+
+	usersAssetsMap := make(map[int]map[int]*domain.UserAsset)
+	for userID, userAssets := range tradingSnapshot.UsersAssets { //TODO: test user id unmarshal correct?
+		userAssetsMap := make(map[int]*domain.UserAsset)
+		for assetID, asset := range userAssets {
+			userAssetsMap[assetID] = asset
 		}
-		a.userAssetsMap.Store(userID, &storeAssetsMap)
+		usersAssetsMap[userID] = userAssetsMap
 	}
+	a.usersAssetsMap = usersAssetsMap
 	return nil
 }

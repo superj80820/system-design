@@ -14,7 +14,6 @@ const LiabilityUserID = 1
 const (
 	AssetTransferUnknown AssetTransferEnum = iota
 	AssetTransferAvailableToAvailable
-	AssetTransferAvailableToFrozen
 	AssetTransferFrozenToAvailable
 )
 
@@ -35,7 +34,11 @@ type UserAssetRepo interface {
 	GetAssetIDByName(assetName string) (int, error)
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)
-	InitAssets(userID, assetID int) *UserAsset
+	GetAssetWithInit(userID, assetID int) (*UserAsset, error)
+	AddAssetAvailable(userAsset *UserAsset, amount decimal.Decimal) error
+	SubAssetAvailable(userAsset *UserAsset, amount decimal.Decimal) error
+	AddAssetFrozen(userAsset *UserAsset, amount decimal.Decimal) error
+	SubAssetFrozen(userAsset *UserAsset, amount decimal.Decimal) error
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 

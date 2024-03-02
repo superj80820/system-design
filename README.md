@@ -262,7 +262,80 @@ t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domai
 
 ![](./asset.jpg)
 
+用戶資產除了基本的UserID、AssetID、Available(可用資產)，還需Frozen(凍結資產)欄位，以實現用戶下單時把下單資金凍結。
 
+```go
+type UserAsset struct {
+	UserID    int
+	AssetID   int
+	Available decimal.Decimal
+	Frozen    decimal.Decimal
+}
+```
+
+一個交易對會有多個用戶，並且每個用戶都會有多個資產，如果資產都需存在memory當中，可以用兩個hash table來實作asset repository。
+
+```go
+type assetRepo struct {
+	usersAssetsMap map[int]map[int]*domain.UserAsset
+	// ...another fields
+}
+```
+
+用戶資產的use case主要有轉帳`Transfer()`、凍結`Freeze()`、解凍`Unfreeze()`，另外我們還需liability user(負債帳戶)，他代表整個系統實際的資產，也可用來對帳，負債帳戶透過`LiabilityUserTransfer()`將資產從系統轉給用戶。
+
+```go
+type UserAssetUseCase interface {
+	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*TransferResult, error)
+
+	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
+
+  // ..another functions
+}
+```
+
+如果liability user id為1，用戶A user id為100，其他用戶在系統已存入10btc與100000usdt。
+
+此時用戶A對系統deposit儲值100000 usdt，並下了1顆btc價格為62000usdt的買單，此時需凍結62000usdt，將資產直接展開成一個二維表顯示如下:
+
+|user id|asset id|available|frozen|
+|---|---|---|---|
+|1|btc|-10|0|
+|1|usdt|-200000|0|
+|100|btc|0|0|
+|100|usdt|38000|62000|
+|...其他用戶||||
+
+
+
+```go
+func (u *userAsset) LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.New("can not operate less or equal zero amount")
+	}
+
+	transferResult := createTransferResult()
+
+	liabilityUserAsset, err := u.assetRepo.GetAssetWithInit(domain.LiabilityUserID, assetID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get asset with init failed")
+	}
+	toUserAsset, err := u.assetRepo.GetAssetWithInit(toUserID, assetID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get asset with init failed")
+	}
+
+	u.assetRepo.SubAssetAvailable(liabilityUserAsset, amount)
+	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
+
+	transferResult.addUserAsset(liabilityUserAsset)
+	transferResult.addUserAsset(toUserAsset)
+
+	return transferResult.TransferResult, nil
+}
+```
 
 ### Order 訂單模組
 ### Matching 撮合模組

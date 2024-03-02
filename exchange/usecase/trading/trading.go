@@ -128,9 +128,9 @@ func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time
 }
 
 func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
-	var tradingResult domain.TradingResult
-
 	t.tradingRepo.SubscribeTradeEvent(key, func(te *domain.TradingEvent) {
+		var tradingResult domain.TradingResult
+
 		switch te.EventType {
 		case domain.TradingEventCreateOrderType:
 			matchResult, transferResult, err := t.syncTradingUseCase.CreateOrder(ctx, te)
