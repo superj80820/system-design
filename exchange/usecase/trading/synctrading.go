@@ -50,7 +50,7 @@ func (t *syncTradingUseCase) checkEventSequence(tradingEvent *domain.TradingEven
 	return nil
 }
 
-func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, []*domain.TransferResult, error) {
+func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.MatchResult, *domain.TransferResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
 		return nil, nil, errors.Wrap(err, "check event sequence failed")
 	}
@@ -72,15 +72,14 @@ func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *doma
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "matching order failed")
 	}
-	transferResults, err := t.clearingUseCase.ClearMatchResult(ctx, matchResult)
+	clearTransferResult, err := t.clearingUseCase.ClearMatchResult(ctx, matchResult)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "clear match order failed")
 	}
 
-	if len(transferResults) > 0 {
-		return matchResult, transferResults, nil
-	}
-	return matchResult, []*domain.TransferResult{transferResult}, nil
+	transferResult.UserAssets = append(transferResult.UserAssets, clearTransferResult.UserAssets...)
+
+	return matchResult, transferResult, nil
 }
 
 func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.OrderEntity, *domain.TransferResult, error) {

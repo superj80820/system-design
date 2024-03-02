@@ -26,6 +26,7 @@ var (
 
 type UserAsset struct {
 	UserID    int
+	AssetID   int
 	Available decimal.Decimal
 	Frozen    decimal.Decimal
 }
@@ -39,7 +40,7 @@ type UserAssetRepo interface {
 	RecoverBySnapshot(*TradingSnapshot) error
 
 	ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *TradingResult) error
-	ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *UserAsset) error)
+	ConsumeUserAsset(ctx context.Context, key string, notify func(userAsset *UserAsset) error)
 }
 
 type UserAssetUseCase interface {
@@ -57,11 +58,5 @@ type UserAssetUseCase interface {
 }
 
 type TransferResult struct {
-	TransferUserAssets []*TransferUserAsset
-}
-
-type TransferUserAsset struct {
-	UserID    int
-	AssetID   int
-	UserAsset *UserAsset
+	UserAssets []*UserAsset
 }

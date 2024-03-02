@@ -27,8 +27,8 @@ func CreateClearingUseCase(
 	}
 }
 
-func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *domain.MatchResult) ([]*domain.TransferResult, error) {
-	var transferResults []*domain.TransferResult
+func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *domain.MatchResult) (*domain.TransferResult, error) {
+	transferResult := new(domain.TransferResult)
 
 	taker := matchResult.TakerOrder
 	switch matchResult.TakerOrder.Direction {
@@ -37,16 +37,16 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 			maker := matchDetail.MakerOrder
 			matched := matchDetail.Quantity
 
-			transferResult, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.baseCurrencyID, matched)
+			transferResultOne, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.baseCurrencyID, matched)
 			if err != nil {
 				return nil, errors.Wrap(err, "transfer failed")
 			}
-			transferResults = append(transferResults, transferResult)
-			transferResult, err = c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
+			transferResultTwo, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
 			if err != nil {
 				return nil, errors.Wrap(err, "transfer failed")
 			}
-			transferResults = append(transferResults, transferResult)
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultOne.UserAssets...)
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultTwo.UserAssets...)
 			if maker.UnfilledQuantity.IsZero() {
 				if err := c.orderUseCase.RemoveOrder(ctx, maker.ID); err != nil {
 					return nil, errors.Wrap(err, "remove failed")
@@ -65,22 +65,22 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 
 			if taker.Price.Cmp(maker.Price) > 0 {
 				unfreezeQuote := taker.Price.Sub(maker.Price).Mul(matched)
-				transferResult, err := c.userAssetUseCase.Unfreeze(ctx, taker.UserID, c.quoteCurrencyID, unfreezeQuote)
+				transferResultOne, err := c.userAssetUseCase.Unfreeze(ctx, taker.UserID, c.quoteCurrencyID, unfreezeQuote)
 				if err != nil {
 					return nil, errors.Wrap(err, "unfreeze taker failed")
 				}
-				transferResults = append(transferResults, transferResult)
+				transferResult.UserAssets = append(transferResult.UserAssets, transferResultOne.UserAssets...)
 			}
-			transferResult, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
+			transferResultTwo, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, taker.UserID, maker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
 			if err != nil {
 				return nil, errors.Wrap(err, "transfer failed")
 			}
-			transferResults = append(transferResults, transferResult)
-			transferResult, err = c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.baseCurrencyID, matched)
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultTwo.UserAssets...)
+			transferResultThree, err := c.userAssetUseCase.Transfer(ctx, domain.AssetTransferFrozenToAvailable, maker.UserID, taker.UserID, c.baseCurrencyID, matched)
 			if err != nil {
 				return nil, errors.Wrap(err, "transfer failed")
 			}
-			transferResults = append(transferResults, transferResult)
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultThree.UserAssets...)
 			if maker.UnfilledQuantity.IsZero() {
 				if err := c.orderUseCase.RemoveOrder(ctx, maker.ID); err != nil {
 					return nil, errors.Wrap(err, "remove maker order failed, maker order id: "+strconv.Itoa(maker.ID))
@@ -96,7 +96,7 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 		return nil, errors.New("unknown direction")
 	}
 
-	return transferResults, nil
+	return transferResult, nil
 }
 
 func (c *clearingUseCase) ClearCancelOrder(ctx context.Context, order *domain.OrderEntity) (*domain.TransferResult, error) {

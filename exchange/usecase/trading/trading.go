@@ -133,7 +133,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 	t.tradingRepo.SubscribeTradeEvent(key, func(te *domain.TradingEvent) {
 		switch te.EventType {
 		case domain.TradingEventCreateOrderType:
-			matchResult, transferResults, err := t.syncTradingUseCase.CreateOrder(ctx, te)
+			matchResult, transferResult, err := t.syncTradingUseCase.CreateOrder(ctx, te)
 			if errors.Is(err, domain.LessAmountErr) {
 				t.logger.Info(fmt.Sprintf("%+v", err))
 				return
@@ -146,7 +146,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 				TradingResultStatus: domain.TradingResultStatusCreate,
 				TradingEvent:        te,
 				MatchResult:         matchResult,
-				TransferResults:     transferResults,
+				TransferResult:      transferResult,
 			}
 		case domain.TradingEventCancelOrderType:
 			cancelOrder, transferResult, err := t.syncTradingUseCase.CancelOrder(ctx, te)
@@ -165,7 +165,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 				TradingResultStatus: domain.TradingResultStatusCancel,
 				CancelOrderResult:   cancelOrder,
 				TradingEvent:        te,
-				TransferResults:     []*domain.TransferResult{transferResult},
+				TransferResult:      transferResult,
 			}
 		case domain.TradingEventTransferType:
 			transferResult, err := t.syncTradingUseCase.Transfer(ctx, te)
@@ -180,7 +180,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 				SequenceID:          te.SequenceID,
 				TradingResultStatus: domain.TradingResultStatusTransfer,
 				TradingEvent:        te,
-				TransferResults:     []*domain.TransferResult{transferResult},
+				TransferResult:      transferResult,
 			}
 		case domain.TradingEventDepositType:
 			transferResult, err := t.syncTradingUseCase.Deposit(ctx, te)
@@ -192,7 +192,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 				SequenceID:          te.SequenceID,
 				TradingResultStatus: domain.TradingResultStatusDeposit,
 				TradingEvent:        te,
-				TransferResults:     []*domain.TransferResult{transferResult},
+				TransferResult:      transferResult,
 			}
 		default:
 			panic(errors.New("unknown event type"))
@@ -656,12 +656,12 @@ func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream d
 				if isConsumeFounds {
 					continue
 				}
-				t.userAssetRepo.ConsumeUserAsset(ctx, consumeKey, func(notifyUserID, assetID int, userAsset *domain.UserAsset) error {
-					if userID != notifyUserID {
+				t.userAssetRepo.ConsumeUserAsset(ctx, consumeKey, func(userAsset *domain.UserAsset) error {
+					if userID != userAsset.UserID {
 						return nil
 					}
 
-					currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(assetID))
+					currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(userAsset.AssetID))
 					if err != nil {
 						return errors.Wrap(err, "get currency upper name by type failed")
 					}

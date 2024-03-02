@@ -89,15 +89,17 @@ func (u *userAsset) tryTransfer(ctx context.Context, assetTransferType domain.As
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)
 
-		transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-			UserID:    fromUserID,
-			AssetID:   assetID,
-			UserAsset: fromUserAsset,
+		transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+			UserID:    fromUserAsset.UserID,
+			AssetID:   fromUserAsset.AssetID,
+			Available: fromUserAsset.Available,
+			Frozen:    fromUserAsset.Frozen,
 		})
-		transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-			UserID:    toUserID,
-			AssetID:   assetID,
-			UserAsset: toUserAsset,
+		transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+			UserID:    toUserAsset.UserID,
+			AssetID:   toUserAsset.AssetID,
+			Available: toUserAsset.Available,
+			Frozen:    toUserAsset.Frozen,
 		})
 
 		return &transferResult, nil
@@ -108,16 +110,18 @@ func (u *userAsset) tryTransfer(ctx context.Context, assetTransferType domain.As
 		fromUserAsset.Available = fromUserAsset.Available.Sub(amount)
 		toUserAsset.Frozen = toUserAsset.Frozen.Add(amount)
 
-		transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-			UserID:    fromUserID,
-			AssetID:   assetID,
-			UserAsset: fromUserAsset,
+		transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+			UserID:    fromUserAsset.UserID,
+			AssetID:   fromUserAsset.AssetID,
+			Available: fromUserAsset.Available,
+			Frozen:    fromUserAsset.Frozen,
 		})
 		if fromUserID != toUserID { // same user no need produce two times
-			transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-				UserID:    toUserID,
-				AssetID:   assetID,
-				UserAsset: toUserAsset,
+			transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+				UserID:    toUserAsset.UserID,
+				AssetID:   toUserAsset.AssetID,
+				Available: toUserAsset.Available,
+				Frozen:    toUserAsset.Frozen,
 			})
 		}
 
@@ -129,16 +133,18 @@ func (u *userAsset) tryTransfer(ctx context.Context, assetTransferType domain.As
 		fromUserAsset.Frozen = fromUserAsset.Frozen.Sub(amount)
 		toUserAsset.Available = toUserAsset.Available.Add(amount)
 
-		transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-			UserID:    fromUserID,
-			AssetID:   assetID,
-			UserAsset: fromUserAsset,
+		transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+			UserID:    fromUserAsset.UserID,
+			AssetID:   fromUserAsset.AssetID,
+			Available: fromUserAsset.Available,
+			Frozen:    fromUserAsset.Frozen,
 		})
 		if fromUserID != toUserID {
-			transferResult.TransferUserAssets = append(transferResult.TransferUserAssets, &domain.TransferUserAsset{
-				UserID:    toUserID,
-				AssetID:   assetID,
-				UserAsset: toUserAsset,
+			transferResult.UserAssets = append(transferResult.UserAssets, &domain.UserAsset{
+				UserID:    toUserAsset.UserID,
+				AssetID:   toUserAsset.AssetID,
+				Available: toUserAsset.Available,
+				Frozen:    toUserAsset.Frozen,
 			})
 		}
 

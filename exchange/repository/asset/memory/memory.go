@@ -39,7 +39,8 @@ func (a *assetRepo) InitAssets(userID int, assetID int) *domain.UserAsset {
 	val, _ := a.userAssetsMap.LoadOrStore(userID, &userAssets)
 
 	asset := domain.UserAsset{
-		UserID: userID,
+		UserID:  userID,
+		AssetID: assetID,
 	}
 	val.Store(assetID, &asset)
 
@@ -77,6 +78,7 @@ func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, err
 		assetsMap.Range(func(assetID int, asset *domain.UserAsset) bool {
 			userAssetsMap[assetID] = &domain.UserAsset{
 				UserID:    asset.UserID,
+				AssetID:   asset.AssetID,
 				Available: asset.Available,
 				Frozen:    asset.Frozen,
 			}
@@ -89,15 +91,13 @@ func (a *assetRepo) GetUsersAssetsData() (map[int]map[int]*domain.UserAsset, err
 }
 
 type mqMessage struct {
-	UserID    int
-	AssetID   int
 	UserAsset *domain.UserAsset
 }
 
 var _ mq.Message = (*mqMessage)(nil)
 
 func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.UserID)
+	return strconv.Itoa(m.UserAsset.UserID)
 }
 
 func (m *mqMessage) Marshal() ([]byte, error) {
@@ -109,26 +109,22 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 }
 
 func (a *assetRepo) ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	for _, transferResults := range tradingResult.TransferResults {
-		for _, transferResult := range transferResults.TransferUserAssets {
-			a.assetMQTopic.Produce(ctx, &mqMessage{
-				UserID:    transferResult.UserID,
-				AssetID:   transferResult.AssetID,
-				UserAsset: transferResult.UserAsset,
-			})
-		}
+	for _, userAsset := range tradingResult.TransferResult.UserAssets {
+		a.assetMQTopic.Produce(ctx, &mqMessage{
+			UserAsset: userAsset,
+		})
 	}
 	return nil
 }
 
-func (a *assetRepo) ConsumeUserAsset(ctx context.Context, key string, notify func(userID, assetID int, userAsset *domain.UserAsset) error) { // TODO: maybe need collect
+func (a *assetRepo) ConsumeUserAsset(ctx context.Context, key string, notify func(userAsset *domain.UserAsset) error) { // TODO: maybe need collect
 	a.assetMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
 			return errors.Wrap(err, "unmarshal failed")
 		}
-		if err := notify(mqMessage.UserID, mqMessage.AssetID, mqMessage.UserAsset); err != nil {
+		if err := notify(mqMessage.UserAsset); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil

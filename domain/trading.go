@@ -108,11 +108,11 @@ type TradingResult struct {
 	TradingEvent        *TradingEvent
 	MatchResult         *MatchResult
 	CancelOrderResult   *OrderEntity
-	TransferResults     []*TransferResult
+	TransferResult      *TransferResult
 }
 
 type SyncTradingUseCase interface {
-	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, []*TransferResult, error)
+	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, *TransferResult, error)
 	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) (*OrderEntity, *TransferResult, error)
 	Transfer(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
 

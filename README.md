@@ -169,6 +169,8 @@
 
 ### Sequence 定序模組
 
+![](./sequencer.jpg)
+
 如何快速儲存event是影響系統寫入速度的關鍵，kafka是可考慮的選項之一。
 
 kafka為append-only logs，不需像RDBMS在需查找與更新索引會增加磁碟I/O操作，並且使用zero-copy快速寫入磁碟來persistent。
@@ -245,6 +247,8 @@ t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domai
 ```
 
 ### Asset 資產模組
+
+![](./asset.jpg)
 
 
 
