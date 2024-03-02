@@ -280,7 +280,7 @@ type UserAsset struct {
 ```go
 type assetRepo struct {
 	usersAssetsMap map[int]map[int]*domain.UserAsset
-  lock           *sync.RWMutex
+	lock           *sync.RWMutex
 	// ...another fields
 }
 ```
