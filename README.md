@@ -161,11 +161,23 @@
 
 ### 系統架構
 
-![](https://github.com/superj80820/system-design/raw/master/exchange-arch.png)
+![](./exchange-arch.png)
 
 撮合系統主要由Sequence(定序模組)、Asset(資產模組)、Order(訂單模組)、Matching(撮合模組)、Clearing(清算模組)組成。
 
-由於需要快速計算撮合內容，計算都會直接在memory完成，過程中不會persistent data，但如果撮合系統崩潰，memory資料都會遺失，所以定序模組需將訂單event都儲存好，再進入撮合系統，如此一來，如果系統崩潰也可以靠已儲存的event來recover撮合系統。
+以訂單事件來舉例:
+
+1. 大量併發的訂單請求進入服務
+2. 定序模組會將訂單以有序的方式儲存
+3. 資產模組凍結訂單所需資產
+4. 訂單模組產生訂單
+5. 撮合模組獲取訂單進行撮合，更新order book後產生match result
+6. 清算模組依照match result來transfer、unfreeze資產
+7. 各模組產生的result組成trading result，produce給下游服務，下游服務透過這些資料cache與persistent data來達到eventual consistency
+
+由於需要快速計算撮合內容，計算都會直接在memory完成，過程中不會persistent data，但如果撮合系統崩潰，memory資料都會遺失，所以才需定序模組將訂單event都儲存好，再進入撮合系統，如此一來，如果系統崩潰也可以靠已儲存的event來recover撮合系統。
+
+下游服務都須考慮idempotency 冪等性，可透過sequence id來判斷event是否重複或超前，如果重複就拋棄，超前就必須讀取先前的event。
 
 ### Sequence 定序模組
 
