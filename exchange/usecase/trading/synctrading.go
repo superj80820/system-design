@@ -110,9 +110,8 @@ func (t *syncTradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.
 		return nil, errors.Wrap(err, "check event sequence failed")
 	}
 
-	transferResult, err := t.userAssetUseCase.Transfer(
+	transferResult, err := t.userAssetUseCase.TransferAvailableToAvailable(
 		ctx,
-		domain.AssetTransferAvailableToAvailable,
 		tradingEvent.TransferEvent.FromUserID,
 		tradingEvent.TransferEvent.ToUserID,
 		tradingEvent.TransferEvent.AssetID,

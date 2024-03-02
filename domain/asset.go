@@ -7,15 +7,7 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-type AssetTransferEnum int
-
 const LiabilityUserID = 1
-
-const (
-	AssetTransferUnknown AssetTransferEnum = iota
-	AssetTransferAvailableToAvailable
-	AssetTransferFrozenToAvailable
-)
 
 var (
 	NotFoundUserAssetsErr = errors.New("not found user assets")
@@ -49,7 +41,8 @@ type UserAssetRepo interface {
 type UserAssetUseCase interface {
 	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 
-	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	TransferFrozenToAvailable(ctx context.Context, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	TransferAvailableToAvailable(ctx context.Context, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
 	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 

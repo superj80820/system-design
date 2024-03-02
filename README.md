@@ -275,9 +275,12 @@ type UserAsset struct {
 
 一個交易對會有多個用戶，並且每個用戶都會有多個資產，如果資產都需存在memory當中，可以用兩個hash table來實作asset repository。
 
+由於在撮合時也有機會透過API讀取memory的用戶資產，所以須用read-write-lock保護。
+
 ```go
 type assetRepo struct {
 	usersAssetsMap map[int]map[int]*domain.UserAsset
+  lock           *sync.RWMutex
 	// ...another fields
 }
 ```
@@ -288,11 +291,12 @@ type assetRepo struct {
 type UserAssetUseCase interface {
 	LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 
-	Transfer(ctx context.Context, transferType AssetTransferEnum, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	TransferFrozenToAvailable(ctx context.Context, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
+	TransferAvailableToAvailable(ctx context.Context, fromUserID, toUserID int, assetID int, amount decimal.Decimal) (*TransferResult, error)
 	Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 	Unfreeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TransferResult, error)
 
-  // ..another functions
+	// ..another functions
 }
 ```
 
@@ -308,7 +312,9 @@ type UserAssetUseCase interface {
 |100|usdt|38000|62000|
 |...其他用戶||||
 
+在deposit時會呼叫`LiabilityUserTransfer()`，`assetRepo`呼叫`GetAssetWithInit()`，如果用戶資產存在則返回，不存在則初始化創建，資產模組在需要使用用戶資產時才創建他，不需先預載用戶資料表，也因為如此，在進入撮合系統前的auth非常重要，必須是認證過的用戶才能進入資產模組。
 
+liability user呼叫`SubAssetAvailable()`減少資產，用戶呼叫`AddAssetAvailable()`獲取資產，資產的變動會呼叫`transferResult.addUserAsset()`添加至`transferResult`，最後回應給下游服務。
 
 ```go
 func (u *userAsset) LiabilityUserTransfer(ctx context.Context, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
@@ -331,6 +337,64 @@ func (u *userAsset) LiabilityUserTransfer(ctx context.Context, toUserID, assetID
 	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
 
 	transferResult.addUserAsset(liabilityUserAsset)
+	transferResult.addUserAsset(toUserAsset)
+
+	return transferResult.TransferResult, nil
+}
+```
+
+其他的use case都與`LiabilityUserTransfer()`類似，只是資產的轉移有差異，最後都會透過`transferResult`將變動的資產回應給下游服務。
+
+在創建訂單時呼叫`Freeze()`，先檢查用戶是否有足夠資產`userAsset.Available.Cmp(amount) < 0`，如果足夠則呼叫`SubAssetAvailable()`減少資產，並呼叫`AddAssetFrozen()`增加凍結資產。
+
+```go
+func (u *userAsset) Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+	// another code...
+
+	if userAsset.Available.Cmp(amount) < 0 {
+		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
+	}
+	u.assetRepo.SubAssetAvailable(userAsset, amount)
+	u.assetRepo.AddAssetFrozen(userAsset, amount)
+
+	transferResult.addUserAsset(userAsset)
+
+	return transferResult.TransferResult, nil
+}
+```
+
+在撮合訂單時呼叫`TransferFrozenToAvailable()`，先檢查用戶(fromUser)是否有足夠的凍結資產後呼叫`SubAssetFrozen()`減少凍結用戶(fromUser)資產，並呼叫`AddAssetAvailable()`增加用戶(toUser)資產。
+
+```go
+func (u *userAsset) TransferFrozenToAvailable(ctx context.Context, fromUserID, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+	// another code...
+
+	if fromUserAsset.Frozen.Cmp(amount) < 0 {
+		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
+	}
+	u.assetRepo.SubAssetFrozen(fromUserAsset, amount)
+	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
+
+	transferResult.addUserAsset(fromUserAsset)
+	transferResult.addUserAsset(toUserAsset)
+
+	return transferResult.TransferResult, nil
+}
+```
+
+在用戶轉帳時呼叫`TransferAvailableToAvailable()`，檢查用戶(fromUser)是否有足夠資產後呼叫`SubAssetAvailable()`減少資產並呼叫`AddAssetAvailable()`增加用戶(toUser)資產。
+
+```go
+func (u *userAsset) TransferAvailableToAvailable(ctx context.Context, fromUserID, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+	// another code...
+
+	if fromUserAsset.Available.Cmp(amount) < 0 {
+		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
+	}
+	u.assetRepo.SubAssetAvailable(fromUserAsset, amount)
+	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
+
+	transferResult.addUserAsset(fromUserAsset)
 	transferResult.addUserAsset(toUserAsset)
 
 	return transferResult.TransferResult, nil

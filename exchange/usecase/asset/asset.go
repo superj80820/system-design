@@ -62,7 +62,7 @@ func (u *userAsset) LiabilityUserTransfer(ctx context.Context, toUserID, assetID
 	return transferResult.TransferResult, nil
 }
 
-func (u *userAsset) Transfer(ctx context.Context, transferType domain.AssetTransferEnum, fromUserID, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+func (u *userAsset) TransferFrozenToAvailable(ctx context.Context, fromUserID, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
 		return nil, errors.New("can not operate less or equal zero amount")
 	}
@@ -78,26 +78,43 @@ func (u *userAsset) Transfer(ctx context.Context, transferType domain.AssetTrans
 		return nil, errors.Wrap(err, "get asset with init failed")
 	}
 
-	switch transferType {
-	case domain.AssetTransferAvailableToAvailable:
-		if fromUserAsset.Available.Cmp(amount) < 0 {
-			return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
-		}
-		u.assetRepo.SubAssetAvailable(fromUserAsset, amount)
-		u.assetRepo.AddAssetAvailable(toUserAsset, amount)
-
-		transferResult.addUserAsset(fromUserAsset)
-		transferResult.addUserAsset(toUserAsset)
-	case domain.AssetTransferFrozenToAvailable:
-		if fromUserAsset.Frozen.Cmp(amount) < 0 {
-			return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
-		}
-		u.assetRepo.SubAssetFrozen(fromUserAsset, amount)
-		u.assetRepo.AddAssetAvailable(toUserAsset, amount)
-
-		transferResult.addUserAsset(fromUserAsset)
-		transferResult.addUserAsset(toUserAsset)
+	if fromUserAsset.Frozen.Cmp(amount) < 0 {
+		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
 	}
+	u.assetRepo.SubAssetFrozen(fromUserAsset, amount)
+	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
+
+	transferResult.addUserAsset(fromUserAsset)
+	transferResult.addUserAsset(toUserAsset)
+
+	return transferResult.TransferResult, nil
+}
+
+func (u *userAsset) TransferAvailableToAvailable(ctx context.Context, fromUserID, toUserID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
+	if amount.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.New("can not operate less or equal zero amount")
+	}
+
+	transferResult := createTransferResult()
+
+	fromUserAsset, err := u.assetRepo.GetAssetWithInit(fromUserID, assetID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get asset with init failed")
+	}
+	toUserAsset, err := u.assetRepo.GetAssetWithInit(toUserID, assetID)
+	if err != nil {
+		return nil, errors.Wrap(err, "get asset with init failed")
+	}
+
+	if fromUserAsset.Available.Cmp(amount) < 0 {
+		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
+	}
+	u.assetRepo.SubAssetAvailable(fromUserAsset, amount)
+	u.assetRepo.AddAssetAvailable(toUserAsset, amount)
+
+	transferResult.addUserAsset(fromUserAsset)
+	transferResult.addUserAsset(toUserAsset)
+
 	return transferResult.TransferResult, nil
 }
 
@@ -108,7 +125,7 @@ func (u *userAsset) Freeze(ctx context.Context, userID, assetID int, amount deci
 
 	transferResult := createTransferResult()
 
-	userAsset, err := u.assetRepo.GetAsset(userID, assetID)
+	userAsset, err := u.assetRepo.GetAssetWithInit(userID, assetID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get asset with init failed")
 	}
@@ -131,7 +148,7 @@ func (u *userAsset) Unfreeze(ctx context.Context, userID, assetID int, amount de
 
 	transferResult := createTransferResult()
 
-	userAsset, err := u.assetRepo.GetAsset(userID, assetID)
+	userAsset, err := u.assetRepo.GetAssetWithInit(userID, assetID)
 	if err != nil {
 		return nil, errors.Wrap(err, "get asset with init failed")
 	}
