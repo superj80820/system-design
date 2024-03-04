@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
@@ -24,6 +25,11 @@ type matchingRepo struct {
 	orm              *ormKit.DB
 	matchingMQTopic  mq.MQTopic
 	orderBookMQTopic mq.MQTopic
+	sellBook         *orderBook
+	buyBook          *orderBook
+
+	sequenceID  int
+	marketPrice decimal.Decimal
 }
 
 func CreateMatchingRepo(orm *ormKit.DB, matchingMQTopic, orderBookMQTopic mq.MQTopic) domain.MatchingRepo {
@@ -31,6 +37,107 @@ func CreateMatchingRepo(orm *ormKit.DB, matchingMQTopic, orderBookMQTopic mq.MQT
 		orm:              orm,
 		matchingMQTopic:  matchingMQTopic,
 		orderBookMQTopic: orderBookMQTopic,
+		sellBook:         createOrderBook(domain.DirectionSell),
+		buyBook:          createOrderBook(domain.DirectionBuy),
+		marketPrice:      decimal.Zero,
+	}
+}
+
+func (m *matchingRepo) GetSequenceID() int {
+	return m.sequenceID
+}
+
+func (m *matchingRepo) GetMarketPrice() decimal.Decimal {
+	return m.marketPrice
+}
+
+func (m *matchingRepo) GetOrderBooksID() (sellBook, buyBook []int) {
+	return m.sellBook.getOrderBooksID(), m.buyBook.getOrderBooksID()
+}
+
+func (m *matchingRepo) SetMarketPrice(price decimal.Decimal) {
+	m.marketPrice = price
+}
+
+func (m *matchingRepo) SetSequenceID(sequenceID int) {
+	m.sequenceID = sequenceID
+}
+
+func (m *matchingRepo) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
+	orderMap := make(map[int]*domain.OrderEntity)
+	for _, order := range tradingSnapshot.Orders {
+		orderMap[order.ID] = order
+	}
+	for _, orderID := range tradingSnapshot.MatchData.Buy {
+		m.buyBook.add(orderMap[orderID])
+	}
+	for _, orderID := range tradingSnapshot.MatchData.Sell {
+		m.sellBook.add(orderMap[orderID])
+	}
+	m.sequenceID = tradingSnapshot.SequenceID
+	m.marketPrice = tradingSnapshot.MatchData.MarketPrice
+	return nil
+}
+
+func (m *matchingRepo) GetOrderBookFirst(direction domain.DirectionEnum) (*domain.OrderEntity, error) {
+	switch direction {
+	case domain.DirectionSell:
+		order, err := m.sellBook.getFirst()
+		if err != nil {
+			return nil, errors.Wrap(err, "get first order failed")
+		}
+		return order, nil
+	case domain.DirectionBuy:
+		order, err := m.buyBook.getFirst()
+		if err != nil {
+			return nil, errors.Wrap(err, "get first order failed")
+		}
+		return order, nil
+	default:
+		return nil, errors.New("unknown direction")
+	}
+}
+
+func (m *matchingRepo) AddOrderBookOrder(direction domain.DirectionEnum, order *domain.OrderEntity) error {
+	switch direction {
+	case domain.DirectionSell:
+		if err := m.sellBook.add(order); err != nil {
+			return errors.Wrap(err, "add order failed")
+		}
+		return nil
+	case domain.DirectionBuy:
+		if err := m.buyBook.add(order); err != nil {
+			return errors.Wrap(err, "add order failed")
+		}
+		return nil
+	default:
+		return errors.New("unknown direction")
+	}
+}
+
+func (m *matchingRepo) RemoveOrderBookOrder(direction domain.DirectionEnum, order *domain.OrderEntity) error {
+	switch direction {
+	case domain.DirectionSell:
+		if err := m.sellBook.remove(order); err != nil {
+			return errors.Wrap(err, "remove order failed")
+		}
+		return nil
+	case domain.DirectionBuy:
+		if err := m.buyBook.remove(order); err != nil {
+			return errors.Wrap(err, "remove order failed")
+		}
+		return nil
+	default:
+		return errors.New("unknown direction")
+	}
+}
+
+func (m *matchingRepo) GetOrderBook(maxDepth int) *domain.OrderBookEntity {
+	return &domain.OrderBookEntity{
+		SequenceID: m.sequenceID,
+		Price:      m.marketPrice,
+		Sell:       m.sellBook.getOrderBook(maxDepth),
+		Buy:        m.buyBook.getOrderBook(maxDepth),
 	}
 }
 

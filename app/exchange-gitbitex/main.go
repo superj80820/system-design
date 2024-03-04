@@ -124,7 +124,7 @@ func main() {
 	}
 
 	if mysqlURI == "" {
-		mySQLContainer, err := mysqlContainer.CreateMySQL(ctx, filepath.Join(".", "schema.sql"))
+		mySQLContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(filepath.Join(".", "schema.sql")))
 		if err != nil {
 			panic(err)
 		}
@@ -267,7 +267,7 @@ func main() {
 	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)

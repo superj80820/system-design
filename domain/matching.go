@@ -26,15 +26,30 @@ type MatchingRepo interface {
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
 	GetMatchingHistory(maxResults int) ([]*MatchOrderDetail, error)
+
+	GetOrderBookFirst(direction DirectionEnum) (*OrderEntity, error)
+	AddOrderBookOrder(direction DirectionEnum, order *OrderEntity) error
+	RemoveOrderBookOrder(direction DirectionEnum, order *OrderEntity) error
+
+	GetOrderBook(maxDepth int) *OrderBookEntity
+	GetOrderBooksID() (sellBook, buyBook []int)
+	GetMarketPrice() decimal.Decimal
+	SetMarketPrice(price decimal.Decimal)
+	GetSequenceID() int
+	SetSequenceID(sequenceID int)
+	RecoverBySnapshot(tradingSnapshot *TradingSnapshot) error
 }
 
 type MatchingUseCase interface {
 	NewOrder(ctx context.Context, o *OrderEntity) (*MatchResult, error)
 	CancelOrder(ts time.Time, o *OrderEntity) error
+
 	GetOrderBook(maxDepth int) *OrderBookEntity
+	GetMarketPrice() decimal.Decimal
+	GetSequenceID() int
 
 	GetMatchesData() (*MatchData, error)
-	RecoverBySnapshot(*TradingSnapshot) error
+	RecoverBySnapshot(tradingSnapshot *TradingSnapshot) error
 
 	ConsumeMatchResultToSave(ctx context.Context, key string)
 }

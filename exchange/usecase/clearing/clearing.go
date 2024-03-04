@@ -31,10 +31,16 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 	transferResult := new(domain.TransferResult)
 
 	taker := matchResult.TakerOrder
+	if err := c.orderUseCase.UpdateOrder(ctx, taker.ID, taker.UnfilledQuantity, taker.Status, taker.UpdatedAt); err != nil {
+		return nil, errors.Wrap(err, "update order failed")
+	}
 	switch matchResult.TakerOrder.Direction {
 	case domain.DirectionSell:
 		for _, matchDetail := range matchResult.MatchDetails {
 			maker := matchDetail.MakerOrder
+			if err := c.orderUseCase.UpdateOrder(ctx, maker.ID, maker.UnfilledQuantity, maker.Status, maker.UpdatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
 			matched := matchDetail.Quantity
 
 			transferResultOne, err := c.userAssetUseCase.TransferFrozenToAvailable(ctx, taker.UserID, maker.UserID, c.baseCurrencyID, matched)
@@ -61,6 +67,9 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 	case domain.DirectionBuy:
 		for _, matchDetail := range matchResult.MatchDetails {
 			maker := matchDetail.MakerOrder
+			if err := c.orderUseCase.UpdateOrder(ctx, maker.ID, maker.UnfilledQuantity, maker.Status, maker.UpdatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
 			matched := matchDetail.Quantity
 
 			if taker.Price.Cmp(maker.Price) > 0 {

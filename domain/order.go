@@ -127,6 +127,7 @@ type OrderEntity struct {
 type OrderUseCase interface {
 	CreateOrder(ctx context.Context, sequenceID int, orderID, userID int, direction DirectionEnum, price, quantity decimal.Decimal, ts time.Time) (*OrderEntity, *TransferResult, error)
 	RemoveOrder(ctx context.Context, orderID int) error
+	UpdateOrder(ctx context.Context, orderID int, unfilledQuantity decimal.Decimal, status OrderStatusEnum, updatedAt time.Time) error
 	GetOrder(orderID int) (*OrderEntity, error)
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 	GetHistoryOrder(userID, orderID int) (*OrderEntity, error)

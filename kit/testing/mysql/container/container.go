@@ -11,21 +11,41 @@ import (
 )
 
 type mysqlContainer struct {
-	uri       string
-	container *mysql.MySQLContainer
+	uri           string
+	sqlSchemaPath string
+	container     *mysql.MySQLContainer
 }
 
-func CreateMySQL(ctx context.Context, sqlSchemaPath string) (testing.MySQLContainer, error) {
+type Option func(*mysqlContainer)
+
+func UseSQLSchema(sqlSchemaPath string) Option {
+	return func(mc *mysqlContainer) {
+		mc.sqlSchemaPath = sqlSchemaPath
+	}
+}
+
+func CreateMySQL(ctx context.Context, options ...Option) (testing.MySQLContainer, error) {
+	var mysqlContainer mysqlContainer
 	mysqlDBName := "db"
 	mysqlDBUsername := "root"
 	mysqlDBPassword := "password"
-	container, err := mysql.RunContainer(ctx,
+
+	for _, option := range options {
+		option(&mysqlContainer)
+	}
+
+	runContainerOptions := []testcontainers.ContainerCustomizer{
 		testcontainers.WithImage("mysql:8"),
 		mysql.WithDatabase(mysqlDBName),
 		mysql.WithUsername(mysqlDBUsername),
 		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(sqlSchemaPath),
-	)
+	}
+
+	if mysqlContainer.sqlSchemaPath != "" {
+		runContainerOptions = append(runContainerOptions, mysql.WithScripts(mysqlContainer.sqlSchemaPath))
+	}
+
+	container, err := mysql.RunContainer(ctx, runContainerOptions...)
 	if err != nil {
 		return nil, errors.Wrap(err, "run container failed")
 	}
@@ -38,17 +58,17 @@ func CreateMySQL(ctx context.Context, sqlSchemaPath string) (testing.MySQLContai
 		return nil, errors.Wrap(err, "mapped container port failed")
 	}
 
-	return &mysqlContainer{
-		uri: fmt.Sprintf(
-			"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-			mysqlDBUsername,
-			mysqlDBPassword,
-			mysqlDBHost,
-			mysqlDBPort.Port(),
-			mysqlDBName,
-		),
-		container: container,
-	}, nil
+	mysqlContainer.uri = fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+		mysqlDBUsername,
+		mysqlDBPassword,
+		mysqlDBHost,
+		mysqlDBPort.Port(),
+		mysqlDBName,
+	)
+	mysqlContainer.container = container
+
+	return &mysqlContainer, nil
 }
 
 func (m *mysqlContainer) GetURI() string {

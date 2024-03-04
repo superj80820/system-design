@@ -97,7 +97,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 
 	ctx := context.Background()
 
-	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, filepath.Join(".", "schema.sql"))
+	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(filepath.Join(".", "schema.sql")))
 	assert.Nil(t, err)
 	redisContainer, err := redisContainer.CreateRedis(ctx)
 	assert.Nil(t, err)
@@ -150,7 +150,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, quotationRepo, candleRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)

@@ -31,6 +31,8 @@ func CreateOrderUseCase(
 		orderRepo:       orderRepo,
 		baseCurrencyID:  int(domain.BaseCurrencyType),
 		quoteCurrencyID: int(domain.QuoteCurrencyType),
+		activeOrders:    make(map[int]*domain.OrderEntity),
+		userOrdersMap:   make(map[int]map[int]*domain.OrderEntity),
 		lock:            new(sync.RWMutex),
 	}
 
@@ -75,9 +77,25 @@ func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID 
 		o.userOrdersMap[userID] = make(map[int]*domain.OrderEntity)
 	}
 	o.userOrdersMap[userID][orderID] = &order
+	cloneOrderInstance := cloneOrder(&order)
 	o.lock.Unlock()
 
-	return &order, transferResult, nil
+	return cloneOrderInstance, transferResult, nil
+}
+
+func (o *orderUseCase) UpdateOrder(ctx context.Context, orderID int, unfilledQuantity decimal.Decimal, status domain.OrderStatusEnum, updatedAt time.Time) error {
+	o.lock.Lock()
+	defer o.lock.Unlock()
+
+	if order, ok := o.activeOrders[orderID]; ok {
+		order.UnfilledQuantity = unfilledQuantity
+		order.Status = status
+		order.UpdatedAt = updatedAt
+	} else {
+		return errors.New("not found order")
+	}
+
+	return nil
 }
 
 func (o *orderUseCase) GetOrder(orderID int) (*domain.OrderEntity, error) {

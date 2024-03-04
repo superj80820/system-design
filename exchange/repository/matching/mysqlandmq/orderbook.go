@@ -1,27 +1,34 @@
-package matching
+package mysqlandmq
 
 import (
 	"sync"
 
+	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 	treemapKit "github.com/superj80820/system-design/kit/util/treemap"
 )
 
+type orderKey struct {
+	sequenceId int
+	price      decimal.Decimal
+}
+
 type orderBook struct {
 	direction domain.DirectionEnum
-	book      *treemapKit.GenericTreeMap[*orderKey, *order]
+	book      *treemapKit.GenericTreeMap[*orderKey, *domain.OrderEntity]
 	lock      *sync.RWMutex
 }
 
 func createOrderBook(direction domain.DirectionEnum) *orderBook {
 	return &orderBook{
 		direction: direction,
-		book:      treemapKit.NewWith[*orderKey, *order](directionEnum(direction).compare), // TODO: think performance
+		book:      treemapKit.NewWith[*orderKey, *domain.OrderEntity](directionEnum(direction).compare), // TODO: think performance
 		lock:      new(sync.RWMutex),
 	}
 }
 
-func (ob *orderBook) getFirst() (*order, error) {
+func (ob *orderBook) getFirst() (*domain.OrderEntity, error) {
 	ob.lock.RLock()
 	defer ob.lock.RUnlock()
 
@@ -33,25 +40,26 @@ func (ob *orderBook) getFirst() (*order, error) {
 	}
 }
 
-func (ob *orderBook) remove(o *order) bool {
+func (ob *orderBook) remove(order *domain.OrderEntity) error {
 	ob.lock.Lock()
 	defer ob.lock.Unlock()
 
-	key := &orderKey{sequenceId: o.SequenceID, price: o.Price}
-	_, found := ob.book.Get(key) // TODO: about performance
+	key := &orderKey{sequenceId: order.SequenceID, price: order.Price}
+	_, found := ob.book.Get(key)
 	if !found {
-		return false
+		return errors.Wrap(domain.ErrNoOrder, "not found order")
 	}
-	ob.book.Remove(key) // TODO: need check? about performance
-	return true
+	ob.book.Remove(key)
+	return nil
 }
 
-func (ob *orderBook) add(o *order) bool {
+func (ob *orderBook) add(order *domain.OrderEntity) error {
 	ob.lock.Lock()
 	defer ob.lock.Unlock()
 
-	ob.book.Put(&orderKey{sequenceId: o.SequenceID, price: o.Price}, o)
-	return true // TODO: need check? about performance
+	ob.book.Put(&orderKey{sequenceId: order.SequenceID, price: order.Price}, order)
+
+	return nil
 }
 
 func (ob *orderBook) getOrderBooksID() []int {
@@ -59,7 +67,7 @@ func (ob *orderBook) getOrderBooksID() []int {
 	defer ob.lock.RUnlock()
 
 	orderBooksID := make([]int, 0, ob.book.Size())
-	ob.book.Each(func(key *orderKey, value *order) {
+	ob.book.Each(func(key *orderKey, value *domain.OrderEntity) {
 		orderBooksID = append(orderBooksID, value.ID)
 	})
 	return orderBooksID
@@ -74,7 +82,7 @@ func (ob *orderBook) getOrderBook(maxDepth int) []*domain.OrderBookItemEntity {
 		prevOrderBookItem *domain.OrderBookItemEntity
 		isMaxDepth        bool
 	)
-	ob.book.Each(func(key *orderKey, value *order) {
+	ob.book.Each(func(key *orderKey, value *domain.OrderEntity) {
 		if isMaxDepth {
 			return
 		}
