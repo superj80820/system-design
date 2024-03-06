@@ -82,7 +82,7 @@ func (t *syncTradingUseCase) CreateOrder(ctx context.Context, tradingEvent *doma
 	return matchResult, transferResult, nil
 }
 
-func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.OrderEntity, *domain.TransferResult, error) {
+func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.CancelResult, *domain.TransferResult, error) {
 	if err := t.checkEventSequence(tradingEvent); err != nil {
 		return nil, nil, errors.Wrap(err, "check event sequence failed")
 	}
@@ -94,15 +94,16 @@ func (t *syncTradingUseCase) CancelOrder(ctx context.Context, tradingEvent *doma
 	if order.UserID != tradingEvent.OrderCancelEvent.UserID {
 		return nil, nil, errors.New("order does not belong to this user")
 	}
-	if err := t.matchingUseCase.CancelOrder(tradingEvent.CreatedAt, order); err != nil {
+	cancelOrderResult, err := t.matchingUseCase.CancelOrder(order, tradingEvent.CreatedAt)
+	if err != nil {
 		return nil, nil, errors.Wrap(err, "cancel order failed")
 	}
-	transferResult, err := t.clearingUseCase.ClearCancelOrder(ctx, order)
+	transferResult, err := t.clearingUseCase.ClearCancelOrder(ctx, cancelOrderResult)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "clear cancel order failed")
 	}
 
-	return order, transferResult, nil
+	return cancelOrderResult, transferResult, nil
 }
 
 func (t *syncTradingUseCase) Transfer(ctx context.Context, tradingEvent *domain.TradingEvent) (*domain.TransferResult, error) {

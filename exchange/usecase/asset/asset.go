@@ -2,6 +2,7 @@ package asset
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -79,7 +80,7 @@ func (u *userAsset) TransferFrozenToAvailable(ctx context.Context, fromUserID, t
 	}
 
 	if fromUserAsset.Frozen.Cmp(amount) < 0 {
-		return nil, errors.Wrap(domain.LessAmountErr, "less amount err")
+		return nil, errors.Wrap(domain.LessAmountErr, fmt.Sprintf("less amount err, from user frozen: %s, amount: %s", fromUserAsset.Frozen, amount))
 	}
 	u.assetRepo.SubAssetFrozen(fromUserAsset, amount)
 	u.assetRepo.AddAssetAvailable(toUserAsset, amount)

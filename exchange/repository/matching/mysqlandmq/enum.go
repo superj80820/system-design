@@ -1,35 +1,21 @@
 package mysqlandmq
 
-import "github.com/superj80820/system-design/domain"
+import (
+	"github.com/shopspring/decimal"
+	"github.com/superj80820/system-design/domain"
+)
 
 type directionEnum domain.DirectionEnum
 
-func (d directionEnum) compare(a, b *orderKey) int {
-	switch domain.DirectionEnum(d) { //TODO: think performance
-	case domain.DirectionBuy:
-		cmp := b.price.Cmp(a.price)
-		if cmp == 0 {
-			if a.sequenceId > b.sequenceId {
-				return 1
-			} else if a.sequenceId < b.sequenceId {
-				return -1
-			} else {
-				return 0
-			}
-		}
-		return cmp
+func (d directionEnum) compare(a, b interface{}) int {
+	aPrice := a.(decimal.Decimal)
+	bPrice := b.(decimal.Decimal)
+
+	switch domain.DirectionEnum(d) {
 	case domain.DirectionSell:
-		cmp := a.price.Cmp(b.price)
-		if cmp == 0 {
-			if a.sequenceId > b.sequenceId {
-				return 1
-			} else if a.sequenceId < b.sequenceId {
-				return -1
-			} else {
-				return 0
-			}
-		}
-		return cmp
+		return aPrice.Cmp(bPrice) // TODO: think
+	case domain.DirectionBuy:
+		return bPrice.Cmp(aPrice)
 	case domain.DirectionUnknown:
 		panic("unknown direction")
 	default:

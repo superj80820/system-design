@@ -146,11 +146,12 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoORMAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
+	matchingOrderBookRepo := matchingMySQLAndMQRepo.CreateOrderBookRepo()
 	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)

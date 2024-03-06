@@ -149,7 +149,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 				TransferResult:      transferResult,
 			}
 		case domain.TradingEventCancelOrderType:
-			cancelOrder, transferResult, err := t.syncTradingUseCase.CancelOrder(ctx, te)
+			cancelOrderResult, transferResult, err := t.syncTradingUseCase.CancelOrder(ctx, te)
 			if errors.Is(err, domain.LessAmountErr) {
 				t.logger.Info(fmt.Sprintf("%+v", err))
 				return
@@ -163,7 +163,7 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 			tradingResult = domain.TradingResult{
 				SequenceID:          te.SequenceID,
 				TradingResultStatus: domain.TradingResultStatusCancel,
-				CancelOrderResult:   cancelOrder,
+				CancelOrderResult:   cancelOrderResult,
 				TradingEvent:        te,
 				TransferResult:      transferResult,
 			}
@@ -495,7 +495,7 @@ func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream domain.Trad
 		OrderBook: t.matchingUseCase.GetOrderBook(100), // TODO: max depth
 	})
 
-	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookEntity) error {
+	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookL2Entity) error {
 		if err := stream.Send(domain.TradingNotifyResponse{
 			Type:      domain.OrderBookExchangeResponseType,
 			ProductID: t.currencyUseCase.GetProductID(),
@@ -610,7 +610,7 @@ func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream d
 		OrderBook: t.matchingUseCase.GetOrderBook(100), // TODO: max depth
 	})
 
-	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookEntity) error {
+	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookL2Entity) error {
 		if err := stream.Send(domain.TradingNotifyResponse{
 			Type:      domain.OrderBookExchangeResponseType,
 			ProductID: t.currencyUseCase.GetProductID(),
@@ -721,6 +721,9 @@ func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream d
 				}
 				t.orderRepo.ConsumeOrderMQBatch(ctx, consumeKey, func(sequenceID int, orders []*domain.OrderEntity) error {
 					for _, order := range orders {
+						if order.UserID != userID {
+							continue
+						}
 						if err := stream.Send(domain.TradingNotifyResponse{
 							Type:      domain.OrderExchangeResponseType,
 							ProductID: t.currencyUseCase.GetProductID(),

@@ -96,16 +96,47 @@ func (o OrderStatusEnum) IsFinalStatus() bool {
 	}
 }
 
-type OrderBookEntity struct {
+type OrderBookL1Entity struct {
 	SequenceID int
 	Price      decimal.Decimal
-	Sell       []*OrderBookItemEntity
-	Buy        []*OrderBookItemEntity
+	BestAsk    *OrderBookL1ItemEntity
+	BestBid    *OrderBookL1ItemEntity
 }
 
-type OrderBookItemEntity struct {
+type OrderBookL1ItemEntity struct {
 	Price    decimal.Decimal
 	Quantity decimal.Decimal
+}
+
+type OrderBookL2Entity struct {
+	SequenceID int
+	Price      decimal.Decimal
+	Sell       []*OrderBookL2ItemEntity
+	Buy        []*OrderBookL2ItemEntity
+}
+
+type OrderBookL2ItemEntity struct {
+	Price    decimal.Decimal
+	Quantity decimal.Decimal
+}
+
+type OrderBookL3Entity struct {
+	SequenceID int
+	Price      decimal.Decimal
+	Sell       []*OrderBookL3ItemEntity
+	Buy        []*OrderBookL3ItemEntity
+}
+
+type OrderBookL3ItemEntity struct {
+	Price    decimal.Decimal
+	Quantity decimal.Decimal
+	Orders   []*OrderL3Entity
+}
+
+type OrderL3Entity struct {
+	SequenceID int
+	OrderID    int
+	Quantity   decimal.Decimal
 }
 
 type OrderEntity struct {
@@ -122,6 +153,21 @@ type OrderEntity struct {
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+func (o *OrderEntity) Clone() *OrderEntity {
+	return &OrderEntity{
+		ID:               o.ID,
+		SequenceID:       o.SequenceID,
+		UserID:           o.UserID,
+		Price:            o.Price,
+		Direction:        o.Direction,
+		Status:           o.Status,
+		Quantity:         o.Quantity,
+		UnfilledQuantity: o.UnfilledQuantity,
+		CreatedAt:        o.CreatedAt,
+		UpdatedAt:        o.UpdatedAt,
+	}
 }
 
 type OrderUseCase interface {

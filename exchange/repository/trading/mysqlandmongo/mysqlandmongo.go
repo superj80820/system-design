@@ -65,7 +65,6 @@ func CreateTradingRepo(
 	ctx context.Context,
 	mongoCollection *mongo.Collection,
 	orm *ormKit.DB,
-	tradingEventMQTopic,
 	tradingResultMQTopic mqKit.MQTopic,
 ) domain.TradingRepo {
 	ctx, cancel := context.WithCancel(ctx)

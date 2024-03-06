@@ -263,11 +263,12 @@ func main() {
 	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic, orderBookMQTopic)
+	matchingOrderBookRepo := matchingMySQLAndMQRepo.CreateOrderBookRepo()
 	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
 	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)

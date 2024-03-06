@@ -107,17 +107,17 @@ func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *dom
 	return transferResult, nil
 }
 
-func (c *clearingUseCase) ClearCancelOrder(ctx context.Context, order *domain.OrderEntity) (*domain.TransferResult, error) {
+func (c *clearingUseCase) ClearCancelOrder(ctx context.Context, cancelOrderResult *domain.CancelResult) (*domain.TransferResult, error) {
 	var err error
 	transferResult := new(domain.TransferResult)
-	switch order.Direction {
+	switch cancelOrderResult.CancelOrder.Direction {
 	case domain.DirectionSell:
-		transferResult, err = c.userAssetUseCase.Unfreeze(ctx, order.UserID, c.baseCurrencyID, order.UnfilledQuantity)
+		transferResult, err = c.userAssetUseCase.Unfreeze(ctx, cancelOrderResult.CancelOrder.UserID, c.baseCurrencyID, cancelOrderResult.CancelOrder.UnfilledQuantity)
 		if err != nil {
 			return nil, errors.Wrap(err, "unfreeze sell order failed")
 		}
 	case domain.DirectionBuy:
-		transferResult, err = c.userAssetUseCase.Unfreeze(ctx, order.UserID, c.quoteCurrencyID, order.Price.Mul(order.UnfilledQuantity))
+		transferResult, err = c.userAssetUseCase.Unfreeze(ctx, cancelOrderResult.CancelOrder.UserID, c.quoteCurrencyID, cancelOrderResult.CancelOrder.Price.Mul(cancelOrderResult.CancelOrder.UnfilledQuantity))
 		if err != nil {
 			return nil, errors.Wrap(err, "unfreeze buy order failed")
 		}
@@ -125,7 +125,11 @@ func (c *clearingUseCase) ClearCancelOrder(ctx context.Context, order *domain.Or
 		return nil, errors.New("unknown direction")
 	}
 
-	if err := c.orderUseCase.RemoveOrder(ctx, order.ID); err != nil {
+	if err := c.orderUseCase.UpdateOrder(ctx, cancelOrderResult.CancelOrder.ID, cancelOrderResult.CancelOrder.UnfilledQuantity, cancelOrderResult.CancelOrder.Status, cancelOrderResult.CreatedAt); err != nil {
+		return nil, errors.Wrap(err, "update failed")
+	}
+
+	if err := c.orderUseCase.RemoveOrder(ctx, cancelOrderResult.CancelOrder.ID); err != nil {
 		return nil, errors.Wrap(err, "remove failed")
 	}
 

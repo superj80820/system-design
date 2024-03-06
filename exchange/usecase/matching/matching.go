@@ -11,17 +11,19 @@ import (
 )
 
 type matchingUseCase struct {
-	matchingRepo       domain.MatchingRepo
-	isOrderBookChanged *atomic.Bool
+	matchingRepo          domain.MatchingRepo
+	matchingOrderBookRepo domain.MatchingOrderBookRepo
+	isOrderBookChanged    *atomic.Bool
 
 	orderBookMaxDepth int
 }
 
-func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, orderBookMaxDepth int) domain.MatchingUseCase {
+func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, matchingOrderBookRepo domain.MatchingOrderBookRepo, orderBookMaxDepth int) domain.MatchingUseCase {
 	m := &matchingUseCase{
-		matchingRepo:       matchingRepo,
-		orderBookMaxDepth:  orderBookMaxDepth,
-		isOrderBookChanged: new(atomic.Bool),
+		matchingRepo:          matchingRepo,
+		matchingOrderBookRepo: matchingOrderBookRepo,
+		orderBookMaxDepth:     orderBookMaxDepth,
+		isOrderBookChanged:    new(atomic.Bool),
 	}
 
 	go func() {
@@ -43,11 +45,11 @@ func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo
 }
 
 func (m *matchingUseCase) GetMarketPrice() decimal.Decimal {
-	return m.matchingRepo.GetMarketPrice()
+	return m.matchingOrderBookRepo.GetMarketPrice()
 }
 
 func (m *matchingUseCase) GetSequenceID() int {
-	return m.matchingRepo.GetSequenceID()
+	return m.matchingOrderBookRepo.GetSequenceID()
 }
 
 func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.OrderEntity) (*domain.MatchResult, error) {
@@ -63,12 +65,11 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		return nil, errors.New("not define direction")
 	}
 
-	m.matchingRepo.SetSequenceID(takerOrder.SequenceID)
+	m.matchingOrderBookRepo.SetSequenceID(takerOrder.SequenceID)
 	matchResult := createMatchResult(takerOrder)
 
-	takerUnfilledQuantity := takerOrder.Quantity
 	for {
-		makerOrder, err := m.matchingRepo.GetOrderBookFirst(makerDirection)
+		makerOrder, err := m.matchingOrderBookRepo.GetOrderBookFirst(makerDirection)
 		if errors.Is(err, domain.ErrEmptyOrderBook) {
 			break
 		} else if err != nil {
@@ -79,29 +80,35 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		} else if takerOrder.Direction == domain.DirectionSell && takerOrder.Price.Cmp(makerOrder.Price) > 0 {
 			break
 		}
-		m.matchingRepo.SetMarketPrice(makerOrder.Price)
-		matchedQuantity := min(takerUnfilledQuantity, makerOrder.UnfilledQuantity)
+		m.matchingOrderBookRepo.SetMarketPrice(makerOrder.Price)
+		matchedQuantity := min(takerOrder.UnfilledQuantity, makerOrder.UnfilledQuantity)
 		addForMatchResult(matchResult, makerOrder.Price, matchedQuantity, makerOrder)
-		takerUnfilledQuantity = takerUnfilledQuantity.Sub(matchedQuantity)
-		makerUnfilledQuantity := makerOrder.UnfilledQuantity.Sub(matchedQuantity)
-		if makerUnfilledQuantity.Equal(decimal.Zero) {
-			updateOrder(makerOrder, makerUnfilledQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt)
-			m.matchingRepo.RemoveOrderBookOrder(makerDirection, makerOrder)
+		takerOrder.UnfilledQuantity = takerOrder.UnfilledQuantity.Sub(matchedQuantity)
+		makerOrder.UnfilledQuantity = makerOrder.UnfilledQuantity.Sub(matchedQuantity)
+		if makerOrder.UnfilledQuantity.Equal(decimal.Zero) {
+			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
+			if err := m.matchingOrderBookRepo.RemoveOrderBookOrder(makerDirection, makerOrder); err != nil {
+				return nil, errors.Wrap(err, "remove order book order failed")
+			}
 		} else {
-			updateOrder(makerOrder, makerUnfilledQuantity, domain.OrderStatusPartialFilled, takerOrder.CreatedAt)
+			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusPartialFilled, takerOrder.CreatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
 		}
-		if takerUnfilledQuantity.Equal(decimal.Zero) {
-			updateOrder(takerOrder, takerUnfilledQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt)
+		if takerOrder.UnfilledQuantity.Equal(decimal.Zero) {
+			takerOrder.Status = domain.OrderStatusFullyFilled
 			break
 		}
 	}
-	if takerUnfilledQuantity.GreaterThan(decimal.Zero) {
+	if takerOrder.UnfilledQuantity.GreaterThan(decimal.Zero) {
 		orderStatus := domain.OrderStatusPending
-		if takerUnfilledQuantity.Cmp(takerOrder.Quantity) != 0 {
+		if takerOrder.UnfilledQuantity.Cmp(takerOrder.Quantity) != 0 {
 			orderStatus = domain.OrderStatusPartialFilled
 		}
-		updateOrder(takerOrder, takerUnfilledQuantity, orderStatus, takerOrder.CreatedAt)
-		m.matchingRepo.AddOrderBookOrder(takerDirection, takerOrder)
+		m.matchingOrderBookRepo.MatchOrder(takerOrder.ID, decimal.Zero, orderStatus, takerOrder.CreatedAt)
+		m.matchingOrderBookRepo.AddOrderBookOrder(takerDirection, takerOrder)
 	}
 
 	m.isOrderBookChanged.Store(true)
@@ -109,40 +116,70 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 	return matchResult, nil
 }
 
-func (m *matchingUseCase) CancelOrder(timestamp time.Time, order *domain.OrderEntity) error {
-	if err := m.matchingRepo.RemoveOrderBookOrder(order.Direction, order); err != nil {
-		return errors.Wrap(err, "remove order failed")
-	}
-
+func (m *matchingUseCase) CancelOrder(order *domain.OrderEntity, timestamp time.Time) (*domain.CancelResult, error) {
 	status := domain.OrderStatusFullyCanceled
 	if !(order.UnfilledQuantity.Cmp(order.Quantity) == 0) {
 		status = domain.OrderStatusPartialCanceled
 	}
 
-	updateOrder(order, order.UnfilledQuantity, status, timestamp)
+	order.Status = status
+
+	m.matchingOrderBookRepo.UpdateOrderStatus(order.ID, status, timestamp)
+
+	if err := m.matchingOrderBookRepo.RemoveOrderBookOrder(order.Direction, order); err != nil {
+		return nil, errors.Wrap(err, "remove order failed")
+	}
 
 	m.isOrderBookChanged.Store(true)
 
-	return nil
+	return &domain.CancelResult{
+		CancelOrder: order,
+	}, nil
 }
 
-func (m *matchingUseCase) GetOrderBook(maxDepth int) *domain.OrderBookEntity {
-	return m.matchingRepo.GetOrderBook(maxDepth)
+func (m *matchingUseCase) GetOrderBook(maxDepth int) *domain.OrderBookL2Entity {
+	return m.matchingOrderBookRepo.GetL2OrderBook(maxDepth)
+}
+
+func (m *matchingUseCase) GetL3OrderBook(maxDepth int) *domain.OrderBookL3Entity {
+	return m.matchingOrderBookRepo.GetL3OrderBook(maxDepth)
 }
 
 func (m *matchingUseCase) GetMatchesData() (*domain.MatchData, error) {
-	sellBook, buyBook := m.matchingRepo.GetOrderBooksID()
+	orderBook := m.matchingOrderBookRepo.GetL3OrderBook(-1)
+	var sellOrderIDs, buyOrderIDs []int
+	for _, item := range orderBook.Sell {
+		for _, order := range item.Orders {
+			sellOrderIDs = append(sellOrderIDs, order.OrderID)
+		}
+	}
+	for _, item := range orderBook.Buy {
+		for _, order := range item.Orders {
+			buyOrderIDs = append(buyOrderIDs, order.OrderID)
+		}
+	}
+
 	return &domain.MatchData{
-		Buy:         sellBook,
-		Sell:        buyBook,
-		MarketPrice: m.matchingRepo.GetMarketPrice(),
+		Buy:         buyOrderIDs,
+		Sell:        sellOrderIDs,
+		MarketPrice: m.matchingOrderBookRepo.GetMarketPrice(),
 	}, nil
 }
 
 func (m *matchingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {
-	if err := m.matchingRepo.RecoverBySnapshot(tradingSnapshot); err != nil {
-		return errors.Wrap(err, "recover by snapshot")
+	orderMap := make(map[int]*domain.OrderEntity)
+	for _, order := range tradingSnapshot.Orders {
+		orderMap[order.ID] = order
 	}
+	for _, orderID := range tradingSnapshot.MatchData.Buy {
+		m.matchingOrderBookRepo.AddOrderBookOrder(domain.DirectionBuy, orderMap[orderID])
+	}
+	for _, orderID := range tradingSnapshot.MatchData.Sell {
+		m.matchingOrderBookRepo.AddOrderBookOrder(domain.DirectionSell, orderMap[orderID])
+	}
+	m.matchingOrderBookRepo.SetSequenceID(tradingSnapshot.SequenceID)
+	m.matchingOrderBookRepo.SetMarketPrice(tradingSnapshot.MatchData.MarketPrice)
+
 	return nil
 }
 
@@ -177,10 +214,4 @@ func addForMatchResult(matchResult *domain.MatchResult, price decimal.Decimal, m
 		TakerOrder: matchResult.TakerOrder,
 		MakerOrder: makerOrder,
 	})
-}
-
-func updateOrder(order *domain.OrderEntity, unfilledQuantity decimal.Decimal, orderStatus domain.OrderStatusEnum, updatedAt time.Time) {
-	order.UnfilledQuantity = unfilledQuantity
-	order.Status = orderStatus
-	order.UpdatedAt = updatedAt
 }

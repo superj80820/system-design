@@ -107,13 +107,13 @@ type TradingResult struct {
 	TradingResultStatus TradingResultStatus
 	TradingEvent        *TradingEvent
 	MatchResult         *MatchResult
-	CancelOrderResult   *OrderEntity
+	CancelOrderResult   *CancelResult
 	TransferResult      *TransferResult
 }
 
 type SyncTradingUseCase interface {
 	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, *TransferResult, error)
-	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) (*OrderEntity, *TransferResult, error)
+	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) (*CancelResult, *TransferResult, error)
 	Transfer(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
 
 	Deposit(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
@@ -167,7 +167,7 @@ type TradingNotifyResponse struct {
 	UserAsset        *TradingNotifyAsset `json:"user_asset,omitempty"`
 	Tick             *TickEntity         `json:"tick,omitempty"`
 	MatchOrderDetail *MatchOrderDetail   `json:"match_order_detail,omitempty"`
-	OrderBook        *OrderBookEntity    `json:"order_book,omitempty"`
+	OrderBook        *OrderBookL2Entity  `json:"order_book,omitempty"`
 	Order            *OrderEntity        `json:"order,omitempty"`
 	CandleBar        *CandleBar          `json:"candle,omitempty"`
 }

@@ -77,7 +77,7 @@ func (o *orderUseCase) CreateOrder(ctx context.Context, sequenceID int, orderID 
 		o.userOrdersMap[userID] = make(map[int]*domain.OrderEntity)
 	}
 	o.userOrdersMap[userID][orderID] = &order
-	cloneOrderInstance := cloneOrder(&order)
+	cloneOrderInstance := order.Clone()
 	o.lock.Unlock()
 
 	return cloneOrderInstance, transferResult, nil
@@ -106,7 +106,7 @@ func (o *orderUseCase) GetOrder(orderID int) (*domain.OrderEntity, error) {
 	if !ok {
 		return nil, errors.Wrap(domain.ErrNoOrder, "not found order")
 	}
-	return cloneOrder(order), nil
+	return order.Clone(), nil
 }
 
 func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, error) {
@@ -119,7 +119,7 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 	}
 	userOrdersClone := make(map[int]*domain.OrderEntity, len(userOrders))
 	for orderID, order := range userOrders {
-		userOrdersClone[orderID] = cloneOrder(order)
+		userOrdersClone[orderID] = order.Clone()
 	}
 	return userOrdersClone, nil
 }
@@ -192,7 +192,7 @@ func (o *orderUseCase) GetOrdersData() ([]*domain.OrderEntity, error) {
 
 	cloneOrders := make([]*domain.OrderEntity, 0, len(o.activeOrders))
 	for _, order := range o.activeOrders {
-		cloneOrders = append(cloneOrders, cloneOrder(order))
+		cloneOrders = append(cloneOrders, order.Clone())
 	}
 
 	return cloneOrders, nil
@@ -203,7 +203,7 @@ func (o *orderUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot
 	defer o.lock.Unlock()
 
 	for _, order := range tradingSnapshot.Orders {
-		cloneOrderInstance := cloneOrder(order)
+		cloneOrderInstance := order.Clone()
 		o.activeOrders[order.ID] = cloneOrderInstance
 		userOrders, ok := o.userOrdersMap[order.UserID]
 		if !ok {
@@ -212,19 +212,4 @@ func (o *orderUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot
 		userOrders[order.ID] = cloneOrderInstance
 	}
 	return nil
-}
-
-func cloneOrder(order *domain.OrderEntity) *domain.OrderEntity {
-	return &domain.OrderEntity{
-		ID:               order.ID,
-		SequenceID:       order.SequenceID,
-		UserID:           order.UserID,
-		Price:            order.Price,
-		Direction:        order.Direction,
-		Status:           order.Status,
-		Quantity:         order.Quantity,
-		UnfilledQuantity: order.UnfilledQuantity,
-		CreatedAt:        order.CreatedAt,
-		UpdatedAt:        order.UpdatedAt,
-	}
 }

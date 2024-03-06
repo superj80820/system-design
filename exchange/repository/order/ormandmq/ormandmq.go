@@ -105,7 +105,7 @@ func (o *orderRepo) ProduceOrderMQByTradingResult(ctx context.Context, tradingRe
 	case domain.TradingResultStatusCancel:
 		if err := o.orderMQTopic.Produce(ctx, &mqMessage{
 			SequenceID: sequenceID,
-			Orders:     []*domain.OrderEntity{tradingResult.CancelOrderResult},
+			Orders:     []*domain.OrderEntity{tradingResult.CancelOrderResult.CancelOrder},
 		}); err != nil {
 			return errors.Wrap(err, "produce failed")
 		}

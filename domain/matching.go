@@ -11,14 +11,15 @@ import (
 var (
 	ErrEmptyOrderBook       = errors.New("empty order book error")
 	ErrNoOrder              = errors.New("order not found error")
+	ErrNoPrice              = errors.New("price not found error")
 	ErrGetDuplicateEvent    = errors.New("get duplicate event error")
 	ErrMissEvent            = errors.New("miss event error")
 	ErrPreviousIDNotCorrect = errors.New("message previous id not correct")
 )
 
 type MatchingRepo interface {
-	ProduceOrderBook(ctx context.Context, orderBook *OrderBookEntity) error
-	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookEntity) error)
+	ProduceOrderBook(ctx context.Context, orderBook *OrderBookL2Entity) error
+	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookL2Entity) error)
 
 	ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
@@ -26,25 +27,33 @@ type MatchingRepo interface {
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
 	GetMatchingHistory(maxResults int) ([]*MatchOrderDetail, error)
+}
 
+type MatchingOrderBookRepo interface {
 	GetOrderBookFirst(direction DirectionEnum) (*OrderEntity, error)
 	AddOrderBookOrder(direction DirectionEnum, order *OrderEntity) error
 	RemoveOrderBookOrder(direction DirectionEnum, order *OrderEntity) error
+	MatchOrder(orderID int, matchedQuantity decimal.Decimal, orderStatus OrderStatusEnum, updatedAt time.Time) error
+	UpdateOrderStatus(orderID int, orderStatus OrderStatusEnum, updatedAt time.Time) error
 
-	GetOrderBook(maxDepth int) *OrderBookEntity
-	GetOrderBooksID() (sellBook, buyBook []int)
+	GetL1OrderBook() *OrderBookL1Entity
+	// GetL2OrderBook maxDepth is -1 will return all order book
+	GetL2OrderBook(maxDepth int) *OrderBookL2Entity
+	// GetL3OrderBook maxDepth is -1 will return all order book
+	GetL3OrderBook(maxDepth int) *OrderBookL3Entity
+
 	GetMarketPrice() decimal.Decimal
-	SetMarketPrice(price decimal.Decimal)
+	SetMarketPrice(marketPrice decimal.Decimal)
 	GetSequenceID() int
 	SetSequenceID(sequenceID int)
-	RecoverBySnapshot(tradingSnapshot *TradingSnapshot) error
 }
 
 type MatchingUseCase interface {
 	NewOrder(ctx context.Context, o *OrderEntity) (*MatchResult, error)
-	CancelOrder(ts time.Time, o *OrderEntity) error
+	CancelOrder(o *OrderEntity, timestamp time.Time) (*CancelResult, error)
 
-	GetOrderBook(maxDepth int) *OrderBookEntity
+	GetOrderBook(maxDepth int) *OrderBookL2Entity
+	GetL3OrderBook(maxDepth int) *OrderBookL3Entity
 	GetMarketPrice() decimal.Decimal
 	GetSequenceID() int
 
@@ -72,6 +81,12 @@ type MatchResult struct {
 	TakerOrder   *OrderEntity
 	MatchDetails []*MatchDetail
 	CreatedAt    time.Time
+}
+
+type CancelResult struct {
+	SequenceID  int
+	CancelOrder *OrderEntity
+	CreatedAt   time.Time
 }
 
 type MatchDetail struct {

@@ -245,7 +245,7 @@ t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domai
   err := t.sequencerRepo.SaveEvents(sequencerEvents)
   if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
     // if duplicate, filter events then retry
-    // code in https://github.com/superj80820/system-design/blob/7342610e010c4fcf15e1b4215007ec7666a1e58f/exchange/usecase/trading/trading.go#L229-L264
+    // another code...
     return
   } else if err != nil {
     panic(errors.Wrap(err, "save event failed"))
@@ -284,7 +284,7 @@ type assetRepo struct {
 	usersAssetsMap map[int]map[int]*domain.UserAsset
 	lock           *sync.RWMutex
 
-	// ...another fields
+	// another fields...
 }
 ```
 
@@ -550,30 +550,42 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 	}
 	userOrdersClone := make(map[int]*domain.OrderEntity, len(userOrders))
 	for orderID, order := range userOrders {
-		userOrdersClone[orderID] = cloneOrder(order)
+		userOrdersClone[orderID] = order.Clone()
 	}
 	return userOrdersClone, nil
-}
-
-func cloneOrder(order *domain.OrderEntity) *domain.OrderEntity {
-	return &domain.OrderEntity{
-		ID:               order.ID,
-		SequenceID:       order.SequenceID,
-		UserID:           order.UserID,
-		Price:            order.Price,
-		Direction:        order.Direction,
-		Status:           order.Status,
-		Quantity:         order.Quantity,
-		UnfilledQuantity: order.UnfilledQuantity,
-		CreatedAt:        order.CreatedAt,
-		UpdatedAt:        order.UpdatedAt,
-	}
 }
 ```
 
 ### Matching 撮合模組
 
 ![](./matching.jpg)
+
+* 撮合模組是整個搓合系統最核心的部分
+* 事實上就是維護一個買單order-book一個賣單order-book
+* order-book必須用一個快速的方式實現查詢、插入、刪除、排序
+  * 如果是用list會比較慢，因為
+    * 查詢: O(n)
+    * 插入: O(n)
+    * 刪除: O(n)
+    * 排序: O(nlogn)
+  * 如果是用link-list也不夠快，因為
+    * 查詢: O(n)
+    * 插入: O(n)
+    * 刪除: O(n)
+    * 排序: O(nlogn)
+  * 如果是用double-link-list也不夠快，因為
+    * 查詢: O(n)
+    * 插入: O(1)
+    * 刪除: O(1)
+    * 排序: O(nlogn)
+  * 紅黑數的話比較適合，因為
+  * 如果是用double-link-list也不夠快，因為
+    * 查詢: O(logn)
+    * 插入: O(logn)
+    * 刪除: O(logn)
+    * 排序: O(nlogn)
+
+![](./order-book.jpg)
 
 
 
