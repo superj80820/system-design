@@ -6,36 +6,30 @@ import (
 	"fmt"
 	"strconv"
 
+	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"gorm.io/gorm/clause"
 )
 
 type orderRepo struct {
 	orm          *ormKit.DB
 	orderMQTopic mq.MQTopic
-}
-
-type orderEntityDB struct {
-	*domain.OrderEntity
-}
-
-func (*orderEntityDB) TableName() string {
-	return "orders"
+	tableName    string
 }
 
 func CreateOrderRepo(orm *ormKit.DB, orderMQTopic mq.MQTopic) domain.OrderRepo {
 	return &orderRepo{
 		orm:          orm,
 		orderMQTopic: orderMQTopic,
+		tableName:    "orders",
 	}
 }
 
 func (o *orderRepo) GetHistoryOrder(userID int, orderID int) (*domain.OrderEntity, error) {
-	var order orderEntityDB
-	err := o.orm.Where("id = ?", orderID).First(&order).Error
+	var order domain.OrderEntity
+	err := o.orm.Table(o.tableName).Where("id = ?", orderID).First(&order).Error
 	if mySQLErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mySQLErr, ormKit.ErrRecordNotFound) {
 		return nil, errors.Wrap(domain.ErrNoOrder, fmt.Sprintf("error call stack: %+v", err))
 	} else if err != nil {
@@ -44,23 +38,42 @@ func (o *orderRepo) GetHistoryOrder(userID int, orderID int) (*domain.OrderEntit
 	if userID != order.UserID {
 		return nil, errors.New("not found")
 	}
-	return order.OrderEntity, nil
+	return &order, nil
 }
 
 func (o *orderRepo) GetHistoryOrders(userID int, maxResults int) ([]*domain.OrderEntity, error) {
 	var orders []*domain.OrderEntity
-	if err := o.orm.Model(&orderEntityDB{}).Where("user_id = ?", userID).Limit(maxResults).Order("id DESC").Find(&orders).Error; err != nil {
+	if err := o.orm.Table(o.tableName).Where("user_id = ?", userID).Limit(maxResults).Order("id DESC").Find(&orders).Error; err != nil {
 		return nil, errors.Wrap(err, "query failed")
 	}
 	return orders, nil
 }
 
-func (o *orderRepo) SaveHistoryOrdersWithIgnore(orders []*domain.OrderEntity) error {
-	ordersDB := make([]*orderEntityDB, len(orders))
-	for idx, order := range orders { // TODO: need for loop to assign?
-		ordersDB[idx] = &orderEntityDB{OrderEntity: order}
+func (o *orderRepo) SaveHistoryOrdersWithIgnore(sequenceID int, orders []*domain.OrderEntity) error {
+	builder := sq.
+		Insert(o.tableName).
+		Columns("id", "user_id", "sequence_id", "direction", "price", "status", "quantity", "unfilled_quantity", "updated_at", "created_at").
+		Suffix("ON DUPLICATE KEY UPDATE "+
+			"`status` = CASE WHEN `sequence_id` < ? THEN VALUES(`status`) ELSE `status` END,"+
+			"`unfilled_quantity` = CASE WHEN `sequence_id` < ? THEN VALUES(`unfilled_quantity`) ELSE `unfilled_quantity` END,"+
+			"`updated_at` = CASE WHEN `sequence_id` < ? THEN VALUES(`updated_at`) ELSE `updated_at` END,"+
+			"`sequence_id` = CASE WHEN `sequence_id` < ? THEN VALUES(`sequence_id`) ELSE `sequence_id` END",
+			sequenceID,
+			sequenceID,
+			sequenceID,
+			sequenceID,
+		)
+	for _, order := range orders {
+		builder = builder.Values(order.ID, order.UserID, sequenceID, order.Direction, order.Price, order.Status, order.Quantity, order.UnfilledQuantity, order.UpdatedAt, order.CreatedAt)
 	}
-	if err := o.orm.Clauses(clause.Insert{Modifier: "IGNORE"}).Create(ordersDB).Error; err != nil {
+	sql, args, err := builder.ToSql()
+	fmt.Println("yorkkk", sql)
+	fmt.Println("yorktyui", args, err)
+	if err != nil {
+		return errors.Wrap(err, "to sql failed")
+	}
+	if err := o.orm.Table(o.tableName).Exec(sql, args...).Error; err != nil {
+		fmt.Println("yorkkadisfjad", errors.Wrap(err, "save orders failed"))
 		return errors.Wrap(err, "save orders failed")
 	}
 	return nil
@@ -114,8 +127,8 @@ func (o *orderRepo) ProduceOrderMQByTradingResult(ctx context.Context, tradingRe
 	return nil
 }
 
-func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity) error) {
-	o.orderMQTopic.SubscribeBatch(key, func(messages [][]byte) error {
+func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error) {
+	o.orderMQTopic.SubscribeBatchWithManualCommit(key, func(messages [][]byte, commitFn func() error) error {
 		for _, message := range messages {
 			var mqMessage mqMessage
 			err := json.Unmarshal(message, &mqMessage)
@@ -123,7 +136,7 @@ func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify 
 				return errors.Wrap(err, "unmarshal failed")
 			}
 
-			if err := notify(mqMessage.SequenceID, mqMessage.Orders); err != nil {
+			if err := notify(mqMessage.SequenceID, mqMessage.Orders, commitFn); err != nil {
 				return errors.Wrap(err, "notify failed")
 			}
 		}

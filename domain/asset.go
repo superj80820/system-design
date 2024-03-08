@@ -13,6 +13,7 @@ var (
 	NotFoundUserAssetsErr = errors.New("not found user assets")
 	NotFoundUserAssetErr  = errors.New("not found user asset")
 	LessAmountErr         = errors.New("less amount error")
+	InvalidAmountErr      = errors.New("invalid amount error")
 )
 
 type UserAsset struct {

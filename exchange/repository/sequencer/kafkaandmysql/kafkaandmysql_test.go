@@ -21,7 +21,7 @@ import (
 type testSetup struct {
 	orm                  *ormKit.DB
 	sequenceMessageTopic mqKit.MQTopic
-	tradingSequencerRepo domain.SequencerRepo[domain.TradingEvent]
+	sequencerRepo        domain.SequencerRepo
 	teardown             func() error
 }
 
@@ -43,6 +43,8 @@ func testSetupFn(t *testing.T) *testSetup {
 		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
 		"SEQUENCE",
 		kafkaMQKit.ConsumeByGroupID("test", true),
+		1000,
+		100*time.Millisecond,
 		kafkaMQKit.CreateTopic(1, 1),
 	)
 	assert.Nil(t, err)
@@ -74,13 +76,13 @@ func testSetupFn(t *testing.T) *testSetup {
 			)))
 	assert.Nil(t, err)
 
-	tradingSequencerRepo, err := CreateTradingSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
+	sequencerRepo, err := CreateSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
 	assert.Nil(t, err)
 
 	return &testSetup{
 		orm:                  mysqlDB,
 		sequenceMessageTopic: sequenceMessageTopic,
-		tradingSequencerRepo: tradingSequencerRepo,
+		sequencerRepo:        sequencerRepo,
 		teardown: func() error {
 			if err := kafkaContainer.Terminate(ctx); err != nil {
 				return errors.Wrap(err, "terminate kafka container failed")
@@ -99,27 +101,63 @@ func TestTradingSequencerRepo(t *testing.T) {
 		fn       func(t *testing.T)
 	}{
 		{
+			scenario: "test get history events",
+			fn: func(t *testing.T) {
+				testSetup := testSetupFn(t)
+				defer testSetup.teardown()
+
+				assert.Nil(t, testSetup.sequencerRepo.SaveEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
+				}))
+				expectedResults := []int64{1, 2, 3}
+				var count int
+				for page, isEnd := 1, false; !isEnd; page++ {
+					var (
+						historySequenceEvents []*domain.SequencerEvent
+						err                   error
+					)
+					historySequenceEvents, isEnd, err = testSetup.sequencerRepo.GetHistoryEvents(1, page, 2)
+					assert.Nil(t, err)
+					for _, event := range historySequenceEvents {
+						assert.Equal(t, expectedResults[count], event.SequenceID)
+						count++
+					}
+				}
+				assert.Equal(t, 3, count)
+			},
+		},
+		{
 			scenario: "test get max sequence id",
 			fn: func(t *testing.T) {
 				testSetup := testSetupFn(t)
 				defer testSetup.teardown()
 
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 1,
-					PreviousID:  0,
-					SequenceID:  1,
+				assert.Nil(t, testSetup.sequencerRepo.SaveEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
 				}))
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 2,
-					PreviousID:  1,
-					SequenceID:  2,
-				}))
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 3,
-					PreviousID:  2,
-					SequenceID:  3,
-				}))
-				maxSequenceID, err := testSetup.tradingSequencerRepo.GetMaxSequenceID()
+				maxSequenceID, err := testSetup.sequencerRepo.GetMaxSequenceID()
 				assert.Nil(t, err)
 				assert.Equal(t, uint64(3), maxSequenceID)
 			},
@@ -130,24 +168,23 @@ func TestTradingSequencerRepo(t *testing.T) {
 				testSetup := testSetupFn(t)
 				defer testSetup.teardown()
 
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 1,
-					PreviousID:  0,
-					SequenceID:  1,
+				assert.Nil(t, testSetup.sequencerRepo.SaveEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
 				}))
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 2,
-					PreviousID:  1,
-					SequenceID:  2,
-				}))
-				assert.Nil(t, testSetup.tradingSequencerRepo.SaveEvent(&domain.SequencerEvent{
-					ReferenceID: 3,
-					PreviousID:  2,
-					SequenceID:  3,
-				}))
-				tradingSequencerRepo, err := CreateTradingSequencerRepo(context.Background(), testSetup.sequenceMessageTopic, testSetup.orm)
+				sequencerRepo, err := CreateSequencerRepo(context.Background(), testSetup.sequenceMessageTopic, testSetup.orm)
 				assert.Nil(t, err)
-				assert.Equal(t, uint64(3), tradingSequencerRepo.GetCurrentSequenceID())
+				assert.Equal(t, uint64(3), sequencerRepo.GetSequenceID())
 			},
 		},
 		{
@@ -156,12 +193,13 @@ func TestTradingSequencerRepo(t *testing.T) {
 				testSetup := testSetupFn(t)
 				defer testSetup.teardown()
 
-				previousID := testSetup.tradingSequencerRepo.GetCurrentSequenceID()
-				sequenceID := testSetup.tradingSequencerRepo.GenerateNextSequenceID()
+				previousID := testSetup.sequencerRepo.GetSequenceID()
+				testSetup.sequencerRepo.SetSequenceID(previousID + 1)
+				sequenceID := testSetup.sequencerRepo.GetSequenceID()
 				assert.Equal(t, uint64(0), previousID)
 				assert.Equal(t, uint64(1), sequenceID)
 
-				currentID := testSetup.tradingSequencerRepo.GetCurrentSequenceID()
+				currentID := testSetup.sequencerRepo.GetSequenceID()
 				assert.Equal(t, uint64(1), currentID)
 			},
 		},
@@ -172,18 +210,20 @@ func TestTradingSequencerRepo(t *testing.T) {
 				defer testSetup.teardown()
 
 				sequenceIDCh := make(chan int)
-				testSetup.tradingSequencerRepo.SubscribeTradeSequenceMessage(func(te *domain.TradingEvent, commitFn func() error) {
-					sequenceIDCh <- te.SequenceID
+				testSetup.sequencerRepo.ConsumeSequenceMessages(func(events []*domain.SequencerEvent, commitFn func() error) {
+					for _, event := range events {
+						sequenceIDCh <- event.SequenceID
+					}
 				})
 				time.Sleep(10 * time.Second)
-				assert.Nil(t, testSetup.tradingSequencerRepo.SendTradeSequenceMessages(context.Background(), &domain.TradingEvent{
+				assert.Nil(t, testSetup.sequencerRepo.ProduceSequenceMessages(context.Background(), &domain.SequencerEvent{
 					SequenceID: 100,
 				}))
 				timer := time.NewTimer(6000 * time.Second)
 				defer timer.Stop()
 				select {
 				case sequenceID := <-sequenceIDCh:
-					assert.Equal(t, 100, sequenceID)
+					assert.Equal(t, int64(100), sequenceID)
 				case <-timer.C:
 					assert.Fail(t, "get message timeout")
 				}

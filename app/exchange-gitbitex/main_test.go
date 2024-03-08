@@ -30,6 +30,7 @@ import (
 	wsDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex/ws"
 	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
+	matchingMemoryRepo "github.com/superj80820/system-design/exchange/repository/matching/memory"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
 	orderORMRepo "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
 	quotationRepoORMAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/ormandredis"
@@ -42,6 +43,7 @@ import (
 	"github.com/superj80820/system-design/exchange/usecase/matching"
 	"github.com/superj80820/system-design/exchange/usecase/order"
 	"github.com/superj80820/system-design/exchange/usecase/quotation"
+	"github.com/superj80820/system-design/exchange/usecase/sequencer"
 	"github.com/superj80820/system-design/exchange/usecase/trading"
 	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
@@ -122,8 +124,6 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	messageChannelBuffer := 10
 	messageCollectDuration := 100 * time.Millisecond
 	sequenceMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
@@ -136,9 +136,9 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	assert.Nil(t, err)
 	tracer := traceKit.CreateNoOpTracer()
 
-	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB, tradingEventMQTopic, tradingResultMQTopic)
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB)
 	assetRepo := assetMemoryRepo.CreateAssetRepo(assetMQTopic)
-	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateTradingSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
 	if err != nil {
 		panic(err)
 	}
@@ -146,10 +146,11 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
 	quotationRepo := quotationRepoORMAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
-	matchingOrderBookRepo := matchingMySQLAndMQRepo.CreateOrderBookRepo()
+	matchingOrderBookRepo := matchingMemoryRepo.CreateOrderBookRepo()
 	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
 
+	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo)
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100) // TODO: 100?
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
@@ -158,7 +159,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, sequencerRepo, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
 	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	assert.Nil(t, err)
 	authUseCase, err := auth.CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath, authRepo, accountRepo, logger)

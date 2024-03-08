@@ -2,6 +2,8 @@ package matching
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -86,6 +88,7 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		takerOrder.UnfilledQuantity = takerOrder.UnfilledQuantity.Sub(matchedQuantity)
 		makerOrder.UnfilledQuantity = makerOrder.UnfilledQuantity.Sub(matchedQuantity)
 		if makerOrder.UnfilledQuantity.Equal(decimal.Zero) {
+			makerOrder.Status = domain.OrderStatusFullyFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt); err != nil {
 				return nil, errors.Wrap(err, "update order failed")
 			}
@@ -93,6 +96,7 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 				return nil, errors.Wrap(err, "remove order book order failed")
 			}
 		} else {
+			makerOrder.Status = domain.OrderStatusPartialFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusPartialFilled, takerOrder.CreatedAt); err != nil {
 				return nil, errors.Wrap(err, "update order failed")
 			}
@@ -103,15 +107,19 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		}
 	}
 	if takerOrder.UnfilledQuantity.GreaterThan(decimal.Zero) {
-		orderStatus := domain.OrderStatusPending
+		status := domain.OrderStatusPending
 		if takerOrder.UnfilledQuantity.Cmp(takerOrder.Quantity) != 0 {
-			orderStatus = domain.OrderStatusPartialFilled
+			status = domain.OrderStatusPartialFilled
 		}
-		m.matchingOrderBookRepo.MatchOrder(takerOrder.ID, decimal.Zero, orderStatus, takerOrder.CreatedAt)
+		takerOrder.Status = status
+		m.matchingOrderBookRepo.MatchOrder(takerOrder.ID, decimal.Zero, status, takerOrder.CreatedAt)
 		m.matchingOrderBookRepo.AddOrderBookOrder(takerDirection, takerOrder)
 	}
 
 	m.isOrderBookChanged.Store(true)
+
+	b, _ := json.Marshal(*matchResult)
+	fmt.Println("yorkazcv", string(b))
 
 	return matchResult, nil
 }

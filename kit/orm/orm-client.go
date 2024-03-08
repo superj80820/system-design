@@ -168,6 +168,10 @@ func (db *DB) Clauses(conds ...Expression) *TX {
 	return db.gormClient.Clauses(conds...)
 }
 
+func (db *DB) Table(name string, args ...interface{}) *TX {
+	return db.gormClient.Table(name, args...)
+}
+
 func (db *DB) Create(value interface{}) *TX {
 	return db.gormClient.Create(value)
 }

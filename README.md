@@ -212,7 +212,7 @@ func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, use
 		},
 	}
 
-	if err := t.sequencerRepo.SendTradeSequenceMessages(ctx, tradingEvent); err != nil {
+	if err := t.sequencerRepo.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "send trade sequence messages failed")
 	}
 
@@ -229,7 +229,7 @@ kafka sequence topic的consume到event後，需為event定序，將一批已經�
 雖然沒辦法保證每次consume都成功處理，但我們可以確保consume失敗後會重試直到成功再commit。
 
 ```go
-t.sequencerRepo.SubscribeGlobalTradeSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
+t.sequencerRepo.SubscribeGlobalSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
   sequencerEvents := make([]*domain.SequencerEvent, len(tradingEvents))
   tradingEventsClone := make([]*domain.TradingEvent, len(tradingEvents))
   for idx := range tradingEvents {

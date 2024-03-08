@@ -7,59 +7,51 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
-type sequencerEventDBEntity struct {
+type sequenceKafkaMessage struct {
 	*domain.SequencerEvent
 }
 
-type tradingEventKafkaEntity struct {
-	*domain.TradingEvent
+func (s *sequenceKafkaMessage) GetKey() string {
+	return strconv.Itoa(s.SequenceID)
 }
 
-var _ mqKit.Message = (*tradingEventKafkaEntity)(nil)
-
-func (t *tradingEventKafkaEntity) GetKey() string {
-	return strconv.Itoa(t.SequenceID)
-}
-
-func (t *tradingEventKafkaEntity) Marshal() ([]byte, error) {
-	marshalMessage, err := json.Marshal(t)
+func (s *sequenceKafkaMessage) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(s)
 	if err != nil {
 		return nil, errors.Wrap(err, "marshal failed")
 	}
-	return marshalMessage, nil
+	return marshalData, nil
 }
 
-func (sequencerEventDBEntity) TableName() string {
-	return "events"
-}
-
-type tradingSequencerRepo struct {
+type sequencerRepo struct {
 	orm        *ormKit.DB
 	sequenceMQ mqKit.MQTopic
+	tableName  string
 
 	pauseCh    chan struct{}
 	continueCh chan struct{}
 
-	sequence    *atomic.Uint64
-	isSubscribe *atomic.Bool
+	sequence *atomic.Uint64
 }
 
-func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, orm *ormKit.DB) (domain.SequencerRepo[domain.TradingEvent], error) {
+func CreateSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, orm *ormKit.DB) (domain.SequencerRepo, error) {
 	var sequence atomic.Uint64
-	t := &tradingSequencerRepo{
-		orm:         orm,
-		sequenceMQ:  sequenceMQ,
-		pauseCh:     make(chan struct{}),
-		continueCh:  make(chan struct{}),
-		sequence:    &sequence,
-		isSubscribe: new(atomic.Bool),
+	t := &sequencerRepo{
+		orm:        orm,
+		sequenceMQ: sequenceMQ,
+		tableName:  "events",
+		pauseCh:    make(chan struct{}),
+		continueCh: make(chan struct{}),
+		sequence:   &sequence,
 	}
 
 	maxSequenceID, err := t.GetMaxSequenceID()
@@ -74,117 +66,177 @@ func CreateTradingSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, o
 	return t, nil
 }
 
-func (t *tradingSequencerRepo) GetMaxSequenceID() (uint64, error) {
-	var sequencerEvent sequencerEventDBEntity
-	if err := t.orm.Order("sequence_id DESC").First(&sequencerEvent).Error; err != nil {
+func (s *sequencerRepo) GetMaxSequenceID() (uint64, error) {
+	var sequencerEvent domain.SequencerEvent
+	if err := s.orm.Table(s.tableName).Order("sequence_id DESC").First(&sequencerEvent).Error; err != nil {
 		return 0, errors.Wrap(err, "get sequence id failed")
 	}
 	return uint64(sequencerEvent.SequenceID), nil
 }
 
-func (t *tradingSequencerRepo) SendTradeSequenceMessages(ctx context.Context, tradingEvent *domain.TradingEvent) error {
-	if err := t.sequenceMQ.Produce(ctx, &tradingEventKafkaEntity{
-		TradingEvent: tradingEvent,
-	}); err != nil {
+func (s *sequencerRepo) ProduceSequenceMessages(ctx context.Context, message *domain.SequencerEvent) error {
+	if err := s.sequenceMQ.Produce(ctx, &sequenceKafkaMessage{SequencerEvent: message}); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
 	return nil
 }
 
-func (t *tradingSequencerRepo) SaveEvent(sequencerEvent *domain.SequencerEvent) error {
-	if err := t.orm.Create(&sequencerEventDBEntity{
-		SequencerEvent: sequencerEvent,
-	}).Error; err != nil {
-		return errors.Wrap(err, "create trading event failed")
+func (s *sequencerRepo) SaveWithFilterEvents(sequenceEvents []*domain.SequencerEvent, commitFn func() error) ([]*domain.SequencerEvent, error) {
+	previousIDInt, err := utilKit.SafeUint64ToInt(s.GetSequenceID())
+	if err != nil {
+		return nil, errors.Wrap(err, "uint64 to int overflow")
+	}
+
+	var curSequenceID int
+	for idx, sequenceEvent := range sequenceEvents {
+		sequenceID := previousIDInt + 1 + idx
+		sequenceEvent.SequenceID = sequenceID
+		sequenceEvent.CreatedAt = time.Now()
+		curSequenceID = sequenceID
+	}
+
+	err = s.SaveEvents(sequenceEvents)
+	if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+		// TODO: test
+		// if duplicate, filter events then retry
+		filterEventsMap, err := s.GetFilterEventsMap(sequenceEvents)
+		if err != nil {
+			return nil, errors.Wrap(err, "get filter events map failed")
+		}
+		var filterSequenceEvents []*domain.SequencerEvent
+		for _, val := range sequenceEvents {
+			if filterEventsMap[val.ReferenceID] {
+				continue
+			}
+			filterSequenceEvents = append(filterSequenceEvents, val)
+		}
+
+		if len(filterSequenceEvents) != 0 {
+			return s.SaveWithFilterEvents(filterSequenceEvents, commitFn)
+		}
+	} else if err != nil {
+		return nil, errors.Wrap(err, "save event failed")
+	}
+
+	if err := commitFn(); err != nil {
+		return nil, errors.Wrap(err, "commit latest message failed")
+	}
+
+	s.SetSequenceID(uint64(curSequenceID))
+
+	return sequenceEvents, nil
+}
+
+func (s *sequencerRepo) CheckEventSequence(sequenceID, lastSequenceID int) error {
+	if sequenceID <= lastSequenceID {
+		return errors.Wrap(domain.ErrGetDuplicateEvent, "skip duplicate, last sequence id: "+strconv.Itoa(lastSequenceID)+", message event sequence id: "+strconv.Itoa(sequenceID))
+	} else if (sequenceID - lastSequenceID) > 1 {
+		return errors.Wrap(domain.ErrMissEvent, "last sequence id: "+strconv.Itoa(lastSequenceID)+", message event sequence id: "+strconv.Itoa(sequenceID))
 	}
 	return nil
 }
 
-func (t *tradingSequencerRepo) SaveEvents(sequencerEvents []*domain.SequencerEvent) error {
-	sequencerEventsDBEntity := make([]*sequencerEventDBEntity, len(sequencerEvents)) // TODO: optimize(no for loop)
-	for idx, sequencerEvent := range sequencerEvents {
-		sequencerEventsDBEntity[idx] = &sequencerEventDBEntity{
-			SequencerEvent: sequencerEvent,
+func (s *sequencerRepo) RecoverEvents(offsetSequenceID int, processFn func([]*domain.SequencerEvent) error) error {
+	for page, isEnd := 1, false; !isEnd; page++ {
+		var (
+			events []*domain.SequencerEvent
+			err    error
+		)
+		events, isEnd, err = s.GetHistoryEvents(offsetSequenceID+1, page, 1000)
+		if err != nil {
+			return errors.Wrap(err, "get history events failed")
+		}
+		if err := processFn(events); err != nil {
+			return errors.Wrap(err, "process events failed")
 		}
 	}
-	if err := t.orm.Create(&sequencerEventsDBEntity).Error; err != nil {
-		return errors.Wrap(err, "create trading events failed")
+	return nil
+}
+
+func (s *sequencerRepo) GetHistoryEvents(offsetSequenceID, page, limit int) (sequencerEvents []*domain.SequencerEvent, isEnd bool, err error) {
+	var maxEvent domain.SequencerEvent
+	if err := s.orm.Table(s.tableName).Order("sequence_id DESC").Limit(1).Select("sequence_id").First(&maxEvent).Error; err != nil {
+		return nil, false, errors.Wrap(err, "get max event failed")
+	}
+
+	var events []*domain.SequencerEvent
+	if err := s.orm.Table(s.tableName).Where("sequence_id >= ?", offsetSequenceID).Order("sequence_id ASC").Offset((page - 1) * limit).Limit(limit).Find(&events).Error; err != nil {
+		return nil, false, errors.Wrap(err, "find events failed")
+	}
+
+	if maxEvent.SequenceID <= offsetSequenceID+(page-1)*limit {
+		return events, true, nil
+	}
+	return events, false, nil
+}
+
+func (s *sequencerRepo) SaveEvents(sequencerEvents []*domain.SequencerEvent) error {
+	if err := s.orm.Table(s.tableName).Create(&sequencerEvents).Error; err != nil {
+		return errors.Wrap(err, "create events failed")
 	}
 	return nil
 }
 
-func (t *tradingSequencerRepo) Pause() error {
+func (s *sequencerRepo) Pause() error {
 	select {
-	case t.pauseCh <- struct{}{}:
+	case s.pauseCh <- struct{}{}:
 	default:
 		// for no block
 	}
 	return nil
 }
 
-func (t *tradingSequencerRepo) Continue() error {
+func (s *sequencerRepo) Continue() error {
 	select {
-	case t.continueCh <- struct{}{}:
+	case s.continueCh <- struct{}{}:
 	default:
 		// for no block
 	}
 	return nil
 }
 
-func (t *tradingSequencerRepo) Shutdown() {
-	t.sequenceMQ.Shutdown() // TODO
+func (s *sequencerRepo) Shutdown() {
+	s.sequenceMQ.Shutdown() // TODO
 }
 
-func (t *tradingSequencerRepo) SubscribeGlobalTradeSequenceMessages(notify func([]*domain.TradingEvent, func() error)) {
-	if !t.isSubscribe.CompareAndSwap(false, true) {
-		return
-	}
-	t.sequenceMQ.SubscribeBatchWithManualCommit("global-sequencer", func(messages [][]byte, commitFn func() error) error {
+func (s *sequencerRepo) ConsumeSequenceMessages(notify func([]*domain.SequencerEvent, func() error)) {
+	s.sequenceMQ.SubscribeBatchWithManualCommit("global-sequencer", func(messages [][]byte, commitFn func() error) error {
 		select {
-		case <-t.pauseCh:
-			<-t.continueCh
+		case <-s.pauseCh:
+			<-s.continueCh
 		default:
 		}
 
-		tradingEvents := make([]*domain.TradingEvent, len(messages))
-		for idx := range messages {
-			var tradingEvent domain.TradingEvent
-			if err := json.Unmarshal(messages[idx], &tradingEvent); err != nil {
-				return errors.Wrap(err, "json unmarshal failed")
+		sequenceEvents := make([]*domain.SequencerEvent, len(messages))
+		for idx, message := range messages {
+			var sequenceEvent domain.SequencerEvent
+			if err := json.Unmarshal(message, &sequenceEvent); err != nil {
+				return errors.Wrap(err, "unmarshal failed")
 			}
-			tradingEvents[idx] = &tradingEvent
+			sequenceEvents[idx] = &sequenceEvent
 		}
-		notify(tradingEvents, commitFn)
+
+		notify(sequenceEvents, commitFn)
 		return nil
 	})
 }
 
-func (t *tradingSequencerRepo) GenerateNextSequenceID() uint64 {
-	return t.sequence.Add(1)
+func (s *sequencerRepo) SetSequenceID(sequenceID uint64) {
+	s.sequence.Store(sequenceID)
 }
 
-func (t *tradingSequencerRepo) GetCurrentSequenceID() uint64 {
-	return t.sequence.Load()
+func (s *sequencerRepo) GetSequenceID() uint64 {
+	return s.sequence.Load()
 }
 
-func (t *tradingSequencerRepo) GetFilterEventsMap(sequencerEvents []*domain.SequencerEvent) (map[int64]bool, error) {
+func (s *sequencerRepo) GetFilterEventsMap(sequencerEvents []*domain.SequencerEvent) (map[int]bool, error) {
 	existsQuery := make([]string, len(sequencerEvents))
-	var sequencerEventDB sequencerEventDBEntity
 	for idx, sequencerEvent := range sequencerEvents {
-		existsQuery[idx] = fmt.Sprintf("EXISTS(SELECT 1 FROM %s WHERE ReferenceID = %d) AS %d", sequencerEventDB.TableName(), sequencerEvent.ReferenceID, sequencerEvent.ReferenceID)
+		existsQuery[idx] = fmt.Sprintf("EXISTS(SELECT 1 FROM %s WHERE ReferenceID = %d) AS %d", s.tableName, sequencerEvent.ReferenceID, sequencerEvent.ReferenceID)
 	}
-	res := make(map[int64]bool)
-	if err := t.orm.Raw("SELECT " + strings.Join(existsQuery, ",")).Scan(&res).Error; err != nil {
+	res := make(map[int]bool)
+	if err := s.orm.Table(s.tableName).Raw("SELECT " + strings.Join(existsQuery, ",")).Scan(&res).Error; err != nil {
 		return nil, errors.Wrap(err, "query failed")
 	}
 	return res, nil
-}
-
-func (t *tradingSequencerRepo) ResetSequence() error {
-	maxSequenceID, err := t.GetMaxSequenceID()
-	if err != nil {
-		return errors.Wrap(err, "get max sequence id failed")
-	}
-	t.sequence.Store(maxSequenceID)
-	return nil
 }

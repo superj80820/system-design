@@ -4,9 +4,9 @@ import { check, sleep } from 'k6';
 export const options = {
   discardResponseBodies: true,
   // A number specifying the number of VUs to run concurrently.
-  vus: 5000,
+  vus: 100,
   // A string specifying the total duration of the test run.
-  duration: '55s',
+  duration: '10s',
 
   // The following section contains configuration options for execution of this
   // test script in Grafana Cloud.
@@ -58,14 +58,14 @@ export const options = {
 //
 export default function () {
   const url = 'http://localhost:9090/api/orders';
-  const randomVal = Math.floor(Math.random() * 100)
+  const randomVal = Math.floor(Math.random() * 100) + 1
   const direction = ["buy", "sell"][Math.floor(Math.random() * 2)]
   const payload = JSON.stringify({ "productId": "BTC-USDT", "side": direction, "price": 2.34 + randomVal, "size": randomVal, "type": "limit" });
 
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDg2NDI4MDksImlhdCI6MTcwODYzOTIwOSwic3ViIjoiMTc2MDc1NjY2NTA0MjM0MTg4OCJ9.XqhDQGlg0djpzw1wVjb8AfpLHFtlbiFNR780DVg8r7zKW707lcWV5Nzx3TJYuTdk-ZOJ3TK1Y_TPkeBx6bEAsQ',
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MDk3MzczMjAsImlhdCI6MTcwOTczMzcyMCwic3ViIjoiMTc2NTM3NzI3NjQ2MDkyOTAyNCJ9.Dn6d7FMabKbEAaQR7VqGdyUJVv9jao9GRzTox8CXkBTnKtGlwHUH60yNQpXwtiLt5jeA_qxkKxvzJE3ZMPgoFA',
     },
   };
 

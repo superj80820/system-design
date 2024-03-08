@@ -1,4 +1,4 @@
-package mysqlandmq
+package memory
 
 import (
 	"github.com/shopspring/decimal"

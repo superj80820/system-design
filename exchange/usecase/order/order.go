@@ -148,17 +148,13 @@ func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
 }
 
 func (o *orderUseCase) ConsumeOrderResultToSave(ctx context.Context, key string) {
-	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(sequenceID int, orders []*domain.OrderEntity) error {
-		// TODO: york 冪等性
-		var saveOrders []*domain.OrderEntity
-		for _, order := range orders {
-			if order.Status.IsFinalStatus() {
-				saveOrders = append(saveOrders, order)
-			}
+	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error {
+		if err := o.orderRepo.SaveHistoryOrdersWithIgnore(sequenceID, orders); err != nil {
+			return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
 		}
 
-		if err := o.orderRepo.SaveHistoryOrdersWithIgnore(saveOrders); err != nil {
-			return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
+		if err := commitFn(); err != nil {
+			return errors.Wrap(err, "commit failed")
 		}
 
 		return nil

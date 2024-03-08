@@ -8,7 +8,6 @@ import (
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/mq"
-	mqKit "github.com/superj80820/system-design/kit/mq"
 	ormKit "github.com/superj80820/system-design/kit/orm"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -16,13 +15,11 @@ import (
 )
 
 type tradingRepo struct {
-	mongoCollection      *mongo.Collection
-	orm                  *ormKit.DB
-	tradingEventMQTopic  mqKit.MQTopic
-	tradingResultMQTopic mqKit.MQTopic
-	err                  error
-	doneCh               chan struct{}
-	cancel               context.CancelFunc
+	mongoCollection *mongo.Collection
+	orm             *ormKit.DB
+	err             error
+	doneCh          chan struct{}
+	cancel          context.CancelFunc
 }
 
 type tradingResultStruct struct {
@@ -43,64 +40,24 @@ func (t *tradingResultStruct) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-type tradingEventStruct struct {
-	*domain.TradingEvent
-}
-
-var _ mq.Message = (*tradingEventStruct)(nil)
-
-func (t *tradingEventStruct) GetKey() string {
-	return strconv.Itoa(t.TradingEvent.UniqueID) // TODO: test correct
-}
-
-func (t *tradingEventStruct) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(*t)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
-	}
-	return marshalData, nil
-}
-
 func CreateTradingRepo(
 	ctx context.Context,
 	mongoCollection *mongo.Collection,
 	orm *ormKit.DB,
-	tradingResultMQTopic mqKit.MQTopic,
 ) domain.TradingRepo {
-	ctx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 
 	return &tradingRepo{
-		orm:                  orm,
-		mongoCollection:      mongoCollection,
-		tradingEventMQTopic:  tradingEventMQTopic,
-		tradingResultMQTopic: tradingResultMQTopic,
-		doneCh:               make(chan struct{}),
-		cancel:               cancel,
-	}
-}
-
-func (t *tradingRepo) SendTradeEvent(ctx context.Context, tradingEvents []*domain.TradingEvent) {
-	for _, tradingEvent := range tradingEvents {
-		t.tradingEventMQTopic.Produce(ctx, &tradingEventStruct{
-			TradingEvent: tradingEvent,
-		})
+		orm:             orm,
+		mongoCollection: mongoCollection,
+		doneCh:          make(chan struct{}),
+		cancel:          cancel,
 	}
 }
 
 func (t *tradingRepo) Shutdown() {
 	t.cancel()
 	<-t.doneCh
-}
-
-func (t *tradingRepo) SubscribeTradeEvent(key string, notify func(*domain.TradingEvent)) {
-	t.tradingEventMQTopic.Subscribe(key, func(message []byte) error {
-		var tradingEvent domain.TradingEvent
-		if err := json.Unmarshal(message, &tradingEvent); err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		notify(&tradingEvent)
-		return nil
-	})
 }
 
 func (t *tradingRepo) GetHistorySnapshot(ctx context.Context) (*domain.TradingSnapshot, error) {

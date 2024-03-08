@@ -5,25 +5,31 @@ import (
 	"time"
 )
 
-type SequencerRepo[T any] interface {
+type SequencerRepo interface {
 	GetMaxSequenceID() (uint64, error)
-	ResetSequence() error
-	GetCurrentSequenceID() uint64
-	GenerateNextSequenceID() uint64
-	SubscribeGlobalTradeSequenceMessages(notify func(any []*T, commitFn func() error))
-	SendTradeSequenceMessages(context.Context, *T) error
-	SaveEvent(*SequencerEvent) error
+	GetSequenceID() uint64
+	SetSequenceID(uint64)
+
+	ConsumeSequenceMessages(notify func(events []*SequencerEvent, commitFn func() error))
+	ProduceSequenceMessages(context.Context, *SequencerEvent) error
+
 	SaveEvents([]*SequencerEvent) error
-	GetFilterEventsMap([]*SequencerEvent) (map[int64]bool, error)
+
+	GetHistoryEvents(offsetSequenceID, page, limit int) (sequencerEvents []*SequencerEvent, isEnd bool, err error)
+	GetFilterEventsMap([]*SequencerEvent) (map[int]bool, error)
+
+	CheckEventSequence(sequenceID, lastSequenceID int) error
+	RecoverEvents(offsetSequenceID int, processFn func([]*SequencerEvent) error) error
+	SaveWithFilterEvents(events []*SequencerEvent, commitFn func() error) ([]*SequencerEvent, error)
+
 	Pause() error
 	Continue() error
 	Shutdown()
 }
 
 type SequencerEvent struct {
-	ReferenceID int64
-	SequenceID  int64
-	PreviousID  int64
+	ReferenceID int
+	SequenceID  int
 	Data        string
 	CreatedAt   time.Time
 }

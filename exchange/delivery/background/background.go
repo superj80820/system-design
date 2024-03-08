@@ -54,7 +54,6 @@ func AsyncTradingConsume(
 	matchingUseCase domain.MatchingUseCase,
 ) error {
 	tradingUseCase.ConsumeGlobalSequencer(ctx)
-	tradingUseCase.ConsumeTradingEvent(ctx, "global-consume-trade-event")
 	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order") // TODO: error handle
 	quotationUseCase.ConsumeTicksToSave(ctx, "global-save-quotation")
 	candleUseCase.ConsumeTradingResultToSave(ctx, "global-save-candle")

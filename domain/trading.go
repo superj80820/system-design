@@ -17,14 +17,11 @@ const (
 	TradingEventDepositType
 )
 
-// TODO: abstract
 type TradingEvent struct {
 	ReferenceID int
 
 	EventType  TradingEventTypeEnum
 	SequenceID int
-	PreviousID int
-	UniqueID   int // TODO: need?
 
 	OrderRequestEvent *OrderRequestEvent
 	OrderCancelEvent  *OrderCancelEvent
@@ -75,14 +72,26 @@ type DepositEvent struct {
 }
 
 type TradingRepo interface {
-	SubscribeTradeEvent(key string, notify func(*TradingEvent))
-	SendTradeEvent(context.Context, []*TradingEvent)
-
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*UserAsset, ordersData []*OrderEntity, matchesData *MatchData) error
 
 	Done() <-chan struct{}
 	Err() error
+	Shutdown()
+}
+
+type SequenceTradingUseCase interface {
+	GetSequenceID() uint64
+
+	ProduceSequenceMessages(context.Context, *TradingEvent) error
+	ConsumeSequenceMessages(notify func(events []*TradingEvent, commitFn func() error))
+
+	CheckEventSequence(sequenceID, lastSequenceID int) error
+	RecoverEvents(offsetSequenceID int, processFn func([]*TradingEvent) error) error
+	SaveWithFilterEvents(events []*TradingEvent, commitFn func() error) ([]*TradingEvent, error)
+
+	Pause() error
+	Continue() error
 	Shutdown()
 }
 
@@ -104,6 +113,7 @@ type TradingSnapshot struct { // TODO: minify
 
 type TradingResult struct {
 	SequenceID          int
+	ReferenceID         int
 	TradingResultStatus TradingResultStatus
 	TradingEvent        *TradingEvent
 	MatchResult         *MatchResult
@@ -115,11 +125,7 @@ type SyncTradingUseCase interface {
 	CreateOrder(ctx context.Context, messages *TradingEvent) (*MatchResult, *TransferResult, error)
 	CancelOrder(ctx context.Context, tradingEvent *TradingEvent) (*CancelResult, *TransferResult, error)
 	Transfer(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
-
 	Deposit(ctx context.Context, tradingEvent *TradingEvent) (*TransferResult, error)
-
-	GetSequenceID() int
-	RecoverBySnapshot(*TradingSnapshot) error
 }
 
 type ExchangeRequestType string
@@ -179,7 +185,7 @@ type TradingNotifyStream interface {
 
 type TradingUseCase interface {
 	ConsumeGlobalSequencer(context.Context)
-	ConsumeTradingEvent(ctx context.Context, key string)
+	ProcessTradingEvents(ctx context.Context, tradingEvents []*TradingEvent) error
 	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
 	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
 	ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TradingEvent, error)

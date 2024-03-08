@@ -121,7 +121,7 @@ func (u *userAsset) TransferAvailableToAvailable(ctx context.Context, fromUserID
 
 func (u *userAsset) Freeze(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*domain.TransferResult, error) {
 	if amount.LessThanOrEqual(decimal.Zero) {
-		return nil, errors.New("can not operate less or equal zero amount")
+		return nil, errors.Wrap(domain.InvalidAmountErr, fmt.Sprintf("can not operate less or equal zero amount, amount: %s", amount.String()))
 	}
 
 	transferResult := createTransferResult()
