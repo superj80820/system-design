@@ -1,4 +1,4 @@
-package memory
+package memoryandredis
 
 import (
 	"github.com/shopspring/decimal"

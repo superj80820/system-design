@@ -2,7 +2,6 @@ package trading
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -23,6 +22,7 @@ type tradingUseCase struct {
 	sequenceTradingUseCase domain.SequenceTradingUseCase
 	candleRepo             domain.CandleRepo
 	matchingUseCase        domain.MatchingUseCase
+	matchingOrderBookRepo  domain.MatchingOrderBookRepo
 	syncTradingUseCase     domain.SyncTradingUseCase
 	orderUseCase           domain.OrderUseCase
 	quotationRepo          domain.QuotationRepo
@@ -30,17 +30,18 @@ type tradingUseCase struct {
 	matchingRepo           domain.MatchingRepo
 	orderRepo              domain.OrderRepo
 
-	lastSequenceID int
-	orderBookDepth int
-	errLock        *sync.Mutex
-	doneCh         chan struct{}
-	err            error
+	lastSequenceID    int
+	orderBookMaxDepth int
+	errLock           *sync.Mutex
+	doneCh            chan struct{}
+	err               error
 }
 
 func CreateTradingUseCase(
 	ctx context.Context,
 	tradingRepo domain.TradingRepo,
 	matchingRepo domain.MatchingRepo,
+	matchingOrderBookRepo domain.MatchingOrderBookRepo,
 	quotationRepo domain.QuotationRepo,
 	candleRepo domain.CandleRepo,
 	orderRepo domain.OrderRepo,
@@ -51,15 +52,14 @@ func CreateTradingUseCase(
 	syncTradingUseCase domain.SyncTradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
 	currencyUseCase domain.CurrencyUseCase,
-	orderBookDepth int,
+	orderBookMaxDepth int,
 	logger loggerKit.Logger,
-	batchEventsSize int,
-	batchEventsDuration time.Duration,
 ) domain.TradingUseCase {
 	return &tradingUseCase{
 		logger:                 logger,
 		tradingRepo:            tradingRepo,
 		matchingRepo:           matchingRepo,
+		matchingOrderBookRepo:  matchingOrderBookRepo,
 		quotationRepo:          quotationRepo,
 		candleRepo:             candleRepo,
 		orderRepo:              orderRepo,
@@ -71,9 +71,9 @@ func CreateTradingUseCase(
 		userAssetUseCase:       userAssetUseCase,
 		currencyUseCase:        currencyUseCase,
 
-		orderBookDepth: orderBookDepth,
-		errLock:        new(sync.Mutex),
-		doneCh:         make(chan struct{}),
+		orderBookMaxDepth: orderBookMaxDepth,
+		errLock:           new(sync.Mutex),
+		doneCh:            make(chan struct{}),
 	}
 }
 
@@ -149,9 +149,6 @@ func (t *tradingUseCase) ProcessTradingEvents(ctx context.Context, tes []*domain
 
 func (t *tradingUseCase) processTradingEvent(ctx context.Context, te *domain.TradingEvent) error {
 	var tradingResult domain.TradingResult
-
-	b, _ := json.MarshalIndent(te, "", "\t")
-	fmt.Println("yorkkk", string(b))
 
 	t.lastSequenceID = te.SequenceID
 
@@ -252,11 +249,30 @@ func (t *tradingUseCase) ConsumeGlobalSequencer(ctx context.Context) {
 			setErrAndDone(errors.Wrap(err, "save with filter events failed"))
 			return
 		}
+		for _, event := range events {
+			if err := t.tradingRepo.ProduceTradingEvent(ctx, event); err != nil {
+				setErrAndDone(errors.Wrap(err, "produce trading event failed"))
+				return
+			}
+		}
+	})
+}
+
+func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
+	setErrAndDone := func(err error) {
+		t.errLock.Lock()
+		defer t.errLock.Unlock()
+		t.err = err
+		close(t.doneCh)
+	}
+
+	t.tradingRepo.ConsumeTradingEvent(ctx, key, func(events []*domain.TradingEvent, commitFn func() error) {
 		if err := t.ProcessTradingEvents(ctx, events); err != nil {
 			setErrAndDone(errors.Wrap(err, "process trading events failed"))
 			return
 		}
 	})
+
 }
 
 func (t *tradingUseCase) ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*domain.TradingEvent, error) {
@@ -435,17 +451,22 @@ func (t *tradingUseCase) SaveSnapshot(ctx context.Context, tradingSnapshot *doma
 func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream domain.TradingNotifyStream) error {
 	consumeKey := utilKit.GetSnowflakeIDString()
 
-	stream.Send(domain.TradingNotifyResponse{
-		Type:      domain.OrderBookExchangeResponseType,
-		ProductID: t.currencyUseCase.GetProductID(),
-		OrderBook: t.matchingUseCase.GetOrderBook(100), // TODO: max depth, to cache
-	})
+	l2OrderBook, err := t.matchingUseCase.GetHistoryL2OrderBook(ctx, t.orderBookMaxDepth)
+	if err != nil && !errors.Is(err, domain.ErrNoData) {
+		return errors.Wrap(err, "get history l2 order book failed")
+	} else if err == nil {
+		stream.Send(domain.TradingNotifyResponse{
+			Type:      domain.OrderBookExchangeResponseType,
+			ProductID: t.currencyUseCase.GetProductID(),
+			OrderBook: l2OrderBook,
+		})
+	}
 
-	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookL2Entity) error {
+	t.matchingOrderBookRepo.ConsumeL2OrderBook(ctx, consumeKey, func(l2OrderBook *domain.OrderBookL2Entity) error {
 		if err := stream.Send(domain.TradingNotifyResponse{
 			Type:      domain.OrderBookExchangeResponseType,
 			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: orderBook,
+			OrderBook: l2OrderBook,
 		}); err != nil {
 			return errors.Wrap(err, "send failed")
 		}
@@ -551,17 +572,22 @@ func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream domain.Trad
 func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream domain.TradingNotifyStream) error {
 	consumeKey := strconv.Itoa(userID) + "-" + utilKit.GetSnowflakeIDString()
 
-	stream.Send(domain.TradingNotifyResponse{
-		Type:      domain.OrderBookExchangeResponseType,
-		ProductID: t.currencyUseCase.GetProductID(),
-		OrderBook: t.matchingUseCase.GetOrderBook(100), // TODO: max depth
-	})
+	l2OrderBook, err := t.matchingUseCase.GetHistoryL2OrderBook(ctx, t.orderBookMaxDepth)
+	if err != nil && !errors.Is(err, domain.ErrNoData) {
+		return errors.Wrap(err, "get history l2 order book failed")
+	} else if err == nil {
+		stream.Send(domain.TradingNotifyResponse{
+			Type:      domain.OrderBookExchangeResponseType,
+			ProductID: t.currencyUseCase.GetProductID(),
+			OrderBook: l2OrderBook,
+		})
+	}
 
-	t.matchingRepo.ConsumeOrderBook(ctx, consumeKey, func(orderBook *domain.OrderBookL2Entity) error {
+	t.matchingOrderBookRepo.ConsumeL2OrderBook(ctx, consumeKey, func(l2OrderBook *domain.OrderBookL2Entity) error {
 		if err := stream.Send(domain.TradingNotifyResponse{
 			Type:      domain.OrderBookExchangeResponseType,
 			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: orderBook,
+			OrderBook: l2OrderBook,
 		}); err != nil {
 			return errors.Wrap(err, "send failed")
 		}
@@ -603,27 +629,28 @@ func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream d
 				if isConsumeFounds {
 					continue
 				}
-				t.userAssetRepo.ConsumeUserAsset(ctx, consumeKey, func(userAsset *domain.UserAsset) error {
-					if userID != userAsset.UserID {
-						return nil
-					}
+				t.userAssetRepo.ConsumeUsersAssets(ctx, consumeKey, func(sequenceID int, usersAssets []*domain.UserAsset) error {
+					for _, userAsset := range usersAssets {
+						if userID != userAsset.UserID {
+							continue
+						}
 
-					currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(userAsset.AssetID))
-					if err != nil {
-						return errors.Wrap(err, "get currency upper name by type failed")
-					}
+						currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(userAsset.AssetID))
+						if err != nil {
+							return errors.Wrap(err, "get currency upper name by type failed")
+						}
 
-					if err := stream.Send(domain.TradingNotifyResponse{
-						Type:      domain.AssetExchangeResponseType,
-						ProductID: t.currencyUseCase.GetProductID(),
-						UserAsset: &domain.TradingNotifyAsset{
-							UserAsset:    userAsset,
-							CurrencyName: currencyCode,
-						},
-					}); err != nil {
-						return errors.Wrap(err, "send failed")
+						if err := stream.Send(domain.TradingNotifyResponse{
+							Type:      domain.AssetExchangeResponseType,
+							ProductID: t.currencyUseCase.GetProductID(),
+							UserAsset: &domain.TradingNotifyAsset{
+								UserAsset:    userAsset,
+								CurrencyName: currencyCode,
+							},
+						}); err != nil {
+							return errors.Wrap(err, "send failed")
+						}
 					}
-
 					return nil
 				})
 				isConsumeFounds = true

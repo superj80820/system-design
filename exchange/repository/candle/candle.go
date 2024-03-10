@@ -126,11 +126,6 @@ const addScript = `
     return '{}'      
 `
 
-var (
-	errBarIsNull                    = errors.New("bar is null")
-	errSequenceIDLessLastSequenceID = errors.New("error sequence id less last sequence id")
-)
-
 type secCandleBar struct {
 	*domain.CandleBar
 }
@@ -164,50 +159,143 @@ func (dayCandleBar) TableName() string {
 }
 
 type candleRepo struct {
-	orm            *ormKit.DB
-	redisInstance  *redisKit.Cache
-	candleMQTopic  mq.MQTopic
-	lastSequenceID int
+	orm                        *ormKit.DB
+	redisInstance              *redisKit.Cache
+	candleTradingResultMQTopic mq.MQTopic
+	candleMQTopic              mq.MQTopic
 }
 
-func CreateCandleRepo(orm *ormKit.DB, redisInstance *redisKit.Cache, candleMQTopic mq.MQTopic) domain.CandleRepo {
+func CreateCandleRepo(orm *ormKit.DB, redisInstance *redisKit.Cache, candleTradingResultMQTopic, candleMQTopic mq.MQTopic) domain.CandleRepo {
 	return &candleRepo{
-		orm:           orm,
-		redisInstance: redisInstance,
-		candleMQTopic: candleMQTopic,
+		orm:                        orm,
+		redisInstance:              redisInstance,
+		candleTradingResultMQTopic: candleTradingResultMQTopic,
+		candleMQTopic:              candleMQTopic,
 	}
 }
 
-func (c *candleRepo) SaveBar(candleBar *domain.CandleBar) error {
-	switch candleBar.Type {
-	case domain.CandleTimeTypeSec:
-		if err := c.orm.Create(
-			secCandleBar{
-				CandleBar: candleBar,
-			}).Error; err != nil {
-			return errors.Wrap(err, "create bar to db failed")
+func (c *candleRepo) SaveBarByMatchResult(ctx context.Context, matchResult *domain.MatchResult) error {
+	openPrice := decimal.NewFromInt(0)
+	closePrice := decimal.NewFromInt(0)
+	highPrice := decimal.NewFromInt(0)
+	lowPrice := decimal.NewFromInt(0)
+	quantity := decimal.NewFromInt(0)
+	for _, matchDetail := range matchResult.MatchDetails {
+		if openPrice.Equal(decimal.Zero) {
+			openPrice = matchDetail.Price
+			highPrice = matchDetail.Price
+			lowPrice = matchDetail.Price
+		} else {
+			highPrice = decimal.Max(highPrice, matchDetail.Price)
+			lowPrice = decimal.Min(lowPrice, matchDetail.Price)
 		}
-	case domain.CandleTimeTypeMin:
-		if err := c.orm.Create(
-			minCandleBar{
-				CandleBar: candleBar,
-			}).Error; err != nil {
-			return errors.Wrap(err, "create bar to db failed")
+		closePrice = matchDetail.Price
+		quantity.Add(matchDetail.Quantity)
+	}
+
+	createdAtTimestamp := matchResult.CreatedAt.UnixMilli()
+	secStartTime := createdAtTimestamp / 1000 * 1000
+	minStartTime := createdAtTimestamp / 1000 / 60 * 1000 * 60
+	hourStartTime := createdAtTimestamp / 1000 / 3600 * 1000 * 3600
+	dayStartTime := createdAtTimestamp / 1000 / 3600 / 24 * 1000 * 3600 * 24
+
+	// TODO: maybe need consistent
+	cmd := c.redisInstance.RunLua(
+		ctx,
+		addScript,
+		[]string{redisKeySec, redisKeyMin, redisKeyHour, redisKeyDay},
+		strconv.Itoa(matchResult.SequenceID),
+		strconv.FormatInt(secStartTime, 10),
+		strconv.FormatInt(minStartTime, 10),
+		strconv.FormatInt(hourStartTime, 10),
+		strconv.FormatInt(dayStartTime, 10),
+		openPrice.String(),
+		closePrice.String(),
+		highPrice.String(),
+		lowPrice.String(),
+		quantity.String(),
+	)
+	if err := cmd.Err(); err != nil {
+		return errors.Wrap(err, "run lua failed")
+	}
+	result, err := cmd.Result()
+	if err != nil {
+		return errors.Wrap(err, "get result failed")
+	}
+	resultString, ok := result.(string)
+	if !ok {
+		return errors.Wrap(err, "cast to string failed")
+	}
+	resultMap := make(map[string][]decimal.Decimal)
+	if err := json.Unmarshal([]byte(resultString), &resultMap); err != nil {
+		return errors.Wrap(err, "unmarshal failed")
+	}
+
+	saveBarFn := func(bar []decimal.Decimal, barType domain.CandleTimeType) error {
+		if len(bar) == 0 {
+			return errors.Wrap(domain.ErrNoData, "no data")
 		}
-	case domain.CandleTimeTypeHour:
-		if err := c.orm.Create(
-			hourCandleBar{
-				CandleBar: candleBar,
-			}).Error; err != nil {
-			return errors.Wrap(err, "create bar to db failed")
+
+		startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
+		if err != nil {
+			return errors.Wrap(err, "int64 to int failed")
 		}
-	case domain.CandleTimeTypeDay:
-		if err := c.orm.Create(
-			dayCandleBar{
-				CandleBar: candleBar,
-			}).Error; err != nil {
-			return errors.Wrap(err, "create bar to db failed")
+
+		candleBar := &domain.CandleBar{
+			Type:       barType,
+			StartTime:  startTime,
+			ClosePrice: bar[1],
+			HighPrice:  bar[2],
+			LowPrice:   bar[3],
+			OpenPrice:  bar[4],
+			Quantity:   bar[5],
 		}
+
+		switch candleBar.Type {
+		case domain.CandleTimeTypeSec:
+			if err := c.orm.Create(
+				secCandleBar{
+					CandleBar: candleBar,
+				}).Error; err != nil {
+				return errors.Wrap(err, "create bar to db failed")
+			}
+		case domain.CandleTimeTypeMin:
+			if err := c.orm.Create(
+				minCandleBar{
+					CandleBar: candleBar,
+				}).Error; err != nil {
+				return errors.Wrap(err, "create bar to db failed")
+			}
+		case domain.CandleTimeTypeHour:
+			if err := c.orm.Create(
+				hourCandleBar{
+					CandleBar: candleBar,
+				}).Error; err != nil {
+				return errors.Wrap(err, "create bar to db failed")
+			}
+		case domain.CandleTimeTypeDay:
+			if err := c.orm.Create(
+				dayCandleBar{
+					CandleBar: candleBar,
+				}).Error; err != nil {
+				return errors.Wrap(err, "create bar to db failed")
+			}
+		}
+
+		return nil
+	}
+
+	if err := saveBarFn(resultMap["SEC"], domain.CandleTimeTypeSec); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'SEC' to enum
+		return errors.Wrap(err, "produce bar failed")
+	}
+	if err := saveBarFn(resultMap["MIN"], domain.CandleTimeTypeMin); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'MIN' to enum
+		return errors.Wrap(err, "produce bar failed")
+	}
+	if err := saveBarFn(resultMap["HOUR"], domain.CandleTimeTypeHour); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'HOUR' to enum
+		return errors.Wrap(err, "produce bar failed")
+	}
+	if err := saveBarFn(resultMap["DAY"], domain.CandleTimeTypeDay); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'DAY' to enum
+		return errors.Wrap(err, "produce bar failed")
 	}
 
 	return nil
@@ -244,7 +332,7 @@ func (c *candleRepo) GetBar(ctx context.Context, timeType domain.CandleTimeType,
 }
 
 type mqMessage struct {
-	*domain.MatchResult
+	*domain.TradingResult
 }
 
 var _ mq.Message = (*mqMessage)(nil)
@@ -266,8 +354,8 @@ func (c *candleRepo) ProduceCandleMQByTradingResult(ctx context.Context, trading
 		return nil
 	}
 
-	if err := c.candleMQTopic.Produce(ctx, &mqMessage{
-		MatchResult: tradingResult.MatchResult,
+	if err := c.candleTradingResultMQTopic.Produce(ctx, &mqMessage{
+		TradingResult: tradingResult,
 	}); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
@@ -275,112 +363,16 @@ func (c *candleRepo) ProduceCandleMQByTradingResult(ctx context.Context, trading
 	return nil
 }
 
-func (c *candleRepo) ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
-	c.candleMQTopic.Subscribe(key, func(message []byte) error {
+func (c *candleRepo) ConsumeCandleMQByTradingResult(ctx context.Context, key string, notify func(tradingResult *domain.TradingResult) error) {
+	c.candleTradingResultMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
 			return errors.Wrap(err, "unmarshal failed")
 		}
-
-		if err := c.checkEventSequence(mqMessage.SequenceID); err != nil {
-			return errors.Wrap(err, "check event sequence failed")
+		if err := notify(mqMessage.TradingResult); err != nil {
+			return errors.Wrap(err, "notify failed")
 		}
-
-		openPrice := decimal.NewFromInt(0)
-		closePrice := decimal.NewFromInt(0)
-		highPrice := decimal.NewFromInt(0)
-		lowPrice := decimal.NewFromInt(0)
-		quantity := decimal.NewFromInt(0)
-		for _, matchDetail := range mqMessage.MatchDetails {
-			if openPrice.Equal(decimal.Zero) {
-				openPrice = matchDetail.Price
-				highPrice = matchDetail.Price
-				lowPrice = matchDetail.Price
-			} else {
-				highPrice = decimal.Max(highPrice, matchDetail.Price)
-				lowPrice = decimal.Min(lowPrice, matchDetail.Price)
-			}
-			closePrice = matchDetail.Price
-			quantity.Add(matchDetail.Quantity)
-		}
-
-		createdAtTimestamp := mqMessage.CreatedAt.UnixMilli()
-		secStartTime := createdAtTimestamp / 1000 * 1000
-		minStartTime := createdAtTimestamp / 1000 / 60 * 1000 * 60
-		hourStartTime := createdAtTimestamp / 1000 / 3600 * 1000 * 3600
-		dayStartTime := createdAtTimestamp / 1000 / 3600 / 24 * 1000 * 3600 * 24
-
-		// TODO: maybe need consistent
-		cmd := c.redisInstance.RunLua(
-			ctx,
-			addScript,
-			[]string{redisKeySec, redisKeyMin, redisKeyHour, redisKeyDay},
-			strconv.Itoa(mqMessage.SequenceID),
-			strconv.FormatInt(secStartTime, 10),
-			strconv.FormatInt(minStartTime, 10),
-			strconv.FormatInt(hourStartTime, 10),
-			strconv.FormatInt(dayStartTime, 10),
-			openPrice.String(),
-			closePrice.String(),
-			highPrice.String(),
-			lowPrice.String(),
-			quantity.String(),
-		)
-		if err := cmd.Err(); err != nil {
-			return errors.Wrap(err, "run lua failed")
-		}
-		result, err := cmd.Result()
-		if err != nil {
-			return errors.Wrap(err, "get result failed")
-		}
-		resultString, ok := result.(string)
-		if !ok {
-			return errors.Wrap(err, "cast to string failed")
-		}
-		resultMap := make(map[string][]decimal.Decimal)
-		if err := json.Unmarshal([]byte(resultString), &resultMap); err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-
-		notifyBarFn := func(bar []decimal.Decimal, barType domain.CandleTimeType) error {
-			if len(bar) == 0 {
-				return errors.Wrap(domain.ErrNoData, "no data")
-			}
-
-			startTime, err := utilKit.SafeInt64ToInt(bar[0].BigInt().Int64())
-			if err != nil {
-				return errors.Wrap(err, "int64 to int failed")
-			}
-
-			if err := notify(&domain.CandleBar{
-				Type:       barType,
-				StartTime:  startTime,
-				ClosePrice: bar[1],
-				HighPrice:  bar[2],
-				LowPrice:   bar[3],
-				OpenPrice:  bar[4],
-				Quantity:   bar[5],
-			}); err != nil {
-				return errors.Wrap(err, "notify failed")
-			}
-
-			return nil
-		}
-
-		if err := notifyBarFn(resultMap["SEC"], domain.CandleTimeTypeSec); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'SEC' to enum
-			return errors.Wrap(err, "produce bar failed")
-		}
-		if err := notifyBarFn(resultMap["MIN"], domain.CandleTimeTypeMin); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'MIN' to enum
-			return errors.Wrap(err, "produce bar failed")
-		}
-		if err := notifyBarFn(resultMap["HOUR"], domain.CandleTimeTypeHour); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'HOUR' to enum
-			return errors.Wrap(err, "produce bar failed")
-		}
-		if err := notifyBarFn(resultMap["DAY"], domain.CandleTimeTypeDay); !errors.Is(err, domain.ErrNoData) && err != nil { //TODO: 'DAY' to enum
-			return errors.Wrap(err, "produce bar failed")
-		}
-
 		return nil
 	})
 }
@@ -403,7 +395,7 @@ func (m *mqCandleMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (c *candleRepo) ProduceCandle(ctx context.Context, candleBar *domain.CandleBar) error {
+func (c *candleRepo) ProduceCandleMQ(ctx context.Context, candleBar *domain.CandleBar) error {
 	if err := c.candleMQTopic.Produce(ctx, &mqCandleMessage{
 		CandleBar: candleBar,
 	}); err != nil {
@@ -412,10 +404,16 @@ func (c *candleRepo) ProduceCandle(ctx context.Context, candleBar *domain.Candle
 	return nil
 }
 
-func (c *candleRepo) checkEventSequence(sequenceID int) error {
-	if sequenceID <= c.lastSequenceID {
-		return errSequenceIDLessLastSequenceID
-	}
-	c.lastSequenceID = sequenceID
-	return nil
+func (c *candleRepo) ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
+	c.candleMQTopic.Subscribe(key, func(message []byte) error {
+		var mqMessage mqCandleMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.CandleBar); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
 }

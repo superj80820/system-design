@@ -2,16 +2,19 @@ package matching
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/superj80820/system-design/domain"
+	matchingMemoryAndRedisRepo "github.com/superj80820/system-design/exchange/repository/matching/memoryandredis"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
+	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
+	ormKit "github.com/superj80820/system-design/kit/orm"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
+	redisContainer "github.com/superj80820/system-design/kit/testing/redis/container"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
@@ -33,27 +36,34 @@ func createOrder(t *testing.T, sequenceId int, price decimal.Decimal, direction 
 }
 
 type testSetup struct {
-	matchingUseCase domain.MatchingUseCase
-	teardownFn      func()
+	matchingUseCase       domain.MatchingUseCase
+	matchingOrderBookRepo domain.MatchingOrderBookRepo
+	teardownFn            func()
 }
 
 func testSetupFn(ctx context.Context, t assert.TestingT) *testSetup {
 	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
 	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
-	// mySQLContainer, err := mysqlContainer.CreateMySQL(ctx)
-	// assert.Nil(t, err)
-	// ormDB, err := ormKit.CreateDB(ormKit.UseMySQL(mySQLContainer.GetURI()))
-	// if err != nil {
-	// 	panic(err)
-	// }
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(nil, matchingMQTopic, orderBookMQTopic)
-	matchingOrderBookRepo := matchingMySQLAndMQRepo.CreateOrderBookRepo()
-	matchingUseCase := CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100)
+	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
+	l2OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
+	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
+	mySQLContainer, err := mysqlContainer.CreateMySQL(ctx)
+	assert.Nil(t, err)
+	redisContainer, err := redisContainer.CreateRedis(ctx)
+	assert.Nil(t, err)
+	redisCache, err := redisKit.CreateCache(redisContainer.GetURI(), "", 0)
+	assert.Nil(t, err)
+	ormDB, err := ormKit.CreateDB(ormKit.UseMySQL(mySQLContainer.GetURI()))
+	assert.Nil(t, err)
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic)
+	matchingOrderBookRepo := matchingMemoryAndRedisRepo.CreateOrderBookRepo(redisCache, orderBookMQTopic, l1OrderBookMQTopic, l2OrderBookMQTopic, l3OrderBookMQTopic)
+	matchingUseCase := CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo)
 
 	return &testSetup{
-		matchingUseCase: matchingUseCase,
+		matchingUseCase:       matchingUseCase,
+		matchingOrderBookRepo: matchingOrderBookRepo,
 		teardownFn: func() {
-			// assert.Nil(t, mySQLContainer.Terminate(ctx))
+			assert.Nil(t, mySQLContainer.Terminate(ctx))
 		},
 	}
 }
@@ -106,65 +116,46 @@ func TestMatching(t *testing.T) {
 				testSetup.matchingUseCase.NewOrder(ctx, createOrder(t, 10, decimal.NewFromFloat32(2086.54), domain.DirectionSell, decimal.NewFromInt(2)))
 				testSetup.matchingUseCase.NewOrder(ctx, createOrder(t, 11, decimal.NewFromFloat32(2086.55), domain.DirectionSell, decimal.NewFromInt(5)))
 				testSetup.matchingUseCase.NewOrder(ctx, createOrder(t, 12, decimal.NewFromFloat32(2086.55), domain.DirectionBuy, decimal.NewFromInt(3)))
-				// testSetup.matchingUseCase.NewOrder(ctx, createOrder(t, 13, decimal.NewFromFloat32(2086.55), domain.DirectionSell, decimal.NewFromInt(3)))
 				assert.Equal(t, "2086.55", testSetup.matchingUseCase.GetMarketPrice().String())
 				assert.Equal(t, 12, testSetup.matchingUseCase.GetSequenceID())
-				currentOrderBook := testSetup.matchingUseCase.GetOrderBook(100)
-				b, _ := json.MarshalIndent(currentOrderBook, "", "\t")
-				fmt.Printf("york\n%s", string(b))
-				currentL3OrderBook := testSetup.matchingUseCase.GetL3OrderBook(100)
-				b, _ = json.MarshalIndent(currentL3OrderBook, "", "\t")
-				fmt.Printf("york2\n%s", string(b))
-				{
-					expectedResults := []struct {
-						price            string
-						unfilledQuantity string
-					}{
+				time.Sleep(500 * time.Millisecond)
+				l2OrderBook := testSetup.matchingOrderBookRepo.GetL2OrderBook()
+				assert.Equal(t, &domain.OrderBookL2Entity{
+					SequenceID: 12,
+					Price:      decimal.NewFromFloat(2086.55),
+					Sell: []*domain.OrderBookL2ItemEntity{
 						{
-							price:            "2086.55",
-							unfilledQuantity: "4",
+							Price:    decimal.NewFromFloat(2086.55),
+							Quantity: decimal.NewFromInt(4),
 						},
 						{
-							price:            "2087.6",
-							unfilledQuantity: "6",
+							Price:    decimal.NewFromFloat(2087.6),
+							Quantity: decimal.NewFromInt(6),
 						},
 						{
-							price:            "2088.02",
-							unfilledQuantity: "3",
+							Price:    decimal.NewFromFloat(2088.02),
+							Quantity: decimal.NewFromInt(3),
 						},
-					}
-					for idx, order := range currentOrderBook.Sell {
-						assert.Equal(t, expectedResults[idx].price, order.Price.String())
-						assert.Equal(t, expectedResults[idx].unfilledQuantity, order.Quantity.String())
-					}
-				}
-				{
-					expectedResults := []struct {
-						price            string
-						unfilledQuantity string
-					}{
+					},
+					Buy: []*domain.OrderBookL2ItemEntity{
 						{
-							price:            "2086",
-							unfilledQuantity: "3",
+							Price:    decimal.NewFromFloat(2086),
+							Quantity: decimal.NewFromInt(3),
 						},
 						{
-							price:            "2085.01",
-							unfilledQuantity: "5",
+							Price:    decimal.NewFromFloat(2085.01),
+							Quantity: decimal.NewFromInt(5),
 						},
 						{
-							price:            "2082.34",
-							unfilledQuantity: "1",
+							Price:    decimal.NewFromFloat(2082.34),
+							Quantity: decimal.NewFromInt(1),
 						},
 						{
-							price:            "2081.11",
-							unfilledQuantity: "7",
+							Price:    decimal.NewFromFloat(2081.11),
+							Quantity: decimal.NewFromInt(7),
 						},
-					}
-					for idx, order := range currentOrderBook.Buy {
-						assert.Equal(t, expectedResults[idx].price, order.Price.String())
-						assert.Equal(t, expectedResults[idx].unfilledQuantity, order.Quantity.String())
-					}
-				}
+					},
+				}, l2OrderBook)
 			},
 		},
 		// {

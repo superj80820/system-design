@@ -14,9 +14,26 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+type mqMessage struct {
+	*domain.TradingEvent
+}
+
+func (s *mqMessage) GetKey() string {
+	return strconv.Itoa(s.SequenceID)
+}
+
+func (s *mqMessage) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(s)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return marshalData, nil
+}
+
 type tradingRepo struct {
 	mongoCollection *mongo.Collection
 	orm             *ormKit.DB
+	tradingEventMQ  mq.MQTopic
 	err             error
 	doneCh          chan struct{}
 	cancel          context.CancelFunc
@@ -43,6 +60,7 @@ func (t *tradingResultStruct) Marshal() ([]byte, error) {
 func CreateTradingRepo(
 	ctx context.Context,
 	mongoCollection *mongo.Collection,
+	tradingEventMQ mq.MQTopic,
 	orm *ormKit.DB,
 ) domain.TradingRepo {
 	_, cancel := context.WithCancel(ctx)
@@ -50,6 +68,7 @@ func CreateTradingRepo(
 	return &tradingRepo{
 		orm:             orm,
 		mongoCollection: mongoCollection,
+		tradingEventMQ:  tradingEventMQ,
 		doneCh:          make(chan struct{}),
 		cancel:          cancel,
 	}
@@ -94,6 +113,28 @@ func (t *tradingRepo) SaveSnapshot(ctx context.Context, sequenceID int, usersAss
 		return errors.Wrap(err, "save snapshot failed")
 	}
 	return nil
+}
+
+func (t *tradingRepo) ProduceTradingEvent(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+	if err := t.tradingEventMQ.Produce(ctx, &mqMessage{TradingEvent: tradingEvent}); err != nil {
+		return errors.Wrap(err, "produce failed")
+	}
+	return nil
+}
+
+func (t *tradingRepo) ConsumeTradingEvent(ctx context.Context, key string, notify func(events []*domain.TradingEvent, commitFn func() error)) {
+	t.tradingEventMQ.SubscribeBatchWithManualCommit(key, func(messages [][]byte, commitFn func() error) error {
+		tradingEvents := make([]*domain.TradingEvent, len(messages))
+		for idx, message := range messages {
+			var tradingEvent domain.TradingEvent
+			if err := json.Unmarshal(message, &tradingEvent); err != nil {
+				panic(errors.Wrap(err, "unmarshal failed")) // TODO
+			}
+			tradingEvents[idx] = &tradingEvent
+		}
+		notify(tradingEvents, commitFn)
+		return nil
+	})
 }
 
 func (t *tradingRepo) Done() <-chan struct{} {

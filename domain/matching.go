@@ -18,9 +18,6 @@ var (
 )
 
 type MatchingRepo interface {
-	ProduceOrderBook(ctx context.Context, orderBook *OrderBookL2Entity) error
-	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookL2Entity) error)
-
 	ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
 	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
 
@@ -37,23 +34,46 @@ type MatchingOrderBookRepo interface {
 	UpdateOrderStatus(orderID int, orderStatus OrderStatusEnum, updatedAt time.Time) error
 
 	GetL1OrderBook() *OrderBookL1Entity
-	// GetL2OrderBook maxDepth is -1 will return all order book
-	GetL2OrderBook(maxDepth int) *OrderBookL2Entity
-	// GetL3OrderBook maxDepth is -1 will return all order book
-	GetL3OrderBook(maxDepth int) *OrderBookL3Entity
+	GetL2OrderBook() *OrderBookL2Entity
+	GetL3OrderBook() *OrderBookL3Entity
 
 	GetMarketPrice() decimal.Decimal
 	SetMarketPrice(marketPrice decimal.Decimal)
 	GetSequenceID() int
 	SetSequenceID(sequenceID int)
+
+	SaveHistoryL1OrderBookByL3OrderBook(context.Context, *OrderBookL3Entity) (*OrderBookL1Entity, error)
+	SaveHistoryL2OrderBookByL3OrderBook(context.Context, *OrderBookL3Entity) (*OrderBookL2Entity, error)
+	SaveHistoryL3OrderBook(context.Context, *OrderBookL3Entity) error
+
+	GetHistoryL1OrderBook(ctx context.Context) (*OrderBookL1Entity, error)
+	// GetHistoryL2OrderBook maxDepth is -1 will return all order book
+	GetHistoryL2OrderBook(ctx context.Context, maxDepth int) (*OrderBookL2Entity, error)
+	// GetHistoryL3OrderBook maxDepth is -1 will return all order book
+	GetHistoryL3OrderBook(ctx context.Context, maxDepth int) (*OrderBookL3Entity, error)
+
+	ProduceOrderBook(ctx context.Context, orderBook *OrderBookL3Entity) error
+	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookL3Entity) error)
+
+	ProduceL1OrderBook(ctx context.Context, orderBook *OrderBookL1Entity) error
+	ConsumeL1OrderBook(ctx context.Context, key string, notify func(*OrderBookL1Entity) error)
+
+	ProduceL2OrderBook(ctx context.Context, orderBook *OrderBookL2Entity) error
+	ConsumeL2OrderBook(ctx context.Context, key string, notify func(*OrderBookL2Entity) error)
+
+	ProduceL3OrderBook(ctx context.Context, orderBook *OrderBookL3Entity) error
+	ConsumeL3OrderBook(ctx context.Context, key string, notify func(*OrderBookL3Entity) error)
 }
 
 type MatchingUseCase interface {
 	NewOrder(ctx context.Context, o *OrderEntity) (*MatchResult, error)
 	CancelOrder(o *OrderEntity, timestamp time.Time) (*CancelResult, error)
 
-	GetOrderBook(maxDepth int) *OrderBookL2Entity
-	GetL3OrderBook(maxDepth int) *OrderBookL3Entity
+	GetHistoryL1OrderBook(ctx context.Context) (*OrderBookL1Entity, error)
+	// GetHistoryL2OrderBook maxDepth is -1 will return all order book
+	GetHistoryL2OrderBook(ctx context.Context, maxDepth int) (*OrderBookL2Entity, error)
+	// GetHistoryL3OrderBook maxDepth is -1 will return all order book
+	GetHistoryL3OrderBook(ctx context.Context, maxDepth int) (*OrderBookL3Entity, error)
 	GetMarketPrice() decimal.Decimal
 	GetSequenceID() int
 
@@ -61,6 +81,7 @@ type MatchingUseCase interface {
 	RecoverBySnapshot(tradingSnapshot *TradingSnapshot) error
 
 	ConsumeMatchResultToSave(ctx context.Context, key string)
+	ConsumeOrderBookToSave(ctx context.Context, key string)
 }
 
 type MatchType int

@@ -22,20 +22,18 @@ func (*matchOrderDetailDB) TableName() string {
 }
 
 type matchingRepo struct {
-	orm              *ormKit.DB
-	matchingMQTopic  mq.MQTopic
-	orderBookMQTopic mq.MQTopic
+	orm             *ormKit.DB
+	matchingMQTopic mq.MQTopic
 
 	sequenceID  int
 	marketPrice decimal.Decimal
 }
 
-func CreateMatchingRepo(orm *ormKit.DB, matchingMQTopic, orderBookMQTopic mq.MQTopic) domain.MatchingRepo {
+func CreateMatchingRepo(orm *ormKit.DB, matchingMQTopic mq.MQTopic) domain.MatchingRepo {
 	return &matchingRepo{
-		orm:              orm,
-		matchingMQTopic:  matchingMQTopic,
-		orderBookMQTopic: orderBookMQTopic,
-		marketPrice:      decimal.Zero,
+		orm:             orm,
+		matchingMQTopic: matchingMQTopic,
+		marketPrice:     decimal.Zero,
 	}
 }
 
@@ -166,45 +164,4 @@ func (m *matchingRepo) GetMatchingHistory(maxResults int) ([]*domain.MatchOrderD
 		return nil, errors.Wrap(err, "query failed")
 	}
 	return matchOrderDetails, nil
-}
-
-type mqOrderBookMessage struct {
-	*domain.OrderBookL2Entity
-}
-
-var _ mq.Message = (*mqOrderBookMessage)(nil)
-
-func (m *mqOrderBookMessage) GetKey() string {
-	return strconv.Itoa(m.OrderBookL2Entity.SequenceID)
-}
-
-func (m *mqOrderBookMessage) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
-	}
-	return marshalData, nil
-}
-
-func (m *matchingRepo) ProduceOrderBook(ctx context.Context, orderBook *domain.OrderBookL2Entity) error {
-	if err := m.orderBookMQTopic.Produce(ctx, &mqOrderBookMessage{
-		OrderBookL2Entity: orderBook,
-	}); err != nil {
-		return errors.Wrap(err, "produce failed")
-	}
-	return nil
-}
-
-func (m *matchingRepo) ConsumeOrderBook(ctx context.Context, key string, notify func(*domain.OrderBookL2Entity) error) {
-	m.orderBookMQTopic.Subscribe(key, func(message []byte) error {
-		var mqMessage mqOrderBookMessage
-		err := json.Unmarshal(message, &mqMessage)
-		if err != nil {
-			return errors.Wrap(err, "unmarshal failed")
-		}
-		if err := notify(mqMessage.OrderBookL2Entity); err != nil {
-			return errors.Wrap(err, "notify failed")
-		}
-		return nil
-	})
 }

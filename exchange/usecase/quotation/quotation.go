@@ -11,17 +11,15 @@ import (
 type quotationUseCase struct {
 	tradingRepo   domain.TradingRepo
 	quotationRepo domain.QuotationRepo
-	cap           int
 	errLock       *sync.Mutex
 	err           error
 	doneCh        chan struct{}
 }
 
-func CreateQuotationUseCase(ctx context.Context, tradingRepo domain.TradingRepo, quotationRepo domain.QuotationRepo, cap int) domain.QuotationUseCase {
+func CreateQuotationUseCase(ctx context.Context, tradingRepo domain.TradingRepo, quotationRepo domain.QuotationRepo) domain.QuotationUseCase {
 	q := &quotationUseCase{
 		tradingRepo:   tradingRepo,
 		quotationRepo: quotationRepo,
-		cap:           cap,
 		errLock:       new(sync.Mutex),
 		doneCh:        make(chan struct{}),
 	}

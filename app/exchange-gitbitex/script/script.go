@@ -11,11 +11,15 @@ func initSQLSchemaFile() {
 	if err != nil {
 		panic(err)
 	}
-	tradingSchemaSQL, err := os.ReadFile("../../exchange/repository/trading/mysqlandmongo/schema.sql")
+	matchingDetailSchemaSQL, err := os.ReadFile("../../exchange/repository/matching/mysqlandmq/schema.sql")
 	if err != nil {
 		panic(err)
 	}
 	orderSchemaSQL, err := os.ReadFile("../../exchange/repository/order/ormandmq/schema.sql")
+	if err != nil {
+		panic(err)
+	}
+	assetSchemaSQL, err := os.ReadFile("../../exchange/repository/asset/memoryandmysql/schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -37,9 +41,10 @@ func initSQLSchemaFile() {
 	}
 	err = os.WriteFile("./schema.sql",
 		[]byte(string(quotationSchemaSQL)+
-			"\n"+string(tradingSchemaSQL)+
+			"\n"+string(matchingDetailSchemaSQL)+
 			"\n"+string(candleSchemaSQL)+
 			"\n"+string(orderSchemaSQL)+
+			"\n"+string(assetSchemaSQL)+
 			"\n"+string(sequencerSchemaSQL)+
 			"\n"+string(accountSchemaSQL)+
 			"\n"+string(authSchemaSQL)),

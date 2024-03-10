@@ -67,13 +67,10 @@ func (o *orderRepo) SaveHistoryOrdersWithIgnore(sequenceID int, orders []*domain
 		builder = builder.Values(order.ID, order.UserID, sequenceID, order.Direction, order.Price, order.Status, order.Quantity, order.UnfilledQuantity, order.UpdatedAt, order.CreatedAt)
 	}
 	sql, args, err := builder.ToSql()
-	fmt.Println("yorkkk", sql)
-	fmt.Println("yorktyui", args, err)
 	if err != nil {
 		return errors.Wrap(err, "to sql failed")
 	}
 	if err := o.orm.Table(o.tableName).Exec(sql, args...).Error; err != nil {
-		fmt.Println("yorkkadisfjad", errors.Wrap(err, "save orders failed"))
 		return errors.Wrap(err, "save orders failed")
 	}
 	return nil

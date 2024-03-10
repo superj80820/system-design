@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"time"
@@ -16,15 +15,12 @@ type matchingUseCase struct {
 	matchingRepo          domain.MatchingRepo
 	matchingOrderBookRepo domain.MatchingOrderBookRepo
 	isOrderBookChanged    *atomic.Bool
-
-	orderBookMaxDepth int
 }
 
-func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, matchingOrderBookRepo domain.MatchingOrderBookRepo, orderBookMaxDepth int) domain.MatchingUseCase {
+func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo, matchingOrderBookRepo domain.MatchingOrderBookRepo) domain.MatchingUseCase {
 	m := &matchingUseCase{
 		matchingRepo:          matchingRepo,
 		matchingOrderBookRepo: matchingOrderBookRepo,
-		orderBookMaxDepth:     orderBookMaxDepth,
 		isOrderBookChanged:    new(atomic.Bool),
 	}
 
@@ -37,7 +33,7 @@ func CreateMatchingUseCase(ctx context.Context, matchingRepo domain.MatchingRepo
 				continue
 			}
 
-			m.matchingRepo.ProduceOrderBook(ctx, m.GetOrderBook(m.orderBookMaxDepth))
+			m.matchingOrderBookRepo.ProduceOrderBook(ctx, m.matchingOrderBookRepo.GetL3OrderBook())
 
 			m.isOrderBookChanged.Store(false)
 		}
@@ -118,9 +114,6 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 
 	m.isOrderBookChanged.Store(true)
 
-	b, _ := json.Marshal(*matchResult)
-	fmt.Println("yorkazcv", string(b))
-
 	return matchResult, nil
 }
 
@@ -145,16 +138,8 @@ func (m *matchingUseCase) CancelOrder(order *domain.OrderEntity, timestamp time.
 	}, nil
 }
 
-func (m *matchingUseCase) GetOrderBook(maxDepth int) *domain.OrderBookL2Entity {
-	return m.matchingOrderBookRepo.GetL2OrderBook(maxDepth)
-}
-
-func (m *matchingUseCase) GetL3OrderBook(maxDepth int) *domain.OrderBookL3Entity {
-	return m.matchingOrderBookRepo.GetL3OrderBook(maxDepth)
-}
-
 func (m *matchingUseCase) GetMatchesData() (*domain.MatchData, error) {
-	orderBook := m.matchingOrderBookRepo.GetL3OrderBook(-1)
+	orderBook := m.matchingOrderBookRepo.GetL3OrderBook()
 	var sellOrderIDs, buyOrderIDs []int
 	for _, item := range orderBook.Sell {
 		for _, order := range item.Orders {
@@ -200,6 +185,58 @@ func (m *matchingUseCase) ConsumeMatchResultToSave(ctx context.Context, key stri
 	})
 }
 
+func (m *matchingUseCase) ConsumeOrderBookToSave(ctx context.Context, key string) {
+	m.matchingOrderBookRepo.ConsumeOrderBook(ctx, key, func(l3OrderBook *domain.OrderBookL3Entity) error { // TODO: error handle
+		if err := m.matchingOrderBookRepo.SaveHistoryL3OrderBook(ctx, l3OrderBook); err != nil {
+			fmt.Println("york1")
+			return errors.Wrap(err, "save history l3 order book failed")
+		}
+		l2OrderBook, err := m.matchingOrderBookRepo.SaveHistoryL2OrderBookByL3OrderBook(ctx, l3OrderBook)
+		if err != nil {
+			fmt.Println("york2")
+			return errors.Wrap(err, "save history l2 order book failed")
+		}
+		l1OrderBook, err := m.matchingOrderBookRepo.SaveHistoryL1OrderBookByL3OrderBook(ctx, l3OrderBook)
+		if err != nil {
+			fmt.Println("york3")
+			return errors.Wrap(err, "save history l1 order book failed")
+		}
+		if err := m.matchingOrderBookRepo.ProduceL2OrderBook(ctx, l2OrderBook); err != nil {
+			fmt.Println("york4")
+			return errors.Wrap(err, "produce l2 order book failed")
+		}
+		if err := m.matchingOrderBookRepo.ProduceL1OrderBook(ctx, l1OrderBook); err != nil {
+			fmt.Println("york5")
+			return errors.Wrap(err, "produce l1 order book failed")
+		}
+		return nil
+	})
+}
+
+func (m *matchingUseCase) GetHistoryL1OrderBook(ctx context.Context) (*domain.OrderBookL1Entity, error) {
+	l1OrderBook, err := m.matchingOrderBookRepo.GetHistoryL1OrderBook(ctx)
+	if err != nil {
+		return nil, errors.Wrap(err, "get history l1 order book failed")
+	}
+	return l1OrderBook, nil
+}
+
+func (m *matchingUseCase) GetHistoryL2OrderBook(ctx context.Context, maxDepth int) (*domain.OrderBookL2Entity, error) { // TODO: maxDepth
+	l2OrderBook, err := m.matchingOrderBookRepo.GetHistoryL2OrderBook(ctx, maxDepth)
+	if err != nil {
+		return nil, errors.Wrap(err, "get history l2 order book failed")
+	}
+	return l2OrderBook, nil
+}
+
+func (m *matchingUseCase) GetHistoryL3OrderBook(ctx context.Context, maxDepth int) (*domain.OrderBookL3Entity, error) { // TODO: maxDepth
+	l3OrderBook, err := m.matchingOrderBookRepo.GetHistoryL3OrderBook(ctx, maxDepth)
+	if err != nil {
+		return nil, errors.Wrap(err, "get history l1 order book failed")
+	}
+	return l3OrderBook, nil
+}
+
 func createMatchResult(takerOrder *domain.OrderEntity) *domain.MatchResult {
 	return &domain.MatchResult{
 		SequenceID: takerOrder.SequenceID,
@@ -215,7 +252,7 @@ func min(a, b decimal.Decimal) decimal.Decimal {
 	return b
 }
 
-func addForMatchResult(matchResult *domain.MatchResult, price decimal.Decimal, matchedQuantity decimal.Decimal, makerOrder *domain.OrderEntity) {
+func addForMatchResult(matchResult *domain.MatchResult, price decimal.Decimal, matchedQuantity decimal.Decimal, makerOrder *domain.OrderEntity) { // TODO: test and think
 	matchResult.MatchDetails = append(matchResult.MatchDetails, &domain.MatchDetail{
 		Price:      price,
 		Quantity:   matchedQuantity,

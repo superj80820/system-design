@@ -27,9 +27,9 @@ import (
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	httpGitbitexDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex"
 	wsDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex/ws"
-	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
+	assetMemoryAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/asset/memoryandmysql"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
-	matchingMemoryRepo "github.com/superj80820/system-design/exchange/repository/matching/memory"
+	matchingMemoryAndRedisRepo "github.com/superj80820/system-design/exchange/repository/matching/memoryandredis"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
 	quotationRepoMySQLAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/ormandredis"
 	wsTransport "github.com/superj80820/system-design/kit/core/transport/http/websocket"
@@ -201,12 +201,17 @@ func main() {
 		sequenceMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	}
 
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	candleTradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l2OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	if err != nil {
@@ -253,30 +258,30 @@ func main() {
 		}
 	}
 
-	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, ormDB)
-	assetRepo := assetMemoryRepo.CreateAssetRepo(assetMQTopic)
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, tradingEventMQTopic, ormDB)
+	assetRepo := assetMemoryAndMySQLRepo.CreateAssetRepo(assetMQTopic, ormDB)
 	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateSequencerRepo(ctx, sequenceMQTopic, ormDB)
 	if err != nil {
 		panic(err)
 	}
 	orderRepo := orderORMRepo.CreateOrderRepo(ormDB, orderMQTopic)
-	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleMQTopic)
+	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleTradingResultMQTopic, candleMQTopic)
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic, orderBookMQTopic)
-	matchingOrderBookRepo := matchingMemoryRepo.CreateOrderBookRepo()
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic)
+	matchingOrderBookRepo := matchingMemoryAndRedisRepo.CreateOrderBookRepo(redisCache, orderBookMQTopic, l1OrderBookMQTopic, l2OrderBookMQTopic, l3OrderBookMQTopic)
 	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo)
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo)
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
+	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo)
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, matchingOrderBookRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
 	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	if err != nil {
 		panic(err)
@@ -297,7 +302,7 @@ func main() {
 				}
 			}
 		}
-		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, userAssetUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()

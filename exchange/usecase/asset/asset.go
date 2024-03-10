@@ -21,10 +21,13 @@ type transferResult struct {
 
 func (t *transferResult) addUserAsset(userAsset *domain.UserAsset) {
 	t.TransferResult.UserAssets = append(t.TransferResult.UserAssets, &domain.UserAsset{
+		ID:        userAsset.ID,
 		UserID:    userAsset.UserID,
 		AssetID:   userAsset.AssetID,
 		Available: userAsset.Available,
 		Frozen:    userAsset.Frozen,
+		CreatedAt: userAsset.CreatedAt,
+		UpdatedAt: userAsset.UpdatedAt,
 	})
 }
 
@@ -194,4 +197,13 @@ func (u *userAsset) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) e
 		return errors.Wrap(err, "recover by snapshot")
 	}
 	return nil
+}
+
+func (u *userAsset) ConsumeTransferResultToSave(ctx context.Context, key string) {
+	u.assetRepo.ConsumeUsersAssets(ctx, key, func(sequenceID int, usersAssets []*domain.UserAsset) error { // TODO: error handle
+		if err := u.assetRepo.SaveAssets(sequenceID, usersAssets); err != nil {
+			return errors.Wrap(err, "save assets failed")
+		}
+		return nil
+	})
 }

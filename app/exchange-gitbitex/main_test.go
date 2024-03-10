@@ -28,9 +28,9 @@ import (
 	httpDelivery "github.com/superj80820/system-design/exchange/delivery/http"
 	httpGitbitexDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex"
 	wsDelivery "github.com/superj80820/system-design/exchange/delivery/httpgitbitex/ws"
-	assetMemoryRepo "github.com/superj80820/system-design/exchange/repository/asset/memory"
+	assetMemoryAndMySQLRepo "github.com/superj80820/system-design/exchange/repository/asset/memoryandmysql"
 	candleRepoRedis "github.com/superj80820/system-design/exchange/repository/candle"
-	matchingMemoryRepo "github.com/superj80820/system-design/exchange/repository/matching/memory"
+	matchingMemoryAndRedisRepo "github.com/superj80820/system-design/exchange/repository/matching/memoryandredis"
 	matchingMySQLAndMQRepo "github.com/superj80820/system-design/exchange/repository/matching/mysqlandmq"
 	orderORMRepo "github.com/superj80820/system-design/exchange/repository/order/ormandmq"
 	quotationRepoORMAndRedis "github.com/superj80820/system-design/exchange/repository/quotation/ormandredis"
@@ -81,7 +81,7 @@ var (
 	userAPassword = "asdfasdf"
 )
 
-func testSetupFn(t assert.TestingT) *testSetup {
+func testSetupFn(ctx context.Context, t assert.TestingT) *testSetup {
 	accessTokenKeyPath := "./access-private-key.pem"
 	refreshTokenKeyPath := "./refresh-private-key.pem"
 	currencyProduct := domain.CurrencyProduct{
@@ -97,8 +97,6 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		QuoteScale:     2,
 	}
 
-	ctx := context.Background()
-
 	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(filepath.Join(".", "schema.sql")))
 	assert.Nil(t, err)
 	redisContainer, err := redisContainer.CreateRedis(ctx)
@@ -106,7 +104,7 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	mongoDBContainer, err := mongoDBContainer.CreateMongoDB(ctx)
 	assert.Nil(t, err)
 
-	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
+	ormDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
 	assert.Nil(t, err)
 	redisCache, err := redisKit.CreateCache(redisContainer.GetURI(), "", 0)
 	assert.Nil(t, err)
@@ -125,48 +123,51 @@ func testSetupFn(t assert.TestingT) *testSetup {
 	messageCollectDuration := 100 * time.Millisecond
 	sequenceMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
+	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	candleTradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l2OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
 	assert.Nil(t, err)
 	tracer := traceKit.CreateNoOpTracer()
 
-	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, mysqlDB)
-	assetRepo := assetMemoryRepo.CreateAssetRepo(assetMQTopic)
-	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateSequencerRepo(ctx, sequenceMQTopic, mysqlDB)
-	if err != nil {
-		panic(err)
-	}
-	orderRepo := orderORMRepo.CreateOrderRepo(mysqlDB, orderMQTopic)
-	candleRepo := candleRepoRedis.CreateCandleRepo(mysqlDB, redisCache, candleMQTopic)
-	quotationRepo := quotationRepoORMAndRedis.CreateQuotationRepo(mysqlDB, redisCache, tickMQTopic)
-	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(mysqlDB, matchingMQTopic, orderBookMQTopic)
-	matchingOrderBookRepo := matchingMemoryRepo.CreateOrderBookRepo()
-	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
-	authRepo := authMySQLRepo.CreateAuthRepo(mysqlDB)
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, tradingEventMQTopic, ormDB)
+	assetRepo := assetMemoryAndMySQLRepo.CreateAssetRepo(assetMQTopic, ormDB)
+	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateSequencerRepo(ctx, sequenceMQTopic, ormDB)
+	assert.Nil(t, err)
+	orderRepo := orderORMRepo.CreateOrderRepo(ormDB, orderMQTopic)
+	candleRepo := candleRepoRedis.CreateCandleRepo(ormDB, redisCache, candleTradingResultMQTopic, candleMQTopic)
+	quotationRepo := quotationRepoORMAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
+	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic)
+	matchingOrderBookRepo := matchingMemoryAndRedisRepo.CreateOrderBookRepo(redisCache, orderBookMQTopic, l1OrderBookMQTopic, l2OrderBookMQTopic, l3OrderBookMQTopic)
+	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
+	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo)
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
-	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo, 100) // TODO: 100?
+	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo)
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
-	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo, 100) // TODO: 100?
+	quotationUseCase := quotation.CreateQuotationUseCase(ctx, tradingRepo, quotationRepo)
 	candleUseCase := candleUseCaseLib.CreateCandleUseCase(ctx, candleRepo)
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger, 3000, 500*time.Millisecond) // TODO: orderBookDepth use function? 100?
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, matchingOrderBookRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger)
 	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	assert.Nil(t, err)
 	authUseCase, err := auth.CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath, authRepo, accountRepo, logger)
 	assert.Nil(t, err)
 
 	go func() {
-		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, userAssetUseCase, tradingUseCase, matchingUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -240,8 +241,8 @@ func testSetupFn(t assert.TestingT) *testSetup {
 		wsDelivery.DecodeStreamExchangeRequest,
 		wsDelivery.EncodeStreamExchangeResponse,
 		wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),
-		wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))), // TODO
-		wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()),                                                   // TODO: maybe to default
+		wsTransport.ServerBefore(httpKit.CustomBeforeCtx(tracer, httpKit.OptionSetCookieAccessTokenKey("accessToken"))),
+		wsTransport.ServerErrorEncoder(wsKit.EncodeWSErrorResponse()), // TODO: maybe to default
 	))
 
 	return &testSetup{
@@ -275,6 +276,8 @@ func testSetupFn(t assert.TestingT) *testSetup {
 }
 
 func TestServer(t *testing.T) {
+	ctx := context.Background()
+
 	testCases := []struct {
 		scenario string
 		fn       func(t *testing.T)
@@ -282,7 +285,7 @@ func TestServer(t *testing.T) {
 		{
 			scenario: "test happy case",
 			fn: func(t *testing.T) {
-				testSetup := testSetupFn(t)
+				testSetup := testSetupFn(ctx, t)
 				defer testSetup.teardownFn()
 
 				testSetup.createUserServer.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{"email":"%s","password":"%s"}`, userAEmail, userAPassword))))
@@ -375,7 +378,9 @@ func TestServer(t *testing.T) {
 }
 
 func BenchmarkServer(b *testing.B) {
-	testSetup := testSetupFn(b)
+	ctx := context.Background()
+
+	testSetup := testSetupFn(ctx, b)
 	// defer testSetup.teardownFn()
 
 	testSetup.createUserServer.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(fmt.Sprintf(`{"email":"%s","password":"%s"}`, userAEmail, userAPassword))))

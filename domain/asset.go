@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/shopspring/decimal"
@@ -17,10 +18,13 @@ var (
 )
 
 type UserAsset struct {
+	ID        int
 	UserID    int
 	AssetID   int
 	Available decimal.Decimal
 	Frozen    decimal.Decimal
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type UserAssetRepo interface {
@@ -36,7 +40,10 @@ type UserAssetRepo interface {
 	RecoverBySnapshot(*TradingSnapshot) error
 
 	ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *TradingResult) error
-	ConsumeUserAsset(ctx context.Context, key string, notify func(userAsset *UserAsset) error)
+	ConsumeUsersAssets(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*UserAsset) error)
+
+	SaveAssets(sequenceID int, usersAssets []*UserAsset) error
+	GetHistoryAssets(userID int) (userAssets map[int]*UserAsset, err error)
 }
 
 type UserAssetUseCase interface {
@@ -49,6 +56,8 @@ type UserAssetUseCase interface {
 
 	GetAssets(userID int) (map[int]*UserAsset, error)
 	GetAsset(userID, assetID int) (*UserAsset, error)
+
+	ConsumeTransferResultToSave(ctx context.Context, key string)
 
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error

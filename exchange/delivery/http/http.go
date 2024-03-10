@@ -249,7 +249,10 @@ func MakeCancelOrderEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
 func MakeGetOrderBookEndpoint(svc domain.MatchingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(getOrderBookRequest) // TODO: maybe no need?
-		orderBook := svc.GetOrderBook(req.MaxDepth)
+		orderBook, err := svc.GetHistoryL2OrderBook(ctx, req.MaxDepth)
+		if err != nil {
+			return nil, errors.Wrap(err, "get history l2 order book failed")
+		}
 		return orderBook, nil
 	}
 }
