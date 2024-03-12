@@ -34,6 +34,7 @@ type tradingRepo struct {
 	mongoCollection *mongo.Collection
 	orm             *ormKit.DB
 	tradingEventMQ  mq.MQTopic
+	tradingResultMQ mq.MQTopic
 	err             error
 	doneCh          chan struct{}
 	cancel          context.CancelFunc
@@ -60,7 +61,7 @@ func (t *tradingResultStruct) Marshal() ([]byte, error) {
 func CreateTradingRepo(
 	ctx context.Context,
 	mongoCollection *mongo.Collection,
-	tradingEventMQ mq.MQTopic,
+	tradingEventMQ, tradingResultMQ mq.MQTopic,
 	orm *ormKit.DB,
 ) domain.TradingRepo {
 	_, cancel := context.WithCancel(ctx)
@@ -69,6 +70,7 @@ func CreateTradingRepo(
 		orm:             orm,
 		mongoCollection: mongoCollection,
 		tradingEventMQ:  tradingEventMQ,
+		tradingResultMQ: tradingResultMQ,
 		doneCh:          make(chan struct{}),
 		cancel:          cancel,
 	}
@@ -133,6 +135,48 @@ func (t *tradingRepo) ConsumeTradingEvent(ctx context.Context, key string, notif
 			tradingEvents[idx] = &tradingEvent
 		}
 		notify(tradingEvents, commitFn)
+		return nil
+	})
+}
+
+type tradingResultMQMessage struct {
+	*domain.TradingResult
+}
+
+func (s *tradingResultMQMessage) GetKey() string {
+	return strconv.Itoa(s.SequenceID)
+}
+
+func (s *tradingResultMQMessage) Marshal() ([]byte, error) {
+	marshalData, err := json.Marshal(s)
+	if err != nil {
+		return nil, errors.Wrap(err, "marshal failed")
+	}
+	return marshalData, nil
+}
+
+func (t *tradingRepo) ProduceTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
+	if err := t.tradingResultMQ.Produce(ctx, &tradingResultMQMessage{
+		TradingResult: tradingResult,
+	}); err != nil {
+		return errors.Wrap(err, "produce failed")
+	}
+	return nil
+}
+
+func (t *tradingRepo) ConsumeTradingResult(ctx context.Context, key string, notify func(tradingResults []*domain.TradingResult) error) {
+	t.tradingResultMQ.SubscribeBatch(key, func(messages [][]byte) error {
+		tradingResults := make([]*domain.TradingResult, len(messages))
+		for idx, message := range messages {
+			var tradingResult domain.TradingResult
+			if err := json.Unmarshal(message, &tradingResult); err != nil {
+				return errors.Wrap(err, "unmarshal failed")
+			}
+			tradingResults[idx] = &tradingResult
+		}
+		if err := notify(tradingResults); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
 		return nil
 	})
 }

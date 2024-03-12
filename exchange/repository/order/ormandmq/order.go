@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/pkg/errors"
@@ -76,55 +75,54 @@ func (o *orderRepo) SaveHistoryOrdersWithIgnore(sequenceID int, orders []*domain
 	return nil
 }
 
-type mqMessage struct {
-	SequenceID int
-	Orders     []*domain.OrderEntity
-}
+func (o *orderRepo) ProduceOrderMQByTradingResults(ctx context.Context, tradingResults []*domain.TradingResult) error {
+	var mqMessages []mq.Message
+	for _, tradingResult := range tradingResults {
+		mqMessage := mqMessage{
+			SequenceID: tradingResult.SequenceID,
+		}
 
-var _ mq.Message = (*mqMessage)(nil)
+		switch tradingResult.TradingResultStatus {
+		case domain.TradingResultStatusCreate:
+			orders := []*domain.OrderEntity{
+				tradingResult.MatchResult.TakerOrder,
+			}
+			for _, order := range tradingResult.MatchResult.MatchDetails {
+				orders = append(orders, order.MakerOrder)
+			}
+			mqMessage.Orders = orders
+		case domain.TradingResultStatusCancel:
+			mqMessage.Orders = []*domain.OrderEntity{tradingResult.CancelOrderResult.CancelOrder}
+		}
 
-func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.SequenceID)
-}
-
-func (m *mqMessage) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
+		mqMessages = append(mqMessages, &mqMessage)
 	}
-	return marshalData, nil
-}
 
-func (o *orderRepo) ProduceOrderMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	sequenceID := tradingResult.SequenceID
-
-	switch tradingResult.TradingResultStatus {
-	case domain.TradingResultStatusCreate:
-		orders := []*domain.OrderEntity{
-			tradingResult.MatchResult.TakerOrder,
-		}
-		for _, order := range tradingResult.MatchResult.MatchDetails {
-			orders = append(orders, order.MakerOrder)
-		}
-		if err := o.orderMQTopic.Produce(ctx, &mqMessage{
-			SequenceID: sequenceID,
-			Orders:     orders,
-		}); err != nil {
-			return errors.Wrap(err, "produce failed")
-		}
-	case domain.TradingResultStatusCancel:
-		if err := o.orderMQTopic.Produce(ctx, &mqMessage{
-			SequenceID: sequenceID,
-			Orders:     []*domain.OrderEntity{tradingResult.CancelOrderResult.CancelOrder},
-		}); err != nil {
-			return errors.Wrap(err, "produce failed")
-		}
+	if err := o.orderMQTopic.ProduceBatch(ctx, mqMessages); err != nil {
+		return errors.Wrap(err, "produce failed")
 	}
 
 	return nil
 }
 
-func (o *orderRepo) ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error) {
+func (o *orderRepo) ConsumeOrderMQ(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity) error) {
+	o.orderMQTopic.SubscribeBatch(key, func(messages [][]byte) error {
+		for _, message := range messages {
+			var mqMessage mqMessage
+			err := json.Unmarshal(message, &mqMessage)
+			if err != nil {
+				return errors.Wrap(err, "unmarshal failed")
+			}
+
+			if err := notify(mqMessage.SequenceID, mqMessage.Orders); err != nil {
+				return errors.Wrap(err, "notify failed")
+			}
+		}
+		return nil
+	})
+}
+
+func (o *orderRepo) ConsumeOrderMQWithCommit(ctx context.Context, key string, notify func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error) {
 	o.orderMQTopic.SubscribeBatchWithManualCommit(key, func(messages [][]byte, commitFn func() error) error {
 		for _, message := range messages {
 			var mqMessage mqMessage

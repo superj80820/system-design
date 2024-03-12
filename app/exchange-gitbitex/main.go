@@ -74,7 +74,13 @@ func main() {
 	enableHTTPS := utilKit.GetEnvBool("ENABLE_HTTPS", false)
 	httpsCertFilePath := utilKit.GetEnvString("HTTPS_CERT_FILE_PATH", "./fullchain.pem")
 	httpsPrivateKeyFilePath := utilKit.GetEnvString("HTTPS_PRIVATE_KEY_FILE_PATH", "./privkey.pem")
-	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE")
+	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE_TOPIC")
+	assetTopicName := utilKit.GetEnvString("ASSET_TOPIC_NAME", "ASSET_TOPIC")
+	tickTopicName := utilKit.GetEnvString("TICK_TOPIC_NAME", "TICK_TOPIC")
+	l2OrderBookTopicName := utilKit.GetEnvString("L2_ORDER_BOOK_TOPIC_NAME", "L2_ORDER_BOOK_TOPIC")
+	matchingTopicName := utilKit.GetEnvString("MATCHING_TOPIC_NAME", "MATCHING_TOPIC")
+	orderTopicName := utilKit.GetEnvString("ORDER_TOPIC_NAME", "ORDER_TOPIC")
+	candleTopicName := utilKit.GetEnvString("CANDLE_TOPIC_NAME", "CANDLE_TOPIC")
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
 	mongoURI := utilKit.GetEnvString("MONGO_URI", "")
@@ -181,15 +187,30 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
-	messageChannelBuffer := 1000
-	messageCollectDuration := 100 * time.Millisecond
-	var sequenceMQTopic mq.MQTopic
+	messageChannelBuffer := 100000
+	messageCollectDuration := 500 * time.Millisecond
+	var (
+		sequenceMQTopic,
+		assetMQTopic,
+		tickMQTopic,
+		matchingMQTopic,
+		orderMQTopic,
+		candleMQTopic,
+		l2OrderBookMQTopic,
+
+		matchingNotifyMQTopic,
+		tickNotifyMQTopic,
+		assetNotifyMQTopic,
+		orderNotifyMQTopic,
+		candleNotifyMQTopic,
+		l2OrderBookNotifyMQTopic mq.MQTopic
+	)
 	if enableKafka {
 		sequenceMQTopic, err = kafkaMQKit.CreateMQTopic(
 			ctx,
 			kafkaURI,
 			sequenceTopicName,
-			kafkaMQKit.ConsumeByGroupID(serviceName, true),
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+sequenceTopicName, true),
 			messageChannelBuffer,
 			messageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
@@ -197,20 +218,175 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		assetMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			assetTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+assetTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		tickMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			tickTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tickTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		matchingMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			matchingTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+matchingTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		l2OrderBookMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			l2OrderBookTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+l2OrderBookTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		orderMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			orderTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+orderTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		candleMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			candleTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+
+		assetNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			assetTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+assetTopicName+":NOTIFY", true),
+			10,
+			500*time.Millisecond,
+			kafkaMQKit.UseRingBuffer(),
+		)
+		if err != nil {
+			panic(err)
+		}
+		tickNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			tickTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tickTopicName+":NOTIFY", true),
+			10,
+			500*time.Millisecond,
+			kafkaMQKit.UseRingBuffer(),
+		)
+		if err != nil {
+			panic(err)
+		}
+		matchingNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			matchingTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+matchingTopicName+":NOTIFY", true),
+			10,
+			500*time.Millisecond,
+			kafkaMQKit.UseRingBuffer(), // TODO: think
+		)
+		if err != nil {
+			panic(err)
+		}
+		l2OrderBookNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			l2OrderBookTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+l2OrderBookTopicName+":NOTIFY", true),
+			10,
+			500*time.Millisecond,
+			kafkaMQKit.UseRingBuffer(),
+		)
+		if err != nil {
+			panic(err)
+		}
+		orderNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			orderTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+orderTopicName+":NOTIFY", true),
+			10,
+			500*time.Millisecond,
+			kafkaMQKit.UseRingBuffer(), // TODO: think
+		)
+		if err != nil {
+			panic(err)
+		}
+		candleNotifyMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			candleTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTopicName+":NOTIFY", true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			// kafkaMQKit.UseRingBuffer(),// TODO: think
+		)
+		if err != nil {
+			panic(err)
+		}
 	} else {
 		sequenceMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		assetMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		tickMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		matchingMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		orderMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		candleMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		l2OrderBookMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
+		assetNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		tickNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		matchingNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		candleNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		l2OrderBookNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		orderNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	}
 
 	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	assetMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
 	candleTradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	candleMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	tickMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	matchingMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+
 	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	l2OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
@@ -258,7 +434,7 @@ func main() {
 		}
 	}
 
-	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, tradingEventMQTopic, ormDB)
+	tradingRepo := tradingMySQLAndMongoRepo.CreateTradingRepo(ctx, eventsCollection, tradingEventMQTopic, tradingResultMQTopic, ormDB)
 	assetRepo := assetMemoryAndMySQLRepo.CreateAssetRepo(assetMQTopic, ormDB)
 	sequencerRepo, err := sequencerKafkaAndMySQLRepo.CreateSequencerRepo(ctx, sequenceMQTopic, ormDB)
 	if err != nil {
@@ -269,6 +445,14 @@ func main() {
 	quotationRepo := quotationRepoMySQLAndRedis.CreateQuotationRepo(ormDB, redisCache, tickMQTopic)
 	matchingRepo := matchingMySQLAndMQRepo.CreateMatchingRepo(ormDB, matchingMQTopic)
 	matchingOrderBookRepo := matchingMemoryAndRedisRepo.CreateOrderBookRepo(redisCache, orderBookMQTopic, l1OrderBookMQTopic, l2OrderBookMQTopic, l3OrderBookMQTopic)
+
+	assetNotifyRepo := assetMemoryAndMySQLRepo.CreateAssetNotifyRepo(assetNotifyMQTopic)
+	quotationNotifyRepo := quotationRepoMySQLAndRedis.CreateQuotationNotifyRepo(tickNotifyMQTopic)
+	matchingNotifyRepo := matchingMySQLAndMQRepo.CreateMatchingNotifyRepo(matchingNotifyMQTopic)
+	matchingOrderBookNotifyRepo := matchingMemoryAndRedisRepo.CreateMatchingOrderBookNotifyRepo(l2OrderBookNotifyMQTopic)
+	orderNotifyRepo := orderORMRepo.CreateOrderNotifyRepo(orderNotifyMQTopic)
+	candleNotifyRepo := candleRepoRedis.CreateCandleNotifyRepo(candleNotifyMQTopic)
+
 	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
@@ -281,7 +465,10 @@ func main() {
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, matchingOrderBookRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, matchingOrderBookRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, logger)
+
+	tradingNotifyUseCase := trading.CreateTradingNotifyUseCase(ctx, matchingOrderBookNotifyRepo, candleNotifyRepo, assetNotifyRepo, quotationNotifyRepo, orderNotifyRepo, matchingNotifyRepo, currencyUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
+
 	accountUseCase, err := account.CreateAccountUseCase(accountRepo, logger)
 	if err != nil {
 		panic(err)
@@ -407,7 +594,7 @@ func main() {
 
 	r.PathPrefix("/ws").Handler(
 		wsTransport.NewServer(
-			wsDelivery.MakeExchangeEndpoint(tradingUseCase, authUseCase),
+			wsDelivery.MakeExchangeEndpoint(tradingNotifyUseCase, authUseCase),
 			wsDelivery.DecodeStreamExchangeRequest,
 			wsDelivery.EncodeStreamExchangeResponse,
 			wsTransport.AddHTTPResponseHeader(wsKit.CustomHeaderFromCtx(ctx)),

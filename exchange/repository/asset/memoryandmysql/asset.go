@@ -3,7 +3,6 @@ package memoryandmysql
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +26,7 @@ type assetRepo struct {
 	db             *ormKit.DB
 	tableName      string
 	lock           *sync.RWMutex
+	observers      utilKit.GenericSyncMap[string, mq.Observer]
 }
 
 func CreateAssetRepo(assetMQTopic mq.MQTopic, db *ormKit.DB) domain.UserAssetRepo {
@@ -173,37 +173,22 @@ func (a *assetRepo) SubAssetFrozen(userAsset *domain.UserAsset, amount decimal.D
 	return nil
 }
 
-type mqMessage struct {
-	SequenceID  int
-	UsersAssets []*domain.UserAsset
-}
-
-var _ mq.Message = (*mqMessage)(nil)
-
-func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.SequenceID)
-}
-
-func (m *mqMessage) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
+func (a *assetRepo) ProduceUserAssetByTradingResults(ctx context.Context, tradingResults []*domain.TradingResult) error {
+	mqMessages := make([]mq.Message, len(tradingResults))
+	for idx, tradingResult := range tradingResults {
+		mqMessages[idx] = &mqMessage{
+			SequenceID:  tradingResult.SequenceID,
+			UsersAssets: tradingResult.TransferResult.UserAssets,
+		}
 	}
-	return marshalData, nil
-}
-
-func (a *assetRepo) ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	if err := a.assetMQTopic.Produce(ctx, &mqMessage{
-		SequenceID:  tradingResult.SequenceID,
-		UsersAssets: tradingResult.TransferResult.UserAssets,
-	}); err != nil {
+	if err := a.assetMQTopic.ProduceBatch(ctx, mqMessages); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
 	return nil
 }
 
 func (a *assetRepo) ConsumeUsersAssets(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*domain.UserAsset) error) { // TODO: error handle
-	a.assetMQTopic.Subscribe(key, func(message []byte) error {
+	observer := a.assetMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
@@ -214,6 +199,22 @@ func (a *assetRepo) ConsumeUsersAssets(ctx context.Context, key string, notify f
 		}
 		return nil
 	})
+	a.observers.Store(key, observer)
+}
+
+func (a *assetRepo) ConsumeUsersAssetsWithCommit(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*domain.UserAsset, commitFn func() error) error) { // TODO: error handle
+	observer := a.assetMQTopic.SubscribeWithManualCommit(key, func(message []byte, commitFn func() error) error {
+		var mqMessage mqMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.SequenceID, mqMessage.UsersAssets, commitFn); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
+	a.observers.Store(key, observer)
 }
 
 func (a *assetRepo) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) error {

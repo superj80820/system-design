@@ -200,9 +200,12 @@ func (u *userAsset) RecoverBySnapshot(tradingSnapshot *domain.TradingSnapshot) e
 }
 
 func (u *userAsset) ConsumeTransferResultToSave(ctx context.Context, key string) {
-	u.assetRepo.ConsumeUsersAssets(ctx, key, func(sequenceID int, usersAssets []*domain.UserAsset) error { // TODO: error handle
+	u.assetRepo.ConsumeUsersAssetsWithCommit(ctx, key, func(sequenceID int, usersAssets []*domain.UserAsset, commitFn func() error) error { // TODO: error handle
 		if err := u.assetRepo.SaveAssets(sequenceID, usersAssets); err != nil {
 			return errors.Wrap(err, "save assets failed")
+		}
+		if err := commitFn(); err != nil {
+			return errors.Wrap(err, "commit failed")
 		}
 		return nil
 	})

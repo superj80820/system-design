@@ -349,50 +349,36 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (c *candleRepo) ProduceCandleMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return nil
+func (c *candleRepo) ProduceCandleMQByTradingResults(ctx context.Context, tradingResults []*domain.TradingResult) error {
+	mqMessages := make([]mq.Message, len(tradingResults))
+	for idx, tradingResult := range tradingResults {
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return nil
+		}
+		mqMessages[idx] = &mqMessage{
+			TradingResult: tradingResult,
+		}
 	}
 
-	if err := c.candleTradingResultMQTopic.Produce(ctx, &mqMessage{
-		TradingResult: tradingResult,
-	}); err != nil {
+	if err := c.candleTradingResultMQTopic.ProduceBatch(ctx, mqMessages); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
 
 	return nil
 }
 
-func (c *candleRepo) ConsumeCandleMQByTradingResult(ctx context.Context, key string, notify func(tradingResult *domain.TradingResult) error) {
-	c.candleTradingResultMQTopic.Subscribe(key, func(message []byte) error {
+func (c *candleRepo) ConsumeCandleMQByTradingResultWithCommit(ctx context.Context, key string, notify func(tradingResult *domain.TradingResult, commitFn func() error) error) {
+	c.candleTradingResultMQTopic.SubscribeWithManualCommit(key, func(message []byte, commitFn func() error) error {
 		var mqMessage mqMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
 			return errors.Wrap(err, "unmarshal failed")
 		}
-		if err := notify(mqMessage.TradingResult); err != nil {
+		if err := notify(mqMessage.TradingResult, commitFn); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil
 	})
-}
-
-type mqCandleMessage struct {
-	*domain.CandleBar
-}
-
-var _ mq.Message = (*mqCandleMessage)(nil)
-
-func (m *mqCandleMessage) GetKey() string {
-	return strconv.Itoa(m.StartTime)
-}
-
-func (m *mqCandleMessage) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
-	}
-	return marshalData, nil
 }
 
 func (c *candleRepo) ProduceCandleMQ(ctx context.Context, candleBar *domain.CandleBar) error {

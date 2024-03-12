@@ -3,7 +3,6 @@ package trading
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
 	"time"
 
@@ -30,11 +29,10 @@ type tradingUseCase struct {
 	matchingRepo           domain.MatchingRepo
 	orderRepo              domain.OrderRepo
 
-	lastSequenceID    int
-	orderBookMaxDepth int
-	errLock           *sync.Mutex
-	doneCh            chan struct{}
-	err               error
+	lastSequenceID int
+	errLock        *sync.Mutex
+	doneCh         chan struct{}
+	err            error
 }
 
 func CreateTradingUseCase(
@@ -52,7 +50,6 @@ func CreateTradingUseCase(
 	syncTradingUseCase domain.SyncTradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
 	currencyUseCase domain.CurrencyUseCase,
-	orderBookMaxDepth int,
 	logger loggerKit.Logger,
 ) domain.TradingUseCase {
 	return &tradingUseCase{
@@ -71,9 +68,8 @@ func CreateTradingUseCase(
 		userAssetUseCase:       userAssetUseCase,
 		currencyUseCase:        currencyUseCase,
 
-		orderBookMaxDepth: orderBookMaxDepth,
-		errLock:           new(sync.Mutex),
-		doneCh:            make(chan struct{}),
+		errLock: new(sync.Mutex),
+		doneCh:  make(chan struct{}),
 	}
 }
 
@@ -216,20 +212,10 @@ func (t *tradingUseCase) processTradingEvent(ctx context.Context, te *domain.Tra
 		return errors.New("unknown event type")
 	}
 
-	if err := t.userAssetRepo.ProduceUserAssetByTradingResult(ctx, &tradingResult); err != nil {
-		panic(errors.Wrap(err, "produce order failed"))
-	}
-	if err := t.orderRepo.ProduceOrderMQByTradingResult(ctx, &tradingResult); err != nil {
-		panic(errors.Wrap(err, "produce order failed"))
-	}
-	if err := t.matchingRepo.ProduceMatchOrderMQByTradingResult(ctx, &tradingResult); err != nil {
-		panic(errors.Wrap(err, "produce match order failed"))
-	}
-	if err := t.candleRepo.ProduceCandleMQByTradingResult(ctx, &tradingResult); err != nil {
-		panic(errors.Wrap(err, "produce candle failed"))
-	}
-	if err := t.quotationRepo.ProduceTicksMQByTradingResult(ctx, &tradingResult); err != nil {
-		panic(errors.Wrap(err, "produce ticks failed"))
+	fmt.Println("york sequence:", tradingResult.SequenceID)
+
+	if err := t.tradingRepo.ProduceTradingResult(ctx, &tradingResult); err != nil {
+		panic(errors.Wrap(err, "produce trading result failed"))
 	}
 
 	return nil
@@ -258,6 +244,27 @@ func (t *tradingUseCase) ConsumeGlobalSequencer(ctx context.Context) {
 	})
 }
 
+func (t *tradingUseCase) ConsumeTradingResult(ctx context.Context, key string) {
+	t.tradingRepo.ConsumeTradingResult(ctx, key, func(tradingResults []*domain.TradingResult) error {
+		if err := t.userAssetRepo.ProduceUserAssetByTradingResults(ctx, tradingResults); err != nil {
+			panic(errors.Wrap(err, "produce order failed"))
+		}
+		if err := t.orderRepo.ProduceOrderMQByTradingResults(ctx, tradingResults); err != nil {
+			panic(errors.Wrap(err, "produce order failed"))
+		}
+		if err := t.matchingRepo.ProduceMatchOrderMQByTradingResults(ctx, tradingResults); err != nil {
+			panic(errors.Wrap(err, "produce match order failed"))
+		}
+		if err := t.candleRepo.ProduceCandleMQByTradingResults(ctx, tradingResults); err != nil {
+			panic(errors.Wrap(err, "produce candle failed"))
+		}
+		if err := t.quotationRepo.ProduceTicksMQByTradingResults(ctx, tradingResults); err != nil {
+			panic(errors.Wrap(err, "produce ticks failed"))
+		}
+		return nil
+	})
+}
+
 func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 	setErrAndDone := func(err error) {
 		t.errLock.Lock()
@@ -269,6 +276,10 @@ func (t *tradingUseCase) ConsumeTradingEvent(ctx context.Context, key string) {
 	t.tradingRepo.ConsumeTradingEvent(ctx, key, func(events []*domain.TradingEvent, commitFn func() error) {
 		if err := t.ProcessTradingEvents(ctx, events); err != nil {
 			setErrAndDone(errors.Wrap(err, "process trading events failed"))
+			return
+		}
+		if err := commitFn(); err != nil {
+			setErrAndDone(errors.Wrap(err, "commit failed"))
 			return
 		}
 	})
@@ -445,281 +456,6 @@ func (t *tradingUseCase) SaveSnapshot(ctx context.Context, tradingSnapshot *doma
 		return errors.Wrap(err, "save snapshot failed")
 	}
 	return nil
-}
-
-// TODO: error handle when consume failed
-func (t *tradingUseCase) NotifyForPublic(ctx context.Context, stream domain.TradingNotifyStream) error {
-	consumeKey := utilKit.GetSnowflakeIDString()
-
-	l2OrderBook, err := t.matchingUseCase.GetHistoryL2OrderBook(ctx, t.orderBookMaxDepth)
-	if err != nil && !errors.Is(err, domain.ErrNoData) {
-		return errors.Wrap(err, "get history l2 order book failed")
-	} else if err == nil {
-		stream.Send(domain.TradingNotifyResponse{
-			Type:      domain.OrderBookExchangeResponseType,
-			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: l2OrderBook,
-		})
-	}
-
-	t.matchingOrderBookRepo.ConsumeL2OrderBook(ctx, consumeKey, func(l2OrderBook *domain.OrderBookL2Entity) error {
-		if err := stream.Send(domain.TradingNotifyResponse{
-			Type:      domain.OrderBookExchangeResponseType,
-			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: l2OrderBook,
-		}); err != nil {
-			return errors.Wrap(err, "send failed")
-		}
-		return nil
-	})
-
-	var (
-		isConsumeTick   bool
-		isConsumeMatch  bool
-		isConsumeOrder  bool
-		isConsumeCandle bool
-	)
-	for {
-		receive, err := stream.Recv()
-		if err != nil {
-			return errors.Wrap(err, "receive failed")
-		}
-		for _, channel := range receive.Channels {
-			switch domain.ExchangeRequestType(channel) {
-			case domain.TickerExchangeRequestType:
-				if isConsumeTick {
-					continue
-				}
-				t.quotationRepo.ConsumeTicksMQ(ctx, consumeKey, func(sequenceID int, ticks []*domain.TickEntity) error {
-					for _, tick := range ticks {
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:      domain.TickerExchangeResponseType,
-							ProductID: t.currencyUseCase.GetProductID(),
-							Tick:      tick,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					return nil
-				})
-				isConsumeTick = true
-			case domain.CandlesExchangeRequestType:
-				if isConsumeCandle {
-					continue
-				}
-				t.candleRepo.ConsumeCandleMQ(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
-					if err := stream.Send(domain.TradingNotifyResponse{
-						Type:      domain.CandleExchangeResponseType,
-						ProductID: t.currencyUseCase.GetProductID(),
-						CandleBar: candleBar,
-					}); err != nil {
-						return errors.Wrap(err, "send failed")
-					}
-					return nil
-				})
-				isConsumeCandle = true
-			case domain.MatchExchangeRequestType:
-				if isConsumeMatch {
-					continue
-				}
-				t.matchingRepo.ConsumeMatchOrderMQBatch(ctx, consumeKey, func(matchOrderDetails []*domain.MatchOrderDetail) error {
-					for _, matchOrderDetail := range matchOrderDetails {
-						if matchOrderDetail.Type != domain.MatchTypeTaker {
-							continue
-						}
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:             domain.MatchExchangeResponseType,
-							ProductID:        t.currencyUseCase.GetProductID(),
-							MatchOrderDetail: matchOrderDetail,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					return nil
-				})
-				isConsumeMatch = true
-			case domain.OrderExchangeRequestType:
-				if isConsumeOrder {
-					continue
-				}
-				t.orderRepo.ConsumeOrderMQBatch(ctx, consumeKey, func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error {
-					for _, order := range orders {
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:      domain.OrderExchangeResponseType,
-							ProductID: t.currencyUseCase.GetProductID(),
-							Order:     order,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					commitFn()
-					return nil
-				})
-				isConsumeOrder = true
-			case domain.PingExchangeRequestType:
-				if err := stream.Send(domain.TradingNotifyResponse{
-					Type:      domain.PongExchangeResponseType,
-					ProductID: t.currencyUseCase.GetProductID(),
-				}); err != nil {
-					return errors.Wrap(err, "send failed")
-				}
-			}
-		}
-	}
-}
-
-// TODO: error handle when consume failed
-func (t *tradingUseCase) NotifyForUser(ctx context.Context, userID int, stream domain.TradingNotifyStream) error {
-	consumeKey := strconv.Itoa(userID) + "-" + utilKit.GetSnowflakeIDString()
-
-	l2OrderBook, err := t.matchingUseCase.GetHistoryL2OrderBook(ctx, t.orderBookMaxDepth)
-	if err != nil && !errors.Is(err, domain.ErrNoData) {
-		return errors.Wrap(err, "get history l2 order book failed")
-	} else if err == nil {
-		stream.Send(domain.TradingNotifyResponse{
-			Type:      domain.OrderBookExchangeResponseType,
-			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: l2OrderBook,
-		})
-	}
-
-	t.matchingOrderBookRepo.ConsumeL2OrderBook(ctx, consumeKey, func(l2OrderBook *domain.OrderBookL2Entity) error {
-		if err := stream.Send(domain.TradingNotifyResponse{
-			Type:      domain.OrderBookExchangeResponseType,
-			ProductID: t.currencyUseCase.GetProductID(),
-			OrderBook: l2OrderBook,
-		}); err != nil {
-			return errors.Wrap(err, "send failed")
-		}
-		return nil
-	})
-
-	var (
-		isConsumeTick   bool
-		isConsumeMatch  bool
-		isConsumeFounds bool
-		isConsumeOrder  bool
-		isConsumeCandle bool
-	)
-	for {
-		receive, err := stream.Recv()
-		if err != nil {
-			return errors.Wrap(err, "receive failed")
-		}
-		for _, channel := range receive.Channels {
-			switch domain.ExchangeRequestType(channel) {
-			case domain.TickerExchangeRequestType:
-				if isConsumeTick {
-					continue
-				}
-				t.quotationRepo.ConsumeTicksMQ(ctx, consumeKey, func(sequenceID int, ticks []*domain.TickEntity) error {
-					for _, tick := range ticks {
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:      domain.TickerExchangeResponseType,
-							ProductID: t.currencyUseCase.GetProductID(),
-							Tick:      tick,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					return nil
-				})
-				isConsumeTick = true
-			case domain.AssetsExchangeRequestType:
-				if isConsumeFounds {
-					continue
-				}
-				t.userAssetRepo.ConsumeUsersAssets(ctx, consumeKey, func(sequenceID int, usersAssets []*domain.UserAsset) error {
-					for _, userAsset := range usersAssets {
-						if userID != userAsset.UserID {
-							continue
-						}
-
-						currencyCode, err := t.currencyUseCase.GetCurrencyUpperNameByType(domain.CurrencyType(userAsset.AssetID))
-						if err != nil {
-							return errors.Wrap(err, "get currency upper name by type failed")
-						}
-
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:      domain.AssetExchangeResponseType,
-							ProductID: t.currencyUseCase.GetProductID(),
-							UserAsset: &domain.TradingNotifyAsset{
-								UserAsset:    userAsset,
-								CurrencyName: currencyCode,
-							},
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					return nil
-				})
-				isConsumeFounds = true
-			case domain.CandlesExchangeRequestType:
-				if isConsumeCandle {
-					continue
-				}
-				t.candleRepo.ConsumeCandleMQ(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
-					if err := stream.Send(domain.TradingNotifyResponse{
-						Type:      domain.CandleExchangeResponseType,
-						ProductID: t.currencyUseCase.GetProductID(),
-						CandleBar: candleBar,
-					}); err != nil {
-						return errors.Wrap(err, "send failed")
-					}
-					return nil
-				})
-				isConsumeCandle = true
-			case domain.MatchExchangeRequestType:
-				if isConsumeMatch {
-					continue
-				}
-				t.matchingRepo.ConsumeMatchOrderMQBatch(ctx, consumeKey, func(matchOrderDetails []*domain.MatchOrderDetail) error {
-					for _, matchOrderDetail := range matchOrderDetails {
-						if matchOrderDetail.Type != domain.MatchTypeTaker {
-							continue
-						}
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:             domain.MatchExchangeResponseType,
-							ProductID:        t.currencyUseCase.GetProductID(),
-							MatchOrderDetail: matchOrderDetail,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					return nil
-				})
-				isConsumeMatch = true
-			case domain.OrderExchangeRequestType:
-				if isConsumeOrder {
-					continue
-				}
-				t.orderRepo.ConsumeOrderMQBatch(ctx, consumeKey, func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error {
-					for _, order := range orders {
-						if order.UserID != userID {
-							continue
-						}
-						if err := stream.Send(domain.TradingNotifyResponse{
-							Type:      domain.OrderExchangeResponseType,
-							ProductID: t.currencyUseCase.GetProductID(),
-							Order:     order,
-						}); err != nil {
-							return errors.Wrap(err, "send failed")
-						}
-					}
-					commitFn()
-					return nil
-				})
-				isConsumeOrder = true
-			case domain.PingExchangeRequestType:
-				if err := stream.Send(domain.TradingNotifyResponse{
-					Type:      domain.PongExchangeResponseType,
-					ProductID: t.currencyUseCase.GetProductID(),
-				}); err != nil {
-					return errors.Wrap(err, "send failed")
-				}
-			}
-		}
-	}
 }
 
 func (t *tradingUseCase) Done() <-chan struct{} {

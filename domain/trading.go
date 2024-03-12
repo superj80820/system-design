@@ -78,6 +78,9 @@ type TradingRepo interface {
 	ProduceTradingEvent(context.Context, *TradingEvent) error
 	ConsumeTradingEvent(ctx context.Context, key string, notify func(events []*TradingEvent, commitFn func() error))
 
+	ProduceTradingResult(ctx context.Context, tradingResult *TradingResult) error
+	ConsumeTradingResult(ctx context.Context, key string, notify func(tradingResults []*TradingResult) error)
+
 	Done() <-chan struct{}
 	Err() error
 	Shutdown()
@@ -189,6 +192,7 @@ type TradingNotifyStream interface {
 type TradingUseCase interface {
 	ConsumeGlobalSequencer(context.Context)
 	ConsumeTradingEvent(ctx context.Context, key string)
+	ConsumeTradingResult(ctx context.Context, key string)
 	ProcessTradingEvents(ctx context.Context, tradingEvents []*TradingEvent) error
 	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
 	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
@@ -203,6 +207,12 @@ type TradingUseCase interface {
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
+	Done() <-chan struct{}
+	Err() error
+	Shutdown() error
+}
+
+type TradingNotifyUseCase interface {
 	NotifyForPublic(ctx context.Context, stream TradingNotifyStream) error
 	NotifyForUser(ctx context.Context, userID int, stream TradingNotifyStream) error
 

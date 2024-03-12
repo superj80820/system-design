@@ -92,48 +92,53 @@ func (m *mqMessage) Marshal() ([]byte, error) {
 	return marshalData, nil
 }
 
-func (m *matchingRepo) ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return nil
+func (m *matchingRepo) ProduceMatchOrderMQByTradingResults(ctx context.Context, tradingResults []*domain.TradingResult) error {
+	var mqMessages []mq.Message
+
+	for _, tradingResult := range tradingResults {
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			break
+		}
+
+		for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
+			takerOrderDetail := &domain.MatchOrderDetail{
+				SequenceID:     tradingResult.SequenceID,
+				OrderID:        matchDetail.TakerOrder.ID,
+				CounterOrderID: matchDetail.MakerOrder.ID,
+				UserID:         matchDetail.TakerOrder.UserID,
+				CounterUserID:  matchDetail.MakerOrder.UserID,
+				Direction:      matchDetail.TakerOrder.Direction,
+				Price:          matchDetail.Price,
+				Quantity:       matchDetail.Quantity,
+				Type:           domain.MatchTypeTaker,
+				CreatedAt:      tradingResult.MatchResult.CreatedAt,
+			}
+			makerOrderDetail := &domain.MatchOrderDetail{
+				SequenceID:     tradingResult.SequenceID,
+				OrderID:        matchDetail.MakerOrder.ID,
+				CounterOrderID: matchDetail.TakerOrder.ID,
+				UserID:         matchDetail.MakerOrder.UserID,
+				CounterUserID:  matchDetail.TakerOrder.UserID,
+				Direction:      matchDetail.MakerOrder.Direction,
+				Price:          matchDetail.Price,
+				Quantity:       matchDetail.Quantity,
+				Type:           domain.MatchTypeMaker,
+				CreatedAt:      tradingResult.MatchResult.CreatedAt,
+			}
+
+			mqMessages = append(mqMessages,
+				&mqMessage{
+					MatchOrderDetail: takerOrderDetail,
+				},
+				&mqMessage{
+					MatchOrderDetail: makerOrderDetail,
+				},
+			)
+		}
 	}
 
-	for _, matchDetail := range tradingResult.MatchResult.MatchDetails {
-		takerOrderDetail := &domain.MatchOrderDetail{
-			SequenceID:     tradingResult.SequenceID, // TODO: do not use taker sequence?
-			OrderID:        matchDetail.TakerOrder.ID,
-			CounterOrderID: matchDetail.MakerOrder.ID,
-			UserID:         matchDetail.TakerOrder.UserID,
-			CounterUserID:  matchDetail.MakerOrder.UserID,
-			Direction:      matchDetail.TakerOrder.Direction,
-			Price:          matchDetail.Price,
-			Quantity:       matchDetail.Quantity,
-			Type:           domain.MatchTypeTaker,
-			CreatedAt:      tradingResult.MatchResult.CreatedAt,
-		}
-		makerOrderDetail := &domain.MatchOrderDetail{
-			SequenceID:     tradingResult.SequenceID, // TODO: do not use maker sequence?
-			OrderID:        matchDetail.MakerOrder.ID,
-			CounterOrderID: matchDetail.TakerOrder.ID,
-			UserID:         matchDetail.MakerOrder.UserID,
-			CounterUserID:  matchDetail.TakerOrder.UserID,
-			Direction:      matchDetail.MakerOrder.Direction,
-			Price:          matchDetail.Price,
-			Quantity:       matchDetail.Quantity,
-			Type:           domain.MatchTypeMaker,
-			CreatedAt:      tradingResult.MatchResult.CreatedAt,
-		}
-
-		if err := m.matchingMQTopic.Produce(ctx, &mqMessage{
-			MatchOrderDetail: takerOrderDetail,
-		}); err != nil {
-			return errors.Wrap(err, "produce failed")
-		}
-
-		if err := m.matchingMQTopic.Produce(ctx, &mqMessage{
-			MatchOrderDetail: makerOrderDetail,
-		}); err != nil {
-			return errors.Wrap(err, "produce failed")
-		}
+	if err := m.matchingMQTopic.ProduceBatch(ctx, mqMessages); err != nil {
+		return errors.Wrap(err, "produce failed")
 	}
 
 	return nil
@@ -152,6 +157,25 @@ func (m *matchingRepo) ConsumeMatchOrderMQBatch(ctx context.Context, key string,
 		}
 
 		if err := notify(details); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
+}
+
+func (m *matchingRepo) ConsumeMatchOrderMQBatchWithCommit(ctx context.Context, key string, notify func(matchOrderDetails []*domain.MatchOrderDetail, commitFn func() error) error) {
+	m.matchingMQTopic.SubscribeBatchWithManualCommit(key, func(messages [][]byte, commitFn func() error) error {
+		details := make([]*domain.MatchOrderDetail, len(messages))
+		for idx, message := range messages {
+			var mqMessage mqMessage
+			err := json.Unmarshal(message, &mqMessage)
+			if err != nil {
+				return errors.Wrap(err, "unmarshal failed")
+			}
+			details[idx] = mqMessage.MatchOrderDetail
+		}
+
+		if err := notify(details, commitFn); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil

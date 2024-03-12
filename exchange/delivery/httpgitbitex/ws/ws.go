@@ -143,18 +143,18 @@ type tradingPongNotify struct {
 	Type string `json:"type"`
 }
 
-func MakeExchangeEndpoint(tradingUseCase domain.TradingUseCase, authUseCase domain.AuthUseCase) endpoint.BiStream[domain.TradingNotifyRequest, domain.TradingNotifyResponse] {
+func MakeExchangeEndpoint(tradingNotifyUseCase domain.TradingNotifyUseCase, authUseCase domain.AuthUseCase) endpoint.BiStream[domain.TradingNotifyRequest, domain.TradingNotifyResponse] {
 	return func(ctx context.Context, s endpoint.Stream[domain.TradingNotifyRequest, domain.TradingNotifyResponse]) error {
 		userIDInt64, err := authUseCase.Verify(httpKit.GetToken(ctx))
 		if err != nil {
 			// TODO: error
-			return tradingUseCase.NotifyForPublic(ctx, s)
+			return tradingNotifyUseCase.NotifyForPublic(ctx, s)
 		}
 		userID, err := utilKit.SafeInt64ToInt(userIDInt64)
 		if err != nil {
 			return errors.Wrap(err, "safe int64 to int failed")
 		}
-		return tradingUseCase.NotifyForUser(ctx, userID, s)
+		return tradingNotifyUseCase.NotifyForUser(ctx, userID, s)
 	}
 }
 

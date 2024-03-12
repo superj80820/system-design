@@ -23,9 +23,12 @@ func CreateCandleUseCase(ctx context.Context, candleRepo domain.CandleRepo) doma
 }
 
 func (c *candleUseCase) ConsumeTradingResultToSave(ctx context.Context, key string) {
-	c.candleRepo.ConsumeCandleMQByTradingResult(ctx, key, func(tradingResult *domain.TradingResult) error {
+	c.candleRepo.ConsumeCandleMQByTradingResultWithCommit(ctx, key, func(tradingResult *domain.TradingResult, commitFn func() error) error {
 		if err := c.candleRepo.SaveBarByMatchResult(ctx, tradingResult.MatchResult); err != nil {
 			return errors.Wrap(err, "save bar failed")
+		}
+		if err := commitFn(); err != nil {
+			return errors.Wrap(err, "commit failed")
 		}
 		return nil
 	})

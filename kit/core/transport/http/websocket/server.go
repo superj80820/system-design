@@ -123,7 +123,7 @@ func (s *Server[IN, OUT]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	interruptFunc := func(err error) {
 		cancel()
 		// 	s.errorHandler.Handle(ctx, err) // TODO
-		fmt.Println("get err(TODO)", err)
+		// fmt.Println("get err(TODO)", err)
 		s.errorEncoder(ctx, err, ws)
 		ws.Close()
 	}

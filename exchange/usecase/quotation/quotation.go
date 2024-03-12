@@ -28,13 +28,21 @@ func CreateQuotationUseCase(ctx context.Context, tradingRepo domain.TradingRepo,
 }
 
 func (q *quotationUseCase) ConsumeTicksToSave(ctx context.Context, key string) {
-	q.quotationRepo.ConsumeTicksMQ(ctx, key, func(sequenceID int, ticks []*domain.TickEntity) error {
-		if err := q.quotationRepo.SaveTickStrings(ctx, sequenceID, ticks); err != nil && !errors.Is(err, domain.ErrNoop) { // TODO: maybe use batch
-			q.errLock.Lock()
-			q.err = errors.Wrap(err, "save ticks failed")
-			q.errLock.Unlock()
-			close(q.doneCh)
-			return nil
+	setErrAndDone := func(err error) error {
+		err = errors.Wrap(err, "consume ticks get error")
+		q.errLock.Lock()
+		q.err = err
+		q.errLock.Unlock()
+		close(q.doneCh)
+		return err
+	}
+
+	q.quotationRepo.ConsumeTicksMQWithCommit(ctx, key, func(sequenceID int, ticks []*domain.TickEntity, commitFn func() error) error {
+		if err := q.quotationRepo.SaveTickStrings(ctx, sequenceID, ticks); err != nil && !errors.Is(err, domain.ErrNoop) { // TODO: error handle
+			return setErrAndDone(errors.Wrap(err, "save tick failed"))
+		}
+		if err := commitFn(); err != nil {
+			return setErrAndDone(errors.Wrap(err, "commit failed"))
 		}
 		return nil
 	})

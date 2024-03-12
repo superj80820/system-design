@@ -9,6 +9,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/segmentio/kafka-go"
 	"github.com/superj80820/system-design/kit/mq"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type ReaderWay int
@@ -64,11 +65,12 @@ func ManualCommit(rmc *readerManagerConfig) {
 type Reader struct {
 	kafkaReader KafkaReader
 
-	messages     []*kafka.Message
+	messages     *utilKit.RingBuffer[kafka.Message]
 	messagesLock *sync.Mutex
 
-	runMaxMessagesLength int
 	runDuration          time.Duration
+	runMaxMessagesLength int
+	skipFull             bool
 
 	isManualCommit bool
 
@@ -105,11 +107,12 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 		pauseHookFn:          defaultPauseHookFn,
 		errorHandleFn:        defaultErrorHandleFn,
 		runDuration:          100 * time.Millisecond,
-		runMaxMessagesLength: 1000,
+		runMaxMessagesLength: 10000,
 	}
 	for _, option := range options {
 		option(r)
 	}
+	r.messages = utilKit.CreateRingBuffer[kafka.Message](r.runMaxMessagesLength)
 	r.kafkaReaderProvider = func() KafkaReader {
 		kafkaReader := defaultKafkaReaderProvider(kafkaReaderConfig)
 		for _, fn := range r.kafkaReaderHookFn {
@@ -152,11 +155,11 @@ func (r *Reader) Run() {
 				}
 
 				r.messagesLock.Lock()
-				r.messages = append(r.messages, &m)
-				messagesLength := len(r.messages)
+				r.messages.Enqueue(&m)
+				isFull := r.messages.IsFull()
 				r.messagesLock.Unlock()
 
-				if messagesLength >= r.runMaxMessagesLength {
+				if !r.skipFull && isFull {
 					isMessagesFullCh <- struct{}{}
 				}
 			}
@@ -171,18 +174,22 @@ func (r *Reader) Run() {
 				r.messagesLock.Lock()
 				defer r.messagesLock.Unlock()
 
-				if len(r.messages) == 0 {
+				if r.messages.GetSize() == 0 {
 					return nil, nil, errors.Wrap(noopErr, "no messages")
 				}
 				latestKafkaMessage := new(kafka.Message)
-				cloneMessages := make([][]byte, len(r.messages))
-				for idx, message := range r.messages {
+				messagesSize := r.messages.GetSize()
+				cloneMessages := make([][]byte, messagesSize)
+				for i := 0; i < messagesSize; i++ {
+					message, err := r.messages.Dequeue()
+					if err != nil {
+						return nil, nil, errors.New("dequeue failed")
+					}
 					cloneValue := make([]byte, len(message.Value))
 					copy(cloneValue, message.Value)
-					cloneMessages[idx] = cloneValue
+					cloneMessages[i] = cloneValue
 					latestKafkaMessage = message
 				}
-				r.messages = nil
 
 				return cloneMessages, latestKafkaMessage, nil
 			}

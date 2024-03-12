@@ -56,12 +56,13 @@ func AsyncTradingConsume(
 ) error {
 	tradingUseCase.ConsumeGlobalSequencer(ctx)
 	tradingUseCase.ConsumeTradingEvent(ctx, "global-consume-trading-event")
-	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order") // TODO: error handle
-	quotationUseCase.ConsumeTicksToSave(ctx, "global-save-quotation")
-	candleUseCase.ConsumeTradingResultToSave(ctx, "global-save-candle")
-	matchingUseCase.ConsumeMatchResultToSave(ctx, "global-save-matching")  // TODO: error handle
-	matchingUseCase.ConsumeOrderBookToSave(ctx, "global-save-order-book")  // TODO: error handle
+	tradingUseCase.ConsumeTradingResult(ctx, "global-consume-trading-result")
 	userAssetUseCase.ConsumeTransferResultToSave(ctx, "global-save-asset") // TODO: error handle
+	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order")        // TODO: error handle
+	matchingUseCase.ConsumeMatchResultToSave(ctx, "global-save-matching")  // TODO: error handle
+	candleUseCase.ConsumeTradingResultToSave(ctx, "global-save-candle")
+	quotationUseCase.ConsumeTicksToSave(ctx, "global-save-quotation")
+	matchingUseCase.ConsumeOrderBookToSave(ctx, "global-save-order-book") // TODO: error handle
 
 	select {
 	case <-tradingUseCase.Done():

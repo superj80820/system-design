@@ -188,6 +188,12 @@ type OrderRepo interface {
 	GetHistoryOrders(userID, maxResults int) ([]*OrderEntity, error)
 	SaveHistoryOrdersWithIgnore(sequenceID int, orders []*OrderEntity) error
 
-	ProduceOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
-	ConsumeOrderMQBatch(ctx context.Context, key string, notify func(sequenceID int, order []*OrderEntity, commitFn func() error) error)
+	ProduceOrderMQByTradingResults(ctx context.Context, tradingResults []*TradingResult) error
+	ConsumeOrderMQ(ctx context.Context, key string, notify func(sequenceID int, order []*OrderEntity) error)
+	ConsumeOrderMQWithCommit(ctx context.Context, key string, notify func(sequenceID int, order []*OrderEntity, commitFn func() error) error)
+}
+
+type OrderNotifyRepo interface {
+	ConsumeOrderMQ(ctx context.Context, key string, notify func(sequenceID int, order []*OrderEntity) error)
+	StopConsume(ctx context.Context, key string)
 }

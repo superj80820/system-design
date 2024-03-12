@@ -18,12 +18,18 @@ var (
 )
 
 type MatchingRepo interface {
-	ProduceMatchOrderMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
+	ProduceMatchOrderMQByTradingResults(ctx context.Context, tradingResults []*TradingResult) error
 	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
+	ConsumeMatchOrderMQBatchWithCommit(ctx context.Context, key string, notify func(matchOrderDetails []*MatchOrderDetail, commitFn func() error) error)
 
 	SaveMatchingDetailsWithIgnore(context.Context, []*MatchOrderDetail) error
 	GetMatchingDetails(orderID int) ([]*MatchOrderDetail, error)
 	GetMatchingHistory(maxResults int) ([]*MatchOrderDetail, error)
+}
+
+type MatchingNotifyRepo interface {
+	ConsumeMatchOrderMQBatch(ctx context.Context, key string, notify func([]*MatchOrderDetail) error)
+	StopConsume(ctx context.Context, key string)
 }
 
 type MatchingOrderBookRepo interface {
@@ -53,7 +59,7 @@ type MatchingOrderBookRepo interface {
 	GetHistoryL3OrderBook(ctx context.Context, maxDepth int) (*OrderBookL3Entity, error)
 
 	ProduceOrderBook(ctx context.Context, orderBook *OrderBookL3Entity) error
-	ConsumeOrderBook(ctx context.Context, key string, notify func(*OrderBookL3Entity) error)
+	ConsumeOrderBookWithCommit(ctx context.Context, key string, notify func(orderBook *OrderBookL3Entity, commitFn func() error) error)
 
 	ProduceL1OrderBook(ctx context.Context, orderBook *OrderBookL1Entity) error
 	ConsumeL1OrderBook(ctx context.Context, key string, notify func(*OrderBookL1Entity) error)
@@ -63,6 +69,11 @@ type MatchingOrderBookRepo interface {
 
 	ProduceL3OrderBook(ctx context.Context, orderBook *OrderBookL3Entity) error
 	ConsumeL3OrderBook(ctx context.Context, key string, notify func(*OrderBookL3Entity) error)
+}
+
+type MatchingOrderBookNotifyRepo interface {
+	ConsumeL2OrderBookWithRingBuffer(ctx context.Context, key string, notify func(*OrderBookL2Entity) error)
+	StopConsume(ctx context.Context, key string)
 }
 
 type MatchingUseCase interface {

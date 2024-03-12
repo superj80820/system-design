@@ -52,6 +52,7 @@ type MQTopic interface {
 	SubscribeBatchWithManualCommit(key string, notifyBatch NotifyBatchWithManualCommit, options ...ObserverOption) Observer
 	UnSubscribe(observer Observer)
 	Produce(ctx context.Context, message Message) error
+	ProduceBatch(ctx context.Context, messages []Message) error
 	Done() <-chan struct{}
 	Err() error
 	Shutdown() bool

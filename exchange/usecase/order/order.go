@@ -148,7 +148,7 @@ func (o *orderUseCase) RemoveOrder(ctx context.Context, orderID int) error {
 }
 
 func (o *orderUseCase) ConsumeOrderResultToSave(ctx context.Context, key string) {
-	o.orderRepo.ConsumeOrderMQBatch(ctx, key, func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error {
+	o.orderRepo.ConsumeOrderMQWithCommit(ctx, key, func(sequenceID int, orders []*domain.OrderEntity, commitFn func() error) error {
 		if err := o.orderRepo.SaveHistoryOrdersWithIgnore(sequenceID, orders); err != nil {
 			return errors.Wrap(err, "save history order with ignore failed") // TODO: async error handle
 		}

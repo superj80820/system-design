@@ -147,46 +147,33 @@ func (q *quotationRepo) SaveTickStrings(ctx context.Context, sequenceID int, tic
 	return nil
 }
 
-type mqMessage struct {
-	SequenceID int // TODO: maybe no need?
-	Ticks      []*domain.TickEntity
-}
+func (q *quotationRepo) ProduceTicksMQByTradingResults(ctx context.Context, tradingResults []*domain.TradingResult) error {
+	mqMessages := make([]mq.Message, len(tradingResults))
+	for idx, tradingResult := range tradingResults {
+		if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
+			return nil
+		}
 
-var _ mq.Message = (*mqMessage)(nil)
+		ticks := make([]*domain.TickEntity, len(tradingResult.MatchResult.MatchDetails))
+		for idx, matchDetail := range tradingResult.MatchResult.MatchDetails {
+			ticks[idx] = &domain.TickEntity{
+				SequenceID:     tradingResult.SequenceID,
+				TakerOrderID:   matchDetail.TakerOrder.ID,
+				MakerOrderID:   matchDetail.MakerOrder.ID,
+				Price:          matchDetail.Price,
+				Quantity:       matchDetail.Quantity,
+				TakerDirection: matchDetail.TakerOrder.Direction,
+				CreatedAt:      tradingResult.MatchResult.CreatedAt,
+			}
+		}
 
-func (m *mqMessage) GetKey() string {
-	return strconv.Itoa(m.SequenceID)
-}
-
-func (m *mqMessage) Marshal() ([]byte, error) {
-	marshalData, err := json.Marshal(m)
-	if err != nil {
-		return nil, errors.Wrap(err, "marshal failed")
-	}
-	return marshalData, nil
-}
-
-func (q *quotationRepo) ProduceTicksMQByTradingResult(ctx context.Context, tradingResult *domain.TradingResult) error {
-	if tradingResult.TradingResultStatus != domain.TradingResultStatusCreate {
-		return nil
-	}
-
-	ticks := make([]*domain.TickEntity, len(tradingResult.MatchResult.MatchDetails))
-	for idx, matchDetail := range tradingResult.MatchResult.MatchDetails {
-		ticks[idx] = &domain.TickEntity{
-			SequenceID:     tradingResult.SequenceID,
-			TakerOrderID:   matchDetail.TakerOrder.ID,
-			MakerOrderID:   matchDetail.MakerOrder.ID,
-			Price:          matchDetail.Price,
-			Quantity:       matchDetail.Quantity,
-			TakerDirection: matchDetail.TakerOrder.Direction,
-			CreatedAt:      tradingResult.MatchResult.CreatedAt,
+		mqMessages[idx] = &mqMessage{
+			SequenceID: tradingResult.SequenceID,
+			Ticks:      ticks,
 		}
 	}
-	if err := q.tickMQTopic.Produce(ctx, &mqMessage{
-		SequenceID: tradingResult.SequenceID,
-		Ticks:      ticks,
-	}); err != nil {
+
+	if err := q.tickMQTopic.ProduceBatch(ctx, mqMessages); err != nil {
 		return errors.Wrap(err, "produce failed")
 	}
 	return nil
@@ -200,6 +187,20 @@ func (q *quotationRepo) ConsumeTicksMQ(ctx context.Context, key string, notify f
 			return errors.Wrap(err, "unmarshal failed")
 		}
 		if err := notify(mqMessage.SequenceID, mqMessage.Ticks); err != nil {
+			return errors.Wrap(err, "notify failed")
+		}
+		return nil
+	})
+}
+
+func (q *quotationRepo) ConsumeTicksMQWithCommit(ctx context.Context, key string, notify func(sequenceID int, ticks []*domain.TickEntity, commitFn func() error) error) {
+	q.tickMQTopic.SubscribeWithManualCommit(key, func(message []byte, commitFn func() error) error {
+		var mqMessage mqMessage
+		err := json.Unmarshal(message, &mqMessage)
+		if err != nil {
+			return errors.Wrap(err, "unmarshal failed")
+		}
+		if err := notify(mqMessage.SequenceID, mqMessage.Ticks, commitFn); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil

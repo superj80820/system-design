@@ -11,8 +11,14 @@ type QuotationRepo interface {
 	GetTickStrings(ctx context.Context, start int64, stop int64) ([]string, error)
 	SaveTickStrings(ctx context.Context, sequenceID int, ticks []*TickEntity) error
 
-	ProduceTicksMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
+	ProduceTicksMQByTradingResults(ctx context.Context, tradingResults []*TradingResult) error
 	ConsumeTicksMQ(ctx context.Context, key string, notify func(sequenceID int, ticks []*TickEntity) error)
+	ConsumeTicksMQWithCommit(ctx context.Context, key string, notify func(sequenceID int, ticks []*TickEntity, commitFn func() error) error)
+}
+
+type QuotationNotifyRepo interface {
+	ConsumeTicksMQWithRingBuffer(ctx context.Context, key string, notify func(sequenceID int, ticks []*TickEntity) error)
+	StopConsume(ctx context.Context, key string)
 }
 
 type QuotationUseCase interface {

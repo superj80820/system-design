@@ -48,6 +48,15 @@ func SetReaderMaxMessagesLength(maxMessagesLength int) ReaderManagerConfigOption
 	}
 }
 
+// SetReaderUseRingBuffer skip message when use ring buffer
+func SetReaderUseRingBuffer(isRingBufferUsed bool) ReaderManagerConfigOption {
+	return func(rmc *readerManagerConfig) {
+		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) {
+			r.skipFull = isRingBufferUsed
+		})
+	}
+}
+
 func AddReaderPauseHookFn(fn func()) ReaderManagerConfigOption {
 	return func(rmc *readerManagerConfig) {
 		rmc.readerOptions = append(rmc.readerOptions, func(r *Reader) { r.pauseHookFn = fn })

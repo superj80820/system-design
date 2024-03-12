@@ -37,14 +37,14 @@ func (ob *orderBookRepo) ProduceOrderBook(ctx context.Context, orderBook *domain
 	return nil
 }
 
-func (ob *orderBookRepo) ConsumeOrderBook(ctx context.Context, key string, notify func(*domain.OrderBookL3Entity) error) {
-	ob.orderBookMQTopic.Subscribe(key, func(message []byte) error {
+func (ob *orderBookRepo) ConsumeOrderBookWithCommit(ctx context.Context, key string, notify func(l3OrderBook *domain.OrderBookL3Entity, commitFn func() error) error) {
+	ob.orderBookMQTopic.SubscribeWithManualCommit(key, func(message []byte, commitFn func() error) error {
 		var mqMessage mqOrderBookMessage
 		err := json.Unmarshal(message, &mqMessage)
 		if err != nil {
 			return errors.Wrap(err, "unmarshal failed")
 		}
-		if err := notify(mqMessage.OrderBookL3Entity); err != nil {
+		if err := notify(mqMessage.OrderBookL3Entity, commitFn); err != nil {
 			return errors.Wrap(err, "notify failed")
 		}
 		return nil

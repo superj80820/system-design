@@ -117,6 +117,19 @@ func (m *memoryMQ) Produce(ctx context.Context, message mq.Message) error {
 	return nil
 }
 
+func (m *memoryMQ) ProduceBatch(ctx context.Context, messages []mq.Message) error {
+	for _, message := range messages {
+		marshalData, err := message.Marshal()
+		if err != nil {
+			return errors.Wrap(err, "marshal failed")
+		}
+
+		m.messageCh <- marshalData
+	}
+
+	return nil
+}
+
 func (m *memoryMQ) Shutdown() bool {
 	m.cancel()
 	<-m.doneCh

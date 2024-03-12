@@ -29,11 +29,16 @@ type CandleRepo interface {
 	GetBar(ctx context.Context, timeType CandleTimeType, start, stop string, sortOrderBy SortOrderByEnum) ([]string, error)
 	SaveBarByMatchResult(ctx context.Context, matchResult *MatchResult) error
 
-	ProduceCandleMQByTradingResult(ctx context.Context, tradingResult *TradingResult) error
-	ConsumeCandleMQByTradingResult(ctx context.Context, key string, notify func(tradingResult *TradingResult) error)
+	ProduceCandleMQByTradingResults(ctx context.Context, tradingResults []*TradingResult) error
+	ConsumeCandleMQByTradingResultWithCommit(ctx context.Context, key string, notify func(tradingResult *TradingResult, commitFn func() error) error)
 
 	ProduceCandleMQ(ctx context.Context, candleBar *CandleBar) error
 	ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
+}
+
+type CandleNotifyRepo interface {
+	ConsumeCandleMQWithRingBuffer(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
+	StopConsume(ctx context.Context, key string)
 }
 
 type CandleUseCase interface {

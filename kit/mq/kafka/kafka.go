@@ -23,6 +23,7 @@ type MQTopicConfig struct {
 
 	writerBalancer writerManager.WriterBalancer
 
+	isRingBufferUsed             bool
 	isCreateTopic                bool
 	isManualCommit               bool
 	createTopicNumPartitions     int
@@ -70,6 +71,12 @@ func CreateTopic(numPartitions, replicationFactor int) MQTopicOption {
 		mc.isCreateTopic = true
 		mc.createTopicNumPartitions = numPartitions
 		mc.createTopicReplicationFactor = replicationFactor
+	}
+}
+
+func UseRingBuffer() MQTopicOption {
+	return func(mc *MQTopicConfig) {
+		mc.isRingBufferUsed = true
 	}
 }
 
@@ -131,6 +138,7 @@ func CreateMQTopic(ctx context.Context, url, topic string, consumeWay MQTopicOpt
 			readerManager.SetReaderDuration(readerDuration),
 			readerManager.SetReaderMaxMessagesLength(readerMaxMessagesLength),
 			readerManager.AddErrorHandleFn(readerErrorHandlerFn),
+			readerManager.SetReaderUseRingBuffer(mqConfig.isRingBufferUsed),
 		}
 
 		switch mqConfig.readerWay {
@@ -240,6 +248,17 @@ func (m *mqTopic) UnSubscribe(observer mq.Observer) {
 
 func (m *mqTopic) Produce(ctx context.Context, message mq.Message) error {
 	if err := m.writerManager.WriteMessages(ctx, message); err != nil {
+		if ctx.Err() != nil { // expected. context done
+			return nil
+		}
+		return errors.Wrap(err, "write messages to kafka failed")
+	}
+
+	return nil
+}
+
+func (m *mqTopic) ProduceBatch(ctx context.Context, messages []mq.Message) error {
+	if err := m.writerManager.WriteMessages(ctx, messages...); err != nil {
 		if ctx.Err() != nil { // expected. context done
 			return nil
 		}

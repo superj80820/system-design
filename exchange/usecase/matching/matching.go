@@ -2,7 +2,6 @@ package matching
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -177,37 +176,38 @@ func (m *matchingUseCase) RecoverBySnapshot(tradingSnapshot *domain.TradingSnaps
 }
 
 func (m *matchingUseCase) ConsumeMatchResultToSave(ctx context.Context, key string) {
-	m.matchingRepo.ConsumeMatchOrderMQBatch(ctx, key, func(matchOrderDetails []*domain.MatchOrderDetail) error { // TODO: error handle
+	m.matchingRepo.ConsumeMatchOrderMQBatchWithCommit(ctx, key, func(matchOrderDetails []*domain.MatchOrderDetail, commitFn func() error) error { // TODO: error handle
 		if err := m.matchingRepo.SaveMatchingDetailsWithIgnore(ctx, matchOrderDetails); err != nil {
 			return errors.Wrap(err, "save matching details failed")
+		}
+		if err := commitFn(); err != nil {
+			return errors.Wrap(err, "commit failed")
 		}
 		return nil
 	})
 }
 
 func (m *matchingUseCase) ConsumeOrderBookToSave(ctx context.Context, key string) {
-	m.matchingOrderBookRepo.ConsumeOrderBook(ctx, key, func(l3OrderBook *domain.OrderBookL3Entity) error { // TODO: error handle
+	m.matchingOrderBookRepo.ConsumeOrderBookWithCommit(ctx, key, func(l3OrderBook *domain.OrderBookL3Entity, commitFn func() error) error { // TODO: error handle
 		if err := m.matchingOrderBookRepo.SaveHistoryL3OrderBook(ctx, l3OrderBook); err != nil {
-			fmt.Println("york1")
 			return errors.Wrap(err, "save history l3 order book failed")
 		}
 		l2OrderBook, err := m.matchingOrderBookRepo.SaveHistoryL2OrderBookByL3OrderBook(ctx, l3OrderBook)
 		if err != nil {
-			fmt.Println("york2")
 			return errors.Wrap(err, "save history l2 order book failed")
 		}
 		l1OrderBook, err := m.matchingOrderBookRepo.SaveHistoryL1OrderBookByL3OrderBook(ctx, l3OrderBook)
 		if err != nil {
-			fmt.Println("york3")
 			return errors.Wrap(err, "save history l1 order book failed")
 		}
 		if err := m.matchingOrderBookRepo.ProduceL2OrderBook(ctx, l2OrderBook); err != nil {
-			fmt.Println("york4")
 			return errors.Wrap(err, "produce l2 order book failed")
 		}
 		if err := m.matchingOrderBookRepo.ProduceL1OrderBook(ctx, l1OrderBook); err != nil {
-			fmt.Println("york5")
 			return errors.Wrap(err, "produce l1 order book failed")
+		}
+		if err := commitFn(); err != nil {
+			return errors.Wrap(err, "commit failed")
 		}
 		return nil
 	})

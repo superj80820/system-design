@@ -39,11 +39,17 @@ type UserAssetRepo interface {
 	GetUsersAssetsData() (map[int]map[int]*UserAsset, error)
 	RecoverBySnapshot(*TradingSnapshot) error
 
-	ProduceUserAssetByTradingResult(ctx context.Context, tradingResult *TradingResult) error
+	ProduceUserAssetByTradingResults(ctx context.Context, tradingResults []*TradingResult) error
 	ConsumeUsersAssets(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*UserAsset) error)
+	ConsumeUsersAssetsWithCommit(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*UserAsset, commitFn func() error) error)
 
 	SaveAssets(sequenceID int, usersAssets []*UserAsset) error
 	GetHistoryAssets(userID int) (userAssets map[int]*UserAsset, err error)
+}
+
+type UserAssetNotifyRepo interface {
+	ConsumeUsersAssetsWithRingBuffer(ctx context.Context, key string, notify func(sequenceID int, usersAssets []*UserAsset) error)
+	StopConsume(ctx context.Context, key string)
 }
 
 type UserAssetUseCase interface {
