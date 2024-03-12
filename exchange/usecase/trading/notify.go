@@ -123,7 +123,7 @@ func (t *tradingNotifyUseCase) NotifyForPublic(ctx context.Context, stream domai
 				if isConsumeCandle {
 					continue
 				}
-				t.candleNotifyRepo.ConsumeCandleMQWithRingBuffer(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
+				t.candleNotifyRepo.ConsumeCandleMQ(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
 					if err := stream.Send(domain.TradingNotifyResponse{
 						Type:      domain.CandleExchangeResponseType,
 						ProductID: t.currencyUseCase.GetProductID(),
@@ -279,7 +279,7 @@ func (t *tradingNotifyUseCase) NotifyForUser(ctx context.Context, userID int, st
 				if isConsumeCandle {
 					continue
 				}
-				t.candleNotifyRepo.ConsumeCandleMQWithRingBuffer(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
+				t.candleNotifyRepo.ConsumeCandleMQ(ctx, consumeKey, func(candleBar *domain.CandleBar) error {
 					if err := stream.Send(domain.TradingNotifyResponse{
 						Type:      domain.CandleExchangeResponseType,
 						ProductID: t.currencyUseCase.GetProductID(),

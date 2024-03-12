@@ -37,7 +37,7 @@ type CandleRepo interface {
 }
 
 type CandleNotifyRepo interface {
-	ConsumeCandleMQWithRingBuffer(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
+	ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *CandleBar) error)
 	StopConsume(ctx context.Context, key string)
 }
 

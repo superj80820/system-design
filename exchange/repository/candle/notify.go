@@ -21,7 +21,7 @@ func CreateCandleNotifyRepo(candleNotifyMQTopic mq.MQTopic) domain.CandleNotifyR
 	}
 }
 
-func (c *candleNotifyRepo) ConsumeCandleMQWithRingBuffer(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
+func (c *candleNotifyRepo) ConsumeCandleMQ(ctx context.Context, key string, notify func(candleBar *domain.CandleBar) error) {
 	observer := c.candleNotifyMQTopic.Subscribe(key, func(message []byte) error {
 		var mqMessage mqCandleMessage
 		err := json.Unmarshal(message, &mqMessage)

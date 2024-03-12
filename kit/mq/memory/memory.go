@@ -9,13 +9,14 @@ import (
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/kit/mq"
 	"github.com/superj80820/system-design/kit/util"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type memoryMQ struct {
 	observers       util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
 	observerBatches util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
 	messageCh       chan []byte
-	messages        [][]byte
+	messages        *utilKit.RingBuffer[[]byte]
 	doneCh          chan struct{}
 	cancel          context.CancelFunc
 	lock            *sync.Mutex
@@ -24,11 +25,12 @@ type memoryMQ struct {
 
 var _ mq.MQTopic = (*memoryMQ)(nil)
 
-func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollectDuration time.Duration) mq.MQTopic {
+func CreateMemoryMQ(ctx context.Context, bufferSize int, collectDuration time.Duration) mq.MQTopic {
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &memoryMQ{
-		messageCh: make(chan []byte, messageChannelBuffer),
+		messageCh: make(chan []byte),
+		messages:  utilKit.CreateRingBuffer[[]byte](bufferSize),
 		doneCh:    make(chan struct{}),
 		lock:      new(sync.Mutex),
 		cancel:    cancel,
@@ -39,7 +41,7 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollec
 			select {
 			case message := <-m.messageCh:
 				m.lock.Lock()
-				m.messages = append(m.messages, message)
+				m.messages.Enqueue(&message)
 				m.lock.Unlock()
 			case <-ctx.Done():
 				close(m.doneCh)
@@ -47,7 +49,7 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollec
 		}
 	}()
 
-	ticker := time.NewTicker(messageCollectDuration)
+	ticker := time.NewTicker(collectDuration)
 	go func() {
 		defer ticker.Stop()
 
@@ -56,12 +58,20 @@ func CreateMemoryMQ(ctx context.Context, messageChannelBuffer int, messageCollec
 			cloneMessages, err := func() ([][]byte, error) {
 				m.lock.Lock()
 				defer m.lock.Unlock()
-				if len(m.messages) == 0 {
+				if m.messages.IsEmpty() {
 					return nil, errors.Wrap(continueErr, "message length is 0")
 				}
-				cloneMessages := make([][]byte, len(m.messages))
-				copy(cloneMessages, m.messages)
-				m.messages = nil
+				messagesSize := m.messages.GetSize()
+				cloneMessages := make([][]byte, messagesSize)
+				for i := 0; i < messagesSize; i++ {
+					message, err := m.messages.Dequeue()
+					if err != nil {
+						return nil, errors.New("dequeue failed")
+					}
+					copyMessage := make([]byte, len(*message))
+					copy(copyMessage, *message)
+					cloneMessages[i] = copyMessage
+				}
 
 				return cloneMessages, nil
 			}()
