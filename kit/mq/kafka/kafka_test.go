@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/superj80820/system-design/kit/mq"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/kafka"
 )
@@ -70,6 +72,125 @@ func TestKafka(t *testing.T) {
 		scenario string
 		fn       func(t *testing.T)
 	}{
+		{
+			scenario: "test consume 10000 message when no use ring buffer",
+			fn: func(t *testing.T) {
+				testSetup := testSetupFn(ctx, t)
+				defer testSetup.teardownFn()
+
+				testTopicName := "TEST_TOPIC"
+				groupID := "GROUP_ID"
+
+				mqTopic, err := CreateMQTopic(
+					ctx,
+					testSetup.kafkaURI,
+					testTopicName,
+					ConsumeByGroupID(groupID, false),
+					10,
+					100*time.Millisecond,
+					CreateTopic(1, 1),
+				)
+				assert.Nil(t, err)
+
+				resultCh := make(chan *testMessageStruct)
+				mqTopic.Subscribe("key", func(message []byte) error {
+					var textMessage testMessageStruct
+					if err := json.Unmarshal(message, &textMessage); err != nil {
+						return errors.Wrap(err, "unmarshal failed")
+					}
+					resultCh <- &textMessage
+					return nil
+				})
+
+				messages := make([]mq.Message, 10000)
+				for i := 0; i < 10000; i++ {
+					messages[i] = &testMessageStruct{
+						Data: strconv.Itoa(i),
+					}
+				}
+
+				assert.Nil(t, mqTopic.ProduceBatch(ctx, messages))
+
+				var results []mq.Message
+				timeout := time.NewTimer(30 * time.Second)
+				defer timeout.Stop()
+				func() {
+					for {
+						select {
+						case <-timeout.C:
+							assert.Fail(t, "timeout")
+						case message := <-resultCh:
+							results = append(results, message)
+							if message.Data == "9999" {
+								assert.Equal(t, "9999", message.Data)
+								return
+							}
+						}
+					}
+				}()
+				assert.Equal(t, messages, results)
+			},
+		},
+		{
+			scenario: "test consume less 10000 message when use ring buffer and last message is correct",
+			fn: func(t *testing.T) {
+				testSetup := testSetupFn(ctx, t)
+				defer testSetup.teardownFn()
+
+				testTopicName := "TEST_TOPIC"
+				groupID := "GROUP_ID"
+
+				mqTopic, err := CreateMQTopic(
+					ctx,
+					testSetup.kafkaURI,
+					testTopicName,
+					ConsumeByGroupID(groupID, false),
+					10,
+					100*time.Millisecond,
+					CreateTopic(1, 1),
+					UseRingBuffer(),
+				)
+				assert.Nil(t, err)
+
+				resultCh := make(chan *testMessageStruct)
+				mqTopic.Subscribe("key", func(message []byte) error {
+					var textMessage testMessageStruct
+					if err := json.Unmarshal(message, &textMessage); err != nil {
+						return errors.Wrap(err, "unmarshal failed")
+					}
+					resultCh <- &textMessage
+					return nil
+				})
+
+				messages := make([]mq.Message, 10000)
+				for i := 0; i < 10000; i++ {
+					messages[i] = &testMessageStruct{
+						Data: strconv.Itoa(i),
+					}
+				}
+
+				assert.Nil(t, mqTopic.ProduceBatch(ctx, messages))
+
+				var results []mq.Message
+				timeout := time.NewTimer(30 * time.Second)
+				defer timeout.Stop()
+				func() {
+					for {
+						select {
+						case <-timeout.C:
+							assert.Fail(t, "timeout")
+						case message := <-resultCh:
+							results = append(results, message)
+							if message.Data == "9999" {
+								assert.Equal(t, "9999", message.Data)
+								return
+							}
+						}
+					}
+				}()
+				assert.True(t, len(results) < 10000)
+			},
+		},
 		{
 			scenario: "test produce and consume by group id",
 			fn: func(t *testing.T) {

@@ -42,8 +42,6 @@ local lastSeqId = redis.call('GET', KEY_LAST_SEQ)
 local ticks, len;
 
 if not lastSeqId or tonumber(seqId) > tonumber(lastSeqId) then
-    -- 广播:
-    redis.call('PUBLISH', 'notification', '{"type":"tick","sequenceId":' .. seqId .. ',"data":' .. jsonData .. '}')
     -- 保存当前sequence id:
     redis.call('SET', KEY_LAST_SEQ, seqId)
     -- 更新最新tick列表:

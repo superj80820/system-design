@@ -75,11 +75,13 @@ func main() {
 	httpsCertFilePath := utilKit.GetEnvString("HTTPS_CERT_FILE_PATH", "./fullchain.pem")
 	httpsPrivateKeyFilePath := utilKit.GetEnvString("HTTPS_PRIVATE_KEY_FILE_PATH", "./privkey.pem")
 	sequenceTopicName := utilKit.GetEnvString("SEQUENCE_TOPIC_NAME", "SEQUENCE_TOPIC")
+	tradingEventTopicName := utilKit.GetEnvString("TRADING_EVENT_TOPIC_NAME", "TRADING_EVENT_TOPIC")
 	assetTopicName := utilKit.GetEnvString("ASSET_TOPIC_NAME", "ASSET_TOPIC")
 	tickTopicName := utilKit.GetEnvString("TICK_TOPIC_NAME", "TICK_TOPIC")
 	l2OrderBookTopicName := utilKit.GetEnvString("L2_ORDER_BOOK_TOPIC_NAME", "L2_ORDER_BOOK_TOPIC")
 	matchingTopicName := utilKit.GetEnvString("MATCHING_TOPIC_NAME", "MATCHING_TOPIC")
 	orderTopicName := utilKit.GetEnvString("ORDER_TOPIC_NAME", "ORDER_TOPIC")
+	candleTradingResultTopicName := utilKit.GetEnvString("CANDLE_TRADING_RESULT_TOPIC_NAME", "CANDLE_TRADING_RESULT_TOPIC")
 	candleTopicName := utilKit.GetEnvString("CANDLE_TOPIC_NAME", "CANDLE_TOPIC")
 	kafkaURI := utilKit.GetEnvString("KAFKA_URI", "")
 	mysqlURI := utilKit.GetEnvString("MYSQL_URI", "")
@@ -187,7 +189,7 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
-	messageChannelBuffer := 100000
+	messageChannelBuffer := 10000
 	messageCollectDuration := 500 * time.Millisecond
 	var (
 		sequenceMQTopic,
@@ -195,7 +197,9 @@ func main() {
 		tickMQTopic,
 		matchingMQTopic,
 		orderMQTopic,
+		candleTradingResultMQTopic,
 		candleMQTopic,
+		tradingEventMQTopic,
 		l2OrderBookMQTopic,
 
 		matchingNotifyMQTopic,
@@ -211,7 +215,19 @@ func main() {
 			kafkaURI,
 			sequenceTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+sequenceTopicName, true),
-			messageChannelBuffer,
+			100000,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
+		tradingEventMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			tradingEventTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tradingEventTopicName, true),
+			100000,
 			messageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
@@ -278,6 +294,18 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+		candleTradingResultMQTopic, err = kafkaMQKit.CreateMQTopic(
+			ctx,
+			kafkaURI,
+			candleTradingResultTopicName,
+			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTradingResultTopicName, true),
+			messageChannelBuffer,
+			messageCollectDuration,
+			kafkaMQKit.CreateTopic(1, 1),
+		)
+		if err != nil {
+			panic(err)
+		}
 		candleMQTopic, err = kafkaMQKit.CreateMQTopic(
 			ctx,
 			kafkaURI,
@@ -296,7 +324,7 @@ func main() {
 			kafkaURI,
 			assetTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+assetTopicName+":NOTIFY", true),
-			10,
+			100,
 			500*time.Millisecond,
 			kafkaMQKit.UseRingBuffer(),
 		)
@@ -308,7 +336,7 @@ func main() {
 			kafkaURI,
 			tickTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tickTopicName+":NOTIFY", true),
-			10,
+			100,
 			500*time.Millisecond,
 			kafkaMQKit.UseRingBuffer(),
 		)
@@ -320,7 +348,7 @@ func main() {
 			kafkaURI,
 			matchingTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+matchingTopicName+":NOTIFY", true),
-			10,
+			100,
 			500*time.Millisecond,
 			kafkaMQKit.UseRingBuffer(), // TODO: think
 		)
@@ -332,7 +360,7 @@ func main() {
 			kafkaURI,
 			l2OrderBookTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+l2OrderBookTopicName+":NOTIFY", true),
-			10,
+			100,
 			500*time.Millisecond,
 			kafkaMQKit.UseRingBuffer(),
 		)
@@ -344,7 +372,7 @@ func main() {
 			kafkaURI,
 			orderTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+orderTopicName+":NOTIFY", true),
-			10,
+			100,
 			500*time.Millisecond,
 			kafkaMQKit.UseRingBuffer(), // TODO: think
 		)
@@ -356,9 +384,8 @@ func main() {
 			kafkaURI,
 			candleTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTopicName+":NOTIFY", true),
-			messageChannelBuffer,
-			messageCollectDuration,
-			// kafkaMQKit.UseRingBuffer(),// TODO: think
+			10000,
+			500*time.Millisecond,
 		)
 		if err != nil {
 			panic(err)
@@ -370,6 +397,8 @@ func main() {
 		matchingMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 		orderMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 		candleMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		candleTradingResultMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		tradingEventMQTopic = memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
 		l2OrderBookMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
 		assetNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
@@ -380,10 +409,7 @@ func main() {
 		orderNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	}
 
-	tradingEventMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-
-	candleTradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
 
 	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)

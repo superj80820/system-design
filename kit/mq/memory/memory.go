@@ -3,86 +3,90 @@ package memory
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/kit/mq"
-	"github.com/superj80820/system-design/kit/util"
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
+var noopErr = errors.New("no op error")
+
+type MQTopicOption func(*memoryMQ)
+
+func UseRingBuffer() MQTopicOption {
+	return func(mm *memoryMQ) {
+		mm.skipFull = true
+	}
+}
+
 type memoryMQ struct {
-	observers       util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
-	observerBatches util.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
+	observers       utilKit.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
+	observerBatches utilKit.GenericSyncMap[mq.Observer, mq.Observer] // TODO: test key safe?
 	messageCh       chan []byte
 	messages        *utilKit.RingBuffer[[]byte]
 	doneCh          chan struct{}
+	skipFull        bool
 	cancel          context.CancelFunc
-	lock            *sync.Mutex
 	err             error
 }
 
 var _ mq.MQTopic = (*memoryMQ)(nil)
 
-func CreateMemoryMQ(ctx context.Context, bufferSize int, collectDuration time.Duration) mq.MQTopic {
+func CreateMemoryMQ(ctx context.Context, bufferSize int, collectDuration time.Duration, options ...MQTopicOption) mq.MQTopic {
 	ctx, cancel := context.WithCancel(ctx)
 
 	m := &memoryMQ{
-		messageCh: make(chan []byte),
+		messageCh: make(chan []byte, bufferSize),
 		messages:  utilKit.CreateRingBuffer[[]byte](bufferSize),
 		doneCh:    make(chan struct{}),
-		lock:      new(sync.Mutex),
 		cancel:    cancel,
 	}
 
-	go func() {
-		for {
-			select {
-			case message := <-m.messageCh:
-				m.lock.Lock()
-				m.messages.Enqueue(&message)
-				m.lock.Unlock()
-			case <-ctx.Done():
-				close(m.doneCh)
-			}
+	for _, option := range options {
+		option(m)
+	}
+
+	cloneMessagesFn := func() ([][]byte, error) {
+		if m.messages.IsEmpty() {
+			return nil, errors.Wrap(noopErr, "no messages")
 		}
-	}()
-
-	ticker := time.NewTicker(collectDuration)
-	go func() {
-		defer ticker.Stop()
-
-		continueErr := errors.New("continue error")
-		for range ticker.C {
-			cloneMessages, err := func() ([][]byte, error) {
-				m.lock.Lock()
-				defer m.lock.Unlock()
-				if m.messages.IsEmpty() {
-					return nil, errors.Wrap(continueErr, "message length is 0")
-				}
-				messagesSize := m.messages.GetSize()
-				cloneMessages := make([][]byte, messagesSize)
-				for i := 0; i < messagesSize; i++ {
-					message, err := m.messages.Dequeue()
-					if err != nil {
-						return nil, errors.New("dequeue failed")
-					}
-					copyMessage := make([]byte, len(*message))
-					copy(copyMessage, *message)
-					cloneMessages[i] = copyMessage
-				}
-
-				return cloneMessages, nil
-			}()
-			if errors.Is(err, continueErr) {
-				continue
-			} else if err != nil {
-				panic(fmt.Sprintf("clone message get except error, error: %+v", err))
+		messagesSize := m.messages.GetCap()
+		cloneMessages := make([][]byte, 0, messagesSize)
+		for !m.messages.IsEmpty() {
+			message, err := m.messages.Dequeue()
+			if err != nil {
+				return nil, errors.New("dequeue failed")
 			}
+			copyMessage := make([]byte, len(*message))
+			copy(copyMessage, *message)
+			cloneMessages = append(cloneMessages, copyMessage)
+		}
 
-			m.observerBatches.Range(func(key, value mq.Observer) bool {
-				if err := value.NotifyBatchWithManualCommit(cloneMessages, func() error {
+		return cloneMessages, nil
+	}
+
+	notify := func() {
+		cloneMessages, err := cloneMessagesFn()
+		if errors.Is(err, noopErr) {
+			return
+		} else if err != nil {
+			panic(fmt.Sprintf("clone message get except error, error: %+v", err)) // TODO: maybe not panic
+		}
+
+		m.observerBatches.Range(func(key, value mq.Observer) bool {
+			if err := value.NotifyBatchWithManualCommit(cloneMessages, func() error {
+				return nil
+			}); err != nil {
+				value.ErrorHandler(err) // handle error then continue
+				return true
+			}
+			return true
+		})
+
+		for _, message := range cloneMessages {
+			m.observers.Range(func(key, value mq.Observer) bool {
+				if err := value.NotifyWithManualCommit(message, func() error {
 					return nil
 				}); err != nil {
 					value.ErrorHandler(err) // handle error then continue
@@ -90,17 +94,26 @@ func CreateMemoryMQ(ctx context.Context, bufferSize int, collectDuration time.Du
 				}
 				return true
 			})
+		}
+	}
 
-			for _, message := range cloneMessages {
-				m.observers.Range(func(key, value mq.Observer) bool {
-					if err := value.NotifyWithManualCommit(message, func() error {
-						return nil
-					}); err != nil {
-						value.ErrorHandler(err) // handle error then continue
-						return true
-					}
-					return true
-				})
+	go func() {
+		ticker := time.NewTicker(collectDuration)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case message := <-m.messageCh:
+				m.messages.Enqueue(&message)
+				isFull := m.messages.IsFull()
+
+				if !m.skipFull && isFull {
+					notify()
+				}
+			case <-ticker.C:
+				notify()
+			case <-ctx.Done():
+				close(m.doneCh)
 			}
 		}
 	}()

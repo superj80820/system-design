@@ -2,6 +2,7 @@ package background
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"math/rand"
@@ -115,6 +116,7 @@ func AsyncAutoPreviewTrading(ctx context.Context, email, password string, durati
 					return
 				}
 			case <-tradingUseCase.Done():
+				fmt.Printf("york todo err: %+v \n", tradingUseCase.Err())
 				close(doneCh)
 			}
 

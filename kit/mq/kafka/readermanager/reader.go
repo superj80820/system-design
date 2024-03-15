@@ -12,6 +12,8 @@ import (
 	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
+var noopErr = errors.New("no op error")
+
 type ReaderWay int
 
 const (
@@ -65,8 +67,8 @@ func ManualCommit(rmc *readerManagerConfig) {
 type Reader struct {
 	kafkaReader KafkaReader
 
-	messages     *utilKit.RingBuffer[kafka.Message]
-	messagesLock *sync.Mutex
+	messages  *utilKit.RingBuffer[kafka.Message]
+	messageCh chan kafka.Message
 
 	runDuration          time.Duration
 	runMaxMessagesLength int
@@ -98,7 +100,6 @@ func defaultKafkaReaderProvider(config kafka.ReaderConfig) KafkaReader {
 
 func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption) *Reader {
 	r := &Reader{
-		messagesLock:         new(sync.Mutex),
 		observers:            make(map[mq.Observer]mq.Observer),
 		observerBatches:      make(map[mq.Observer]mq.Observer),
 		pauseCh:              make(chan context.CancelFunc, 1),
@@ -113,6 +114,7 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 		option(r)
 	}
 	r.messages = utilKit.CreateRingBuffer[kafka.Message](r.runMaxMessagesLength)
+	r.messageCh = make(chan kafka.Message, r.runMaxMessagesLength)
 	r.kafkaReaderProvider = func() KafkaReader {
 		kafkaReader := defaultKafkaReaderProvider(kafkaReaderConfig)
 		for _, fn := range r.kafkaReaderHookFn {
@@ -124,8 +126,61 @@ func createReader(kafkaReaderConfig kafka.ReaderConfig, options ...readerOption)
 }
 
 func (r *Reader) Run() {
-	ticker := time.NewTicker(r.runDuration)
-	isMessagesFullCh := make(chan struct{})
+	cloneMessagesFn := func() ([][]byte, *kafka.Message, error) {
+		if r.messages.IsEmpty() {
+			return nil, nil, errors.Wrap(noopErr, "no messages")
+		}
+		latestKafkaMessage := new(kafka.Message)
+		messagesSize := r.messages.GetCap()
+		cloneMessages := make([][]byte, 0, messagesSize)
+		for !r.messages.IsEmpty() {
+			message, err := r.messages.Dequeue()
+			if err != nil {
+				return nil, nil, errors.New("dequeue failed")
+			}
+			cloneValue := make([]byte, len(message.Value))
+			copy(cloneValue, message.Value)
+			cloneMessages = append(cloneMessages, cloneValue)
+			latestKafkaMessage = message
+		}
+
+		return cloneMessages, latestKafkaMessage, nil
+	}
+
+	notify := func() {
+		cloneMessages, latestKafkaMessage, err := cloneMessagesFn()
+		if errors.Is(err, noopErr) {
+			return
+		} else if err != nil {
+			panic(fmt.Sprintf("kafka read messages get error, error: %+v", err)) // TODO: maybe not panic
+		}
+
+		r.RangeAllObserverBatches(func(_, observerBatch mq.Observer) bool {
+			if err := observerBatch.NotifyBatchWithManualCommit(cloneMessages, func() error {
+				if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
+					return errors.Wrap(err, "commit message failed")
+				}
+				return nil
+			}); err != nil { // TODO: think async
+				r.errorHandleFn(err)
+			}
+			return true
+		})
+
+		for _, m := range cloneMessages {
+			r.RangeAllObservers(func(_, observer mq.Observer) bool {
+				if err := observer.NotifyWithManualCommit(m, func() error {
+					if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
+						return errors.Wrap(err, "commit message failed")
+					}
+					return nil
+				}); err != nil { // TODO: think async
+					r.errorHandleFn(err)
+				}
+				return true
+			})
+		}
+	}
 
 	go func() {
 		for ctx := range r.startCh {
@@ -139,9 +194,9 @@ func (r *Reader) Run() {
 			for {
 				var getMessageFn func(ctx context.Context) (kafka.Message, error)
 				if r.isManualCommit {
-					getMessageFn = r.kafkaReader.FetchMessage // TODO: is correct?
+					getMessageFn = r.kafkaReader.FetchMessage
 				} else {
-					getMessageFn = r.kafkaReader.ReadMessage // TODO: is correct?
+					getMessageFn = r.kafkaReader.ReadMessage
 				}
 				// fmt.Println("start consume")
 				m, err := getMessageFn(ctx)
@@ -153,87 +208,26 @@ func (r *Reader) Run() {
 					}
 					break
 				}
-
-				r.messagesLock.Lock()
-				r.messages.Enqueue(&m)
-				isFull := r.messages.IsFull()
-				r.messagesLock.Unlock()
-
-				if !r.skipFull && isFull {
-					isMessagesFullCh <- struct{}{}
-				}
+				r.messageCh <- m
 			}
 		}
 	}()
+
 	go func() {
+		ticker := time.NewTicker(r.runDuration)
 		defer ticker.Stop()
-
-		fn := func() {
-			noopErr := errors.New("no op error")
-			cloneMessagesFn := func() ([][]byte, *kafka.Message, error) {
-				r.messagesLock.Lock()
-				defer r.messagesLock.Unlock()
-
-				if r.messages.GetSize() == 0 {
-					return nil, nil, errors.Wrap(noopErr, "no messages")
-				}
-				latestKafkaMessage := new(kafka.Message)
-				messagesSize := r.messages.GetSize()
-				cloneMessages := make([][]byte, messagesSize)
-				for i := 0; i < messagesSize; i++ {
-					message, err := r.messages.Dequeue()
-					if err != nil {
-						return nil, nil, errors.New("dequeue failed")
-					}
-					cloneValue := make([]byte, len(message.Value))
-					copy(cloneValue, message.Value)
-					cloneMessages[i] = cloneValue
-					latestKafkaMessage = message
-				}
-
-				return cloneMessages, latestKafkaMessage, nil
-			}
-
-			cloneMessages, latestKafkaMessage, err := cloneMessagesFn()
-			if errors.Is(err, noopErr) {
-				return
-			} else if err != nil {
-				panic(fmt.Sprintf("kafka read messages get error, error: %+v", err)) // TODO: maybe not panic
-			}
-
-			r.RangeAllObserverBatches(func(_, observerBatch mq.Observer) bool {
-				if err := observerBatch.NotifyBatchWithManualCommit(cloneMessages, func() error {
-					if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
-						return errors.Wrap(err, "commit message failed")
-					}
-					return nil
-				}); err != nil { // TODO: think async
-					r.errorHandleFn(err)
-				}
-				return true
-			})
-
-			for _, m := range cloneMessages {
-				r.RangeAllObservers(func(_, observer mq.Observer) bool {
-					if err := observer.NotifyWithManualCommit(m, func() error {
-						if err := r.kafkaReader.CommitMessages(context.Background(), *latestKafkaMessage); err != nil { // TODO: if context done. need time out
-							return errors.Wrap(err, "commit message failed")
-						}
-						return nil
-					}); err != nil { // TODO: think async
-						r.errorHandleFn(err)
-					}
-					return true
-				})
-			}
-		}
 
 		for {
 			select {
+			case message := <-r.messageCh:
+				r.messages.Enqueue(&message)
+				isFull := r.messages.IsFull()
+
+				if !r.skipFull && isFull {
+					notify()
+				}
 			case <-ticker.C:
-				fn()
-			case <-isMessagesFullCh:
-				fn()
+				notify()
 			}
 		}
 	}()

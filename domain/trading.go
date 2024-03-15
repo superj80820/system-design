@@ -75,7 +75,7 @@ type TradingRepo interface {
 	GetHistorySnapshot(context.Context) (*TradingSnapshot, error)
 	SaveSnapshot(ctx context.Context, sequenceID int, usersAssetsData map[int]map[int]*UserAsset, ordersData []*OrderEntity, matchesData *MatchData) error
 
-	ProduceTradingEvent(context.Context, *TradingEvent) error
+	ProduceTradingEvents(ctx context.Context, tradingEvents []*TradingEvent) error
 	ConsumeTradingEvent(ctx context.Context, key string, notify func(events []*TradingEvent, commitFn func() error))
 
 	ProduceTradingResult(ctx context.Context, tradingResult *TradingResult) error

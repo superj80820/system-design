@@ -6,7 +6,7 @@ export const options = {
   // A number specifying the number of VUs to run concurrently.
   vus: 100,
   // A string specifying the total duration of the test run.
-  duration: '10s',
+  duration: '60s',
 
   // The following section contains configuration options for execution of this
   // test script in Grafana Cloud.
@@ -65,7 +65,7 @@ export default function () {
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTAyNzk3ODUsImlhdCI6MTcxMDI3NjE4NSwic3ViIjoiMTc2NzY1MjUxMTQ2MTY3NTAwOCJ9.07rFqeyG1DLu84YaUep8e6xyqSh_N3z0l5o-TMIr_S99Gq3FEWCQMo628wdHBPh_HfqRS-Fk3CnZgkNORi_2uQ',
+      'Authentication': 'Bearer eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MTA1MDQ4NjIsImlhdCI6MTcxMDUwMTI2Miwic3ViIjoiMTc2ODU5NjU5MDUzNDA3MDI3MiJ9.dD_TPg9bCbaf5nzHt4oE8HY60upXenFvfcHYPDOnal7Ijhn-nP5rEdCT_soupDZ7DCZpGtWzBwGrPX9kseN7ww',
     },
   };
 

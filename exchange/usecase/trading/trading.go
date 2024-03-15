@@ -11,6 +11,7 @@ import (
 	"github.com/superj80820/system-design/domain"
 	loggerKit "github.com/superj80820/system-design/kit/logger"
 	utilKit "github.com/superj80820/system-design/kit/util"
+	"golang.org/x/sync/errgroup"
 )
 
 type tradingUseCase struct {
@@ -124,7 +125,7 @@ func (t *tradingUseCase) EnableBackupSnapshot(ctx context.Context, duration time
 func (t *tradingUseCase) ProcessTradingEvents(ctx context.Context, tes []*domain.TradingEvent) error {
 	err := t.sequenceTradingUseCase.CheckEventSequence(tes[0].SequenceID, t.lastSequenceID)
 	if errors.Is(err, domain.ErrMissEvent) {
-		fmt.Printf("york wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\n")
+		fmt.Printf("york wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\nyork wow miss events\n this event id %d", tes[0].SequenceID)
 		t.sequenceTradingUseCase.RecoverEvents(t.lastSequenceID, func(tradingEvents []*domain.TradingEvent) error {
 			for _, te := range tradingEvents {
 				if err := t.processTradingEvent(ctx, te); err != nil {
@@ -232,35 +233,59 @@ func (t *tradingUseCase) ConsumeGlobalSequencer(ctx context.Context) {
 	t.sequenceTradingUseCase.ConsumeSequenceMessages(func(events []*domain.TradingEvent, commitFn func() error) {
 		events, err := t.sequenceTradingUseCase.SaveWithFilterEvents(events, commitFn)
 		if err != nil {
-			setErrAndDone(errors.Wrap(err, "save with filter events failed"))
+			setErrAndDone(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events))))
 			return
 		}
-		for _, event := range events {
-			if err := t.tradingRepo.ProduceTradingEvent(ctx, event); err != nil {
-				setErrAndDone(errors.Wrap(err, "produce trading event failed"))
-				return
-			}
+		if err := t.tradingRepo.ProduceTradingEvents(ctx, events); err != nil {
+			setErrAndDone(errors.Wrap(err, "produce trading event failed"))
+			return
 		}
 	})
 }
 
 func (t *tradingUseCase) ConsumeTradingResult(ctx context.Context, key string) {
 	t.tradingRepo.ConsumeTradingResult(ctx, key, func(tradingResults []*domain.TradingResult) error {
-		if err := t.userAssetRepo.ProduceUserAssetByTradingResults(ctx, tradingResults); err != nil {
-			panic(errors.Wrap(err, "produce order failed"))
+		eg, ctx := errgroup.WithContext(ctx)
+
+		eg.Go(func() error {
+			if err := t.userAssetRepo.ProduceUserAssetByTradingResults(ctx, tradingResults); err != nil {
+				return errors.Wrap(err, "produce order failed")
+			}
+			return nil
+		})
+
+		eg.Go(func() error {
+			if err := t.orderRepo.ProduceOrderMQByTradingResults(ctx, tradingResults); err != nil {
+				return errors.Wrap(err, "produce order failed")
+			}
+			return nil
+		})
+
+		eg.Go(func() error {
+			if err := t.matchingRepo.ProduceMatchOrderMQByTradingResults(ctx, tradingResults); err != nil {
+				return errors.Wrap(err, "produce match order failed")
+			}
+			return nil
+		})
+
+		eg.Go(func() error {
+			if err := t.candleRepo.ProduceCandleMQByTradingResults(ctx, tradingResults); err != nil {
+				return errors.Wrap(err, "produce candle failed")
+			}
+			return nil
+		})
+
+		eg.Go(func() error {
+			if err := t.quotationRepo.ProduceTicksMQByTradingResults(ctx, tradingResults); err != nil {
+				return errors.Wrap(err, "produce ticks failed")
+			}
+			return nil
+		})
+
+		if err := eg.Wait(); err != nil {
+			panic(errors.Wrap(err, "produce failed"))
 		}
-		if err := t.orderRepo.ProduceOrderMQByTradingResults(ctx, tradingResults); err != nil {
-			panic(errors.Wrap(err, "produce order failed"))
-		}
-		if err := t.matchingRepo.ProduceMatchOrderMQByTradingResults(ctx, tradingResults); err != nil {
-			panic(errors.Wrap(err, "produce match order failed"))
-		}
-		if err := t.candleRepo.ProduceCandleMQByTradingResults(ctx, tradingResults); err != nil {
-			panic(errors.Wrap(err, "produce candle failed"))
-		}
-		if err := t.quotationRepo.ProduceTicksMQByTradingResults(ctx, tradingResults); err != nil {
-			panic(errors.Wrap(err, "produce ticks failed"))
-		}
+
 		return nil
 	})
 }

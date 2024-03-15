@@ -117,6 +117,19 @@ func (t *tradingRepo) SaveSnapshot(ctx context.Context, sequenceID int, usersAss
 	return nil
 }
 
+func (t *tradingRepo) ProduceTradingEvents(ctx context.Context, tradingEvents []*domain.TradingEvent) error {
+	mqMessages := make([]mq.Message, len(tradingEvents))
+	for idx, tradingEvent := range tradingEvents {
+		mqMessages[idx] = &mqMessage{
+			TradingEvent: tradingEvent,
+		}
+	}
+	if err := t.tradingEventMQ.ProduceBatch(ctx, mqMessages); err != nil {
+		return errors.Wrap(err, "produce failed")
+	}
+	return nil
+}
+
 func (t *tradingRepo) ProduceTradingEvent(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	if err := t.tradingEventMQ.Produce(ctx, &mqMessage{TradingEvent: tradingEvent}); err != nil {
 		return errors.Wrap(err, "produce failed")

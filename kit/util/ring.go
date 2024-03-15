@@ -3,11 +3,11 @@ package util
 import "github.com/pkg/errors"
 
 type RingBuffer[T any] struct {
-	items []*T
-	size  int
-	cap   int
-	head  int
-	tail  int
+	items  []*T
+	isFull bool
+	cap    int
+	head   int
+	tail   int
 }
 
 func CreateRingBuffer[T any](cap int) *RingBuffer[T] {
@@ -18,19 +18,17 @@ func CreateRingBuffer[T any](cap int) *RingBuffer[T] {
 }
 
 func (r *RingBuffer[T]) IsFull() bool {
-	return r.size == r.cap
+	return r.isFull
 }
 
 func (r *RingBuffer[T]) IsEmpty() bool {
-	return r.size == 0
+	return r.head == r.tail && !r.isFull
 }
 
 func (r *RingBuffer[T]) Enqueue(item *T) {
 	r.items[r.tail] = item
 	r.tail = (r.tail + 1) % r.cap
-	if !r.IsFull() {
-		r.size++
-	}
+	r.isFull = r.head == r.tail
 }
 
 func (r *RingBuffer[T]) Dequeue() (*T, error) {
@@ -40,11 +38,11 @@ func (r *RingBuffer[T]) Dequeue() (*T, error) {
 
 	item := r.items[r.head]
 	r.head = (r.head + 1) % r.cap
-	r.size--
+	r.isFull = false
 
 	return item, nil
 }
 
-func (r *RingBuffer[T]) GetSize() int {
-	return r.size
+func (r *RingBuffer[T]) GetCap() int {
+	return r.cap
 }

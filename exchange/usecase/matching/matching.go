@@ -50,6 +50,8 @@ func (m *matchingUseCase) GetSequenceID() int {
 }
 
 func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.OrderEntity) (*domain.MatchResult, error) {
+	// 如果taker是賣單，maker對手盤的為買單簿
+	// 如果taker是買單，maker對手盤的為賣單簿
 	var makerDirection, takerDirection domain.DirectionEnum
 	switch takerOrder.Direction {
 	case domain.DirectionSell:
@@ -62,26 +64,41 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		return nil, errors.New("not define direction")
 	}
 
+	// 設置此次撮合的sequence id
 	m.matchingOrderBookRepo.SetSequenceID(takerOrder.SequenceID)
+	// 紀錄此次撮合的成交的result
 	matchResult := createMatchResult(takerOrder)
 
+	// taker不斷與對手盤的最佳價格撮合直到無法撮合
 	for {
+		// 取得對手盤的最佳價格
 		makerOrder, err := m.matchingOrderBookRepo.GetOrderBookFirst(makerDirection)
+		// 如果沒有最佳價格則退出撮合
 		if errors.Is(err, domain.ErrEmptyOrderBook) {
 			break
 		} else if err != nil {
 			return nil, errors.Wrap(err, "get first order book order failed")
 		}
-		if takerOrder.Direction == domain.DirectionBuy && takerOrder.Price.Cmp(makerOrder.Price) < 0 {
+
+		// 如果賣單低於對手盤最佳價格則退出撮合
+		if takerOrder.Direction == domain.DirectionSell && takerOrder.Price.Cmp(makerOrder.Price) > 0 {
 			break
-		} else if takerOrder.Direction == domain.DirectionSell && takerOrder.Price.Cmp(makerOrder.Price) > 0 {
+			// 如果買單高於對手盤最佳價格則退出撮合
+		} else if takerOrder.Direction == domain.DirectionBuy && takerOrder.Price.Cmp(makerOrder.Price) < 0 {
 			break
 		}
+
+		// 撮合成功，設置撮合價格為對手盤的最佳價格
 		m.matchingOrderBookRepo.SetMarketPrice(makerOrder.Price)
+		// 撮合數量為taker或maker兩者的最小數量
 		matchedQuantity := min(takerOrder.UnfilledQuantity, makerOrder.UnfilledQuantity)
+		// 新增撮合紀錄
 		addForMatchResult(matchResult, makerOrder.Price, matchedQuantity, makerOrder)
+		// taker的數量減去撮合數量
 		takerOrder.UnfilledQuantity = takerOrder.UnfilledQuantity.Sub(matchedQuantity)
+		// maker的數量減去撮合數量
 		makerOrder.UnfilledQuantity = makerOrder.UnfilledQuantity.Sub(matchedQuantity)
+		// 如果maker數量減至0，代表已完全成交(Fully Filled)，更新maker order並從order-book移除
 		if makerOrder.UnfilledQuantity.Equal(decimal.Zero) {
 			makerOrder.Status = domain.OrderStatusFullyFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt); err != nil {
@@ -90,27 +107,33 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 			if err := m.matchingOrderBookRepo.RemoveOrderBookOrder(makerDirection, makerOrder); err != nil {
 				return nil, errors.Wrap(err, "remove order book order failed")
 			}
+			// 如果maker數量不為零，代表已部分成交(Partial Filled)，更新maker order
 		} else {
 			makerOrder.Status = domain.OrderStatusPartialFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusPartialFilled, takerOrder.CreatedAt); err != nil {
 				return nil, errors.Wrap(err, "update order failed")
 			}
 		}
+		// 如果taker數量減至0，則完全成交，退出撮合
 		if takerOrder.UnfilledQuantity.Equal(decimal.Zero) {
 			takerOrder.Status = domain.OrderStatusFullyFilled
 			break
 		}
 	}
+	// 如果taker數量不為0，檢查原始數量與剩餘數量來設置status
 	if takerOrder.UnfilledQuantity.GreaterThan(decimal.Zero) {
+		// 預設status為等待成交(Pending)
 		status := domain.OrderStatusPending
+		// 如果原始數量與剩餘數量不等，status為部分成交(Partial Filled)
 		if takerOrder.UnfilledQuantity.Cmp(takerOrder.Quantity) != 0 {
 			status = domain.OrderStatusPartialFilled
 		}
 		takerOrder.Status = status
-		m.matchingOrderBookRepo.MatchOrder(takerOrder.ID, decimal.Zero, status, takerOrder.CreatedAt)
+		// 新增order至taker方向的order book
 		m.matchingOrderBookRepo.AddOrderBookOrder(takerDirection, takerOrder)
 	}
 
+	// 設置order-book為已改變
 	m.isOrderBookChanged.Store(true)
 
 	return matchResult, nil

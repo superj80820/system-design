@@ -3,6 +3,7 @@ package sequencer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
@@ -96,7 +97,7 @@ func (t *tradingSequencerUseCase) SaveWithFilterEvents(tradingEvents []*domain.T
 	}
 	sequenceEvents, err := t.sequencerRepo.SaveWithFilterEvents(sequenceEvents, commitFn)
 	if err != nil {
-		return nil, errors.Wrap(err, "save with filter events failed")
+		return nil, errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(tradingEvents)))
 	}
 	tradingEvents = make([]*domain.TradingEvent, len(sequenceEvents))
 	for idx, sequenceEvent := range sequenceEvents {

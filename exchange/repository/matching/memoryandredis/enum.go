@@ -13,8 +13,10 @@ func (d directionEnum) compare(a, b interface{}) int {
 
 	switch domain.DirectionEnum(d) {
 	case domain.DirectionSell:
-		return aPrice.Cmp(bPrice) // TODO: think
+		// low price is first
+		return aPrice.Cmp(bPrice)
 	case domain.DirectionBuy:
+		// hight price is first
 		return bPrice.Cmp(aPrice)
 	case domain.DirectionUnknown:
 		panic("unknown direction")

@@ -171,7 +171,7 @@ func (s *sequencerRepo) GetHistoryEvents(offsetSequenceID, page, limit int) (seq
 }
 
 func (s *sequencerRepo) SaveEvents(sequencerEvents []*domain.SequencerEvent) error {
-	if err := s.orm.Table(s.tableName).Create(&sequencerEvents).Error; err != nil {
+	if err := s.orm.Table(s.tableName).CreateInBatches(&sequencerEvents, 10000).Error; err != nil {
 		return errors.Wrap(err, "create events failed")
 	}
 	return nil

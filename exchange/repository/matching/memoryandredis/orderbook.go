@@ -12,7 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
 
-	rbt "github.com/emirpasic/gods/trees/redblacktree"
+	rbtree "github.com/emirpasic/gods/trees/redblacktree"
 	goRedis "github.com/redis/go-redis/v9"
 	redisKit "github.com/superj80820/system-design/kit/cache/redis"
 	"github.com/superj80820/system-design/kit/mq"
@@ -50,10 +50,10 @@ return false
 
 type orderBookRepo struct {
 	sequenceID    int
-	sellBook      *bookStruct
-	buyBook       *bookStruct
+	sellBook      *bookEntity
+	buyBook       *bookEntity
 	orderMap      map[int]*list.Element
-	priceLevelMap map[string]*rbt.Node
+	priceLevelMap map[string]*rbtree.Node
 	marketPrice   decimal.Decimal
 	lock          *sync.RWMutex
 
@@ -64,12 +64,24 @@ type orderBookRepo struct {
 	l3OrderBookMQTopic mq.MQTopic
 }
 
+type bookEntity struct {
+	direction   domain.DirectionEnum
+	orderLevels *rbtree.Tree // <priceLevelEntity.price, priceLevelEntity>
+	bestPrice   *rbtree.Node
+}
+
+type priceLevelEntity struct {
+	price                 decimal.Decimal
+	totalUnfilledQuantity decimal.Decimal
+	orders                *list.List
+}
+
 func CreateOrderBookRepo(cache *redisKit.Cache, orderBookMQTopic, l1OrderBookMQTopic, l2OrderBookMQTopic, l3OrderBookMQTopic mq.MQTopic) domain.MatchingOrderBookRepo {
 	return &orderBookRepo{
 		sellBook:      createBook(domain.DirectionSell),
 		buyBook:       createBook(domain.DirectionBuy),
 		orderMap:      make(map[int]*list.Element),
-		priceLevelMap: make(map[string]*rbt.Node),
+		priceLevelMap: make(map[string]*rbtree.Node),
 		lock:          new(sync.RWMutex),
 
 		cache:              cache,
@@ -84,28 +96,58 @@ func (ob *orderBookRepo) AddOrderBookOrder(direction domain.DirectionEnum, order
 	ob.lock.Lock()
 	defer ob.lock.Unlock()
 
-	book, err := ob.getBookByDirection(direction)
-	if err != nil {
-		return errors.Wrap(err, "get book failed")
-	}
-
-	var (
-		priceLevel *priceLevelStruct
-		curNode    *rbt.Node
-	)
+	var priceLevel *priceLevelEntity
 	if _, ok := ob.priceLevelMap[order.Price.String()]; !ok {
-		priceLevel = &priceLevelStruct{
-			Price:  order.Price,
-			Orders: list.New(),
+		priceLevel = &priceLevelEntity{
+			price:  order.Price,
+			orders: list.New(),
 		}
-		curNode = book.addPrice(order.Price, priceLevel)
+
+		book, err := ob.getBookByDirection(direction)
+		if err != nil {
+			return errors.Wrap(err, "get book failed")
+		}
+
+		curNode := book.addPrice(order.Price, priceLevel)
 		ob.priceLevelMap[order.Price.String()] = curNode
 	} else {
-		priceLevel = ob.priceLevelMap[order.Price.String()].Value.(*priceLevelStruct)
+		priceLevel = ob.priceLevelMap[order.Price.String()].Value.(*priceLevelEntity)
 	}
-	priceLevel.TotalUnfilledQuantity = priceLevel.TotalUnfilledQuantity.Add(order.UnfilledQuantity)
-	orderElement := priceLevel.Orders.PushBack(order)
+	priceLevel.totalUnfilledQuantity = priceLevel.totalUnfilledQuantity.Add(order.UnfilledQuantity)
+
+	orderElement := priceLevel.orders.PushBack(order)
 	ob.orderMap[order.ID] = orderElement
+
+	return nil
+}
+
+func (ob *orderBookRepo) RemoveOrderBookOrder(direction domain.DirectionEnum, order *domain.OrderEntity) error {
+	ob.lock.Lock()
+	defer ob.lock.Unlock()
+
+	orderElement, ok := ob.orderMap[order.ID]
+	if !ok {
+		return errors.Wrap(domain.ErrNoOrder, "not found order")
+	}
+	priceLevelNode, ok := ob.priceLevelMap[order.Price.String()]
+	if !ok {
+		return errors.Wrap(domain.ErrNoPrice, "not found price")
+	}
+	priceLevel := priceLevelNode.Value.(*priceLevelEntity)
+
+	if priceLevel.orders.Remove(orderElement) == nil {
+		return errors.New("remove order failed")
+	}
+
+	if priceLevel.orders.Len() == 0 {
+		book, err := ob.getBookByDirection(direction)
+		if err != nil {
+			return errors.Wrap(err, "get book failed")
+		}
+
+		book.removePrice(order.Price)
+		delete(ob.priceLevelMap, order.Price.String())
+	}
 
 	return nil
 }
@@ -121,12 +163,12 @@ func (ob *orderBookRepo) GetL1OrderBook() *domain.OrderBookL1Entity {
 		SequenceID: ob.sequenceID,
 		Price:      ob.marketPrice,
 		BestAsk: &domain.OrderBookL1ItemEntity{
-			Price:    sellBestPrice.Price,
-			Quantity: sellBestPrice.TotalUnfilledQuantity,
+			Price:    sellBestPrice.price,
+			Quantity: sellBestPrice.totalUnfilledQuantity,
 		},
 		BestBid: &domain.OrderBookL1ItemEntity{
-			Price:    buyBestPrice.Price,
-			Quantity: buyBestPrice.TotalUnfilledQuantity,
+			Price:    buyBestPrice.price,
+			Quantity: buyBestPrice.totalUnfilledQuantity,
 		},
 	}
 }
@@ -135,16 +177,16 @@ func (ob *orderBookRepo) GetL2OrderBook() *domain.OrderBookL2Entity {
 	ob.lock.RLock()
 	defer ob.lock.RUnlock()
 
-	formatFn := func(iterator *rbt.Iterator, size int) []*domain.OrderBookL2ItemEntity {
+	formatFn := func(iterator *rbtree.Iterator, size int) []*domain.OrderBookL2ItemEntity {
 		var orderBookItems []*domain.OrderBookL2ItemEntity
 		orderBookItems = make([]*domain.OrderBookL2ItemEntity, 0, size)
 		for iterator.Next() {
 			value := iterator.Value()
-			priceLevel := value.(*priceLevelStruct)
+			priceLevel := value.(*priceLevelEntity)
 
 			orderBookItem := &domain.OrderBookL2ItemEntity{
-				Price:    priceLevel.Price,
-				Quantity: priceLevel.TotalUnfilledQuantity,
+				Price:    priceLevel.price,
+				Quantity: priceLevel.totalUnfilledQuantity,
 			}
 
 			orderBookItems = append(orderBookItems, orderBookItem)
@@ -164,19 +206,19 @@ func (ob *orderBookRepo) GetL3OrderBook() *domain.OrderBookL3Entity {
 	ob.lock.RLock()
 	defer ob.lock.RUnlock()
 
-	formatFn := func(iterator *rbt.Iterator, size int) []*domain.OrderBookL3ItemEntity {
+	formatFn := func(iterator *rbtree.Iterator, size int) []*domain.OrderBookL3ItemEntity {
 		var orderBookItems []*domain.OrderBookL3ItemEntity
 		orderBookItems = make([]*domain.OrderBookL3ItemEntity, 0, size)
 		for iterator.Next() {
 			value := iterator.Value()
-			priceLevel := value.(*priceLevelStruct)
+			priceLevel := value.(*priceLevelEntity)
 
 			orderBookItem := &domain.OrderBookL3ItemEntity{
-				Price:    priceLevel.Price,
-				Quantity: priceLevel.TotalUnfilledQuantity,
+				Price:    priceLevel.price,
+				Quantity: priceLevel.totalUnfilledQuantity,
 			}
 
-			for value := priceLevel.Orders.Front(); value != nil; value = value.Next() {
+			for value := priceLevel.orders.Front(); value != nil; value = value.Next() {
 				order := value.Value.(*domain.OrderEntity)
 				orderBookItem.Orders = append(orderBookItem.Orders, &domain.OrderL3Entity{
 					SequenceID: order.SequenceID,
@@ -242,37 +284,6 @@ func (ob *orderBookRepo) GetSequenceID() int {
 	return ob.sequenceID
 }
 
-func (ob *orderBookRepo) RemoveOrderBookOrder(direction domain.DirectionEnum, order *domain.OrderEntity) error {
-	ob.lock.Lock()
-	defer ob.lock.Unlock()
-
-	orderElement, ok := ob.orderMap[order.ID]
-	if !ok {
-		return errors.Wrap(domain.ErrNoOrder, "not found order")
-	}
-	priceLevelNode, ok := ob.priceLevelMap[order.Price.String()]
-	if !ok {
-		return errors.Wrap(domain.ErrNoPrice, "not found price")
-	}
-	priceLevel := priceLevelNode.Value.(*priceLevelStruct)
-
-	if priceLevel.Orders.Remove(orderElement) == nil {
-		return errors.New("remove order failed")
-	}
-
-	book, err := ob.getBookByDirection(direction)
-	if err != nil {
-		return errors.Wrap(err, "get book failed")
-	}
-
-	if priceLevel.Orders.Len() == 0 { // TODO: maybe no need // to search
-		book.removePrice(order.Price)
-		delete(ob.priceLevelMap, order.Price.String())
-	}
-
-	return nil
-}
-
 func (ob *orderBookRepo) MatchOrder(orderID int, matchedQuantity decimal.Decimal, orderStatus domain.OrderStatusEnum, updatedAt time.Time) error {
 	ob.lock.Lock()
 	defer ob.lock.Unlock()
@@ -287,12 +298,12 @@ func (ob *orderBookRepo) MatchOrder(orderID int, matchedQuantity decimal.Decimal
 	if !ok {
 		return errors.Wrap(domain.ErrNoPrice, "not found price")
 	}
-	priceLevel := priceLevelNode.Value.(*priceLevelStruct)
+	priceLevel := priceLevelNode.Value.(*priceLevelEntity)
 
 	order.UnfilledQuantity = order.UnfilledQuantity.Sub(matchedQuantity)
 	order.Status = orderStatus
 	order.UpdatedAt = updatedAt
-	priceLevel.TotalUnfilledQuantity = priceLevel.TotalUnfilledQuantity.Sub(matchedQuantity)
+	priceLevel.totalUnfilledQuantity = priceLevel.totalUnfilledQuantity.Sub(matchedQuantity)
 
 	return nil
 }
@@ -478,7 +489,7 @@ func (ob *orderBookRepo) SaveHistoryL3OrderBook(ctx context.Context, l3OrderBook
 	return nil
 }
 
-func (o *orderBookRepo) getBookByDirection(direction domain.DirectionEnum) (*bookStruct, error) {
+func (o *orderBookRepo) getBookByDirection(direction domain.DirectionEnum) (*bookEntity, error) {
 	switch direction {
 	case domain.DirectionSell:
 		return o.sellBook, nil
@@ -489,73 +500,51 @@ func (o *orderBookRepo) getBookByDirection(direction domain.DirectionEnum) (*boo
 	}
 }
 
-type priceLevelStruct struct {
-	Price                 decimal.Decimal
-	TotalUnfilledQuantity decimal.Decimal
-	Orders                *list.List
-}
-
-type bookStruct struct {
-	direction domain.DirectionEnum
-	orders    *rbt.Tree
-	bestPrice *rbt.Node
-}
-
-func createBook(direction domain.DirectionEnum) *bookStruct {
-	return &bookStruct{
-		direction: direction,
-		orders:    rbt.NewWith(directionEnum(direction).compare), // TODO: think performance
+func createBook(direction domain.DirectionEnum) *bookEntity {
+	return &bookEntity{
+		direction:   direction,
+		orderLevels: rbtree.NewWith(directionEnum(direction).compare),
 	}
 }
 
-func (b *bookStruct) removePrice(price decimal.Decimal) {
-	b.orders.Remove(price)
-	if price.Equal(b.bestPrice.Value.(*priceLevelStruct).Price) {
-		iterator := b.orders.Iterator()
+func (b *bookEntity) removePrice(price decimal.Decimal) {
+	b.orderLevels.Remove(price)
+
+	if price.Equal(b.bestPrice.Value.(*priceLevelEntity).price) {
+		iterator := b.orderLevels.Iterator()
 		iterator.Next()
 		b.bestPrice = iterator.Node()
-		// b.bestPrice = min(b.bestPrice.Parent, b.bestPrice.Right)
 	}
 }
 
-func (b *bookStruct) getOrderBookFirst() (*domain.OrderEntity, error) {
-	if b.orders.Empty() {
+func (b *bookEntity) getOrderBookFirst() (*domain.OrderEntity, error) {
+	if b.orderLevels.Empty() {
 		return nil, errors.Wrap(domain.ErrEmptyOrderBook, "get empty book")
 	} else {
-		order := b.bestPrice.Value.(*priceLevelStruct).Orders.Front().Value.(*domain.OrderEntity)
+		order := b.bestPrice.Value.(*priceLevelEntity).orders.Front().Value.(*domain.OrderEntity)
 		return order, nil
 	}
 }
 
-func (ob *bookStruct) addPrice(price decimal.Decimal, priceLevel *priceLevelStruct) *rbt.Node {
+func (ob *bookEntity) addPrice(price decimal.Decimal, priceLevel *priceLevelEntity) *rbtree.Node {
 	key := price
-	ob.orders.Put(key, priceLevel)
-	curNode := ob.orders.GetNode(key) // TODO: maybe push and return
+	ob.orderLevels.Put(key, priceLevel)
+	curNode := ob.orderLevels.GetNode(key) // TODO: optimize. maybe push and return node in one function call
 	if ob.bestPrice == nil {
 		ob.bestPrice = curNode
 	} else {
-		if directionEnum(ob.direction).compare(ob.bestPrice.Value.(*priceLevelStruct).Price, price) == 1 {
-			ob.bestPrice = curNode // TODO: think
+		if directionEnum(ob.direction).compare(ob.bestPrice.Value.(*priceLevelEntity).price, price) == 1 {
+			ob.bestPrice = curNode
 		}
 	}
 	return curNode
 }
 
-func (ob *bookStruct) getBestPrice() *priceLevelStruct {
-	return ob.bestPrice.Value.(*priceLevelStruct)
+func (ob *bookEntity) getBestPrice() *priceLevelEntity {
+	return ob.bestPrice.Value.(*priceLevelEntity)
 }
 
-func (ob *bookStruct) getOrderBookIteratorAndSize() (*rbt.Iterator, int) {
-	iterator := ob.orders.Iterator()
-	return &iterator, ob.orders.Size()
-}
-
-func min(parent, right *rbt.Node) *rbt.Node {
-	if right == nil {
-		return parent
-	}
-	if parent.Value.(*priceLevelStruct).Price.LessThan(right.Value.(*priceLevelStruct).Price) {
-		return parent
-	}
-	return right
+func (ob *bookEntity) getOrderBookIteratorAndSize() (*rbtree.Iterator, int) {
+	iterator := ob.orderLevels.Iterator()
+	return &iterator, ob.orderLevels.Size()
 }
