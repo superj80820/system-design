@@ -5,100 +5,23 @@
 依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) clean architecture，每個domain依repository、usecase、delivery三層設計
 
 
-* app: 實際啟動的server
-* domain: domain interface與entity，不具邏輯，所有層都靠此domain interface傳輸entity進行溝通
-* kit: 對mysql、mongodb、kafka、redis等底層進行封裝，抽象出介面後始得替換更容易
-* instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
-* 其餘資料夾: 依照repository、usecase、delivery實作的domain
 
 ```
 .
-├── app
-│   ├── botclient
-│   ├── chat
-│   ├── exchange
-│   ├── exchange-gitbitex
-│   ├── simple
-│   ├── urlshortener
-│   └── user
-├── domain
-├── auth
-│   ├── delivery
-│   ├── repository
-│   │   ├── account
-│   │   └── auth
-│   └── usecase
-│       ├── account
-│       └── auth
-├── chat
-│   ├── delivery
-│   │   └── http
-│   │       └── websocket
-│   ├── repository
-│   └── usecase
-├── config
-│   └── repository
-├── exchange
-│   ├── delivery
-│   ├── repository
-│   │   ├── asset
-│   │   ├── candle
-│   │   ├── matching
-│   │   ├── order
-│   │   ├── quotation
-│   │   ├── sequencer
-│   │   └── trading
-│   └── usecase
-│       ├── asset
-│       ├── candle
-│       ├── clearing
-│       ├── currency
-│       ├── matching
-│       ├── order
-│       ├── quotation
-│       └── trading
-├── line
-│   └── repository
-├── urshortener
-│   ├── delivery
-│   ├── repository
-│   └── usecase
-├── kit
-│   ├── cache
-│   ├── code
-│   ├── core
-│   │   ├── endpoint
-│   │   └── transport
-│   │       └── http
-│   │           └── websocket
-│   ├── http
-│   │   ├── middleware
-│   │   ├── transport
-│   │   └── websocket
-│   │       └── middleware
-│   ├── logger
-│   ├── mq
-│   │   ├── kafka
-│   │   └── memory
-│   ├── orm
-│   ├── ratelimit
-│   │   ├── memory
-│   │   └── redis
-│   ├── testing
-│   │   ├── kafka
-│   │   │   └── container
-│   │   ├── mongo
-│   │   │   ├── container
-│   │   │   └── memory
-│   │   ├── mysql
-│   │   │   └── container
-│   │   ├── postgres
-│   │   │   └── container
-│   │   └── redis
-│   │       └── container
-│   ├── trace
-│   └── util
-└── instrumenting
+├── app: 實際啟動的server
+│
+├── domain: domain interface與entity，不具邏輯，所有層都靠此domain interface傳輸entity進行溝通
+│
+├── auth: 依照repository、usecase、delivery實作的domain
+├── chat: 同上
+├── config: 同上
+├── exchange: 同上
+├── line: 同上
+├── urshortener: 同上
+│
+├── kit: 對mysql、mongodb、kafka、redis等底層進行封裝，抽象出介面後始得替換更容易
+│
+└── instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
 ```
 
 * 不同層依照domain interface進行DIP
@@ -286,7 +209,7 @@ type assetRepo struct {
 	usersAssetsMap map[int]map[int]*domain.UserAsset
 	lock           *sync.RWMutex
 
-	// another fields...
+	// another code...
 }
 ```
 
@@ -315,7 +238,7 @@ type UserAssetUseCase interface {
 |1|2|-200000|0|
 |100|1|0|0|
 |100|2|38000|62000|
-|...其他用戶||||
+|其他用戶...||||
 
 在deposit時會呼叫`LiabilityUserTransfer()`，`assetRepo`呼叫`GetAssetWithInit()`，如果用戶資產存在則返回，不存在則初始化創建，資產模組在需要使用用戶資產時才創建他，不需先預載用戶資料表，也因為如此，在進入撮合系統前的auth非常重要，必須是認證過的用戶才能進入資產模組。
 
@@ -420,7 +343,7 @@ type orderUseCase struct {
 	activeOrders  map[int]*domain.OrderEntity
 	userOrdersMap map[int]map[int]*domain.OrderEntity
 
-  // ...another fields
+  // another code...
 }
 ```
 
@@ -435,13 +358,13 @@ type OrderEntity struct {
 	Price     decimal.Decimal // 價格
 	Direction DirectionEnum   // 買單還是賣單
 
-	// 狀態，分別是:
+	// 狀態:
 	// 完全成交(Fully Filled)、
 	// 部分成交(Partial Filled)、
 	// 等待成交(Pending)、
 	// 完全取消(Fully Canceled)、
 	// 部分取消(Partial Canceled)
-	Status    OrderStatusEnum 
+	Status OrderStatusEnum
 
 	Quantity         decimal.Decimal // 數量
 	UnfilledQuantity decimal.Decimal // 未成交數量
@@ -459,7 +382,7 @@ type OrderUseCase interface {
 	RemoveOrder(ctx context.Context, orderID int) error
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 
-  // another functions...
+  // another code...
 }
 ```
 
@@ -750,10 +673,12 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		makerOrder.UnfilledQuantity = makerOrder.UnfilledQuantity.Sub(matchedQuantity)
 		// 如果maker數量減至0，代表已完全成交(Fully Filled)，更新maker order並從order-book移除
 		if makerOrder.UnfilledQuantity.Equal(decimal.Zero) {
+			// 更新maker order
 			makerOrder.Status = domain.OrderStatusFullyFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt); err != nil {
 				return nil, errors.Wrap(err, "update order failed")
 			}
+			// 從order-book移除
 			if err := m.matchingOrderBookRepo.RemoveOrderBookOrder(makerDirection, makerOrder); err != nil {
 				return nil, errors.Wrap(err, "remove order book order failed")
 			}
@@ -790,9 +715,166 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 }
 ```
 
-最後的`matchResult`我們將傳送給下游模組進行處理。
+最後的`MatchResult`我們將傳送給下游模組進行處理。
 
 ### Clearing 清算模組
+
+![](./clearing.jpg)
+
+* 撮合模組撮合後，雙方資產還沒有實際交換，訂單也還沒更新，必須再透過清算模組進行處理，故引入資產模組與訂單模組
+
+```go
+type clearingUseCase struct {
+	userAssetUseCase domain.UserAssetUseCase
+	orderUseCase     domain.OrderUseCase
+
+	// another code...
+}
+```
+
+* 清算模組需實作的method不多，只需實作`ClearMatchResult()`，將`MatchResult`帶入，資產的轉換結果生成`TransferResult`提供給下游系統使用
+
+```go
+type ClearingUseCase interface {
+	ClearMatchResult(ctx context.Context, matchResult *MatchResult) (*TransferResult, error)
+
+	// another code...
+}
+```
+
+將taker訂單更新，並依照taker的方向進行清算，以下分別介紹
+
+```go
+func (c *clearingUseCase) ClearMatchResult(ctx context.Context, matchResult *domain.MatchResult) (*domain.TransferResult, error) {
+	// 新增`transferResult`紀錄資產轉換結果
+	transferResult := new(domain.TransferResult)
+
+	// 更新taker在訂單模組的狀態
+	taker := matchResult.TakerOrder
+	if err := c.orderUseCase.UpdateOrder(ctx, taker.ID, taker.UnfilledQuantity, taker.Status, taker.UpdatedAt); err != nil {
+		return nil, errors.Wrap(err, "update order failed")
+	}
+	switch matchResult.TakerOrder.Direction {
+	// taker是賣單的情形
+	case domain.DirectionSell:
+		// another code...
+	// taker是買單的情形
+	case domain.DirectionBuy:
+		// another code...
+	default:
+		return nil, errors.New("unknown direction")
+	}
+
+	return transferResult, nil
+}
+```
+
+如果taker是賣單，依照`MatchResult`的`MatchDetails`逐一將maker訂單更新:
+  * 將taker賣單凍結的數量轉換給maker，數量是`matched`
+  * 將maker買單凍結的資產轉換給taker，金額是`(maker price)*matched`
+
+並把taker跟maker最後的資產紀錄在`TransferResult`
+
+```go
+	// taker是賣單的情形
+	case domain.DirectionSell:
+		// 依照`MatchDetails`逐一拿出撮合maker的細節來處理
+		for _, matchDetail := range matchResult.MatchDetails {
+			// 更新maker在訂單模組的狀態
+			maker := matchDetail.MakerOrder
+			if err := c.orderUseCase.UpdateOrder(ctx, maker.ID, maker.UnfilledQuantity, maker.Status, maker.UpdatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
+			matched := matchDetail.Quantity
+
+			// 將taker賣單凍結的數量轉換給maker，數量是matched
+			transferResultOne, err := c.userAssetUseCase.TransferFrozenToAvailable(ctx, taker.UserID, maker.UserID, c.baseCurrencyID, matched)
+			if err != nil {
+				return nil, errors.Wrap(err, "transfer failed")
+			}
+			// 將轉換結果紀錄
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultOne.UserAssets...)
+			// 將maker買單凍結的資產轉換給taker，金額是(maker price)*matched
+			transferResultTwo, err := c.userAssetUseCase.TransferFrozenToAvailable(ctx, maker.UserID, taker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
+			if err != nil {
+				return nil, errors.Wrap(err, "transfer failed")
+			}
+			// 將轉換結果紀錄
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultTwo.UserAssets...)
+			// 如果maker買單數量減至0，則移除訂單
+			if maker.UnfilledQuantity.IsZero() {
+				if err := c.orderUseCase.RemoveOrder(ctx, maker.ID); err != nil {
+					return nil, errors.Wrap(err, "remove failed")
+				}
+			}
+		}
+		// 如果taker買單數量減至0，則移除訂單
+		if taker.UnfilledQuantity.IsZero() {
+			if err := c.orderUseCase.RemoveOrder(ctx, taker.ID); err != nil {
+				return nil, errors.Wrap(err, "remove failed")
+			}
+		}
+```
+
+如果taker是買單，則相反:
+  * 將taker買單凍結的資產轉換給maker，金額是`(maker price)*matched`
+  * 將maker賣單凍結的資產轉換給taker，數量是`matched`
+
+需注意的是，如果taker是買單，凍結的資產金額是(taker price)*matched，須退還`(taker price-maker price)*matched`金額給taker。
+
+例如10usdt price數量3btc的買單，需凍結30usdt，如果撮合到1usdt price數量2btc的賣單，撮合到2btc，taker理應用`1*2=2usdt`會獲得2btc，須退還`(10-1)*2=18usdt`給taker
+
+```go
+	// taker是買單的情形
+	case domain.DirectionBuy:
+		// 依照`MatchDetails`逐一拿出撮合maker的細節來處理
+		for _, matchDetail := range matchResult.MatchDetails {
+			// 更新maker在訂單模組的狀態
+			maker := matchDetail.MakerOrder
+			if err := c.orderUseCase.UpdateOrder(ctx, maker.ID, maker.UnfilledQuantity, maker.Status, maker.UpdatedAt); err != nil {
+				return nil, errors.Wrap(err, "update order failed")
+			}
+			matched := matchDetail.Quantity
+
+			// taker買單的價格如果高於maker賣單，則多出來的價格須退還給taker，金額是(taker price-maker price)*matched
+			// 退還給taker不需紀錄在`transferResult`，因為後續taker還會從maker拿到資產，taker資產的結果只需紀錄最後一個就可以了
+			if taker.Price.Cmp(maker.Price) > 0 {
+				unfreezeQuote := taker.Price.Sub(maker.Price).Mul(matched)
+				_, err := c.userAssetUseCase.Unfreeze(ctx, taker.UserID, c.quoteCurrencyID, unfreezeQuote)
+				if err != nil {
+					return nil, errors.Wrap(err, "unfreeze taker failed")
+				}
+			}
+			// 將taker買單凍結的資產轉換給maker，金額是(maker price)*matched
+			transferResultOne, err := c.userAssetUseCase.TransferFrozenToAvailable(ctx, taker.UserID, maker.UserID, c.quoteCurrencyID, maker.Price.Mul(matched))
+			if err != nil {
+				return nil, errors.Wrap(err, "transfer failed")
+			}
+			// 將轉換結果紀錄
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultOne.UserAssets...)
+			// 將maker賣單凍結的資產轉換給taker，數量是matched
+			transferResultTwo, err := c.userAssetUseCase.TransferFrozenToAvailable(ctx, maker.UserID, taker.UserID, c.baseCurrencyID, matched)
+			if err != nil {
+				return nil, errors.Wrap(err, "transfer failed")
+			}
+			// 將轉換結果紀錄
+			transferResult.UserAssets = append(transferResult.UserAssets, transferResultTwo.UserAssets...)
+			// 如果maker買單數量減至0，則移除訂單
+			if maker.UnfilledQuantity.IsZero() {
+				if err := c.orderUseCase.RemoveOrder(ctx, maker.ID); err != nil {
+					return nil, errors.Wrap(err, "remove maker order failed, maker order id: "+strconv.Itoa(maker.ID))
+				}
+			}
+		}
+		// 如果taker買單數量減至0，則移除訂單
+		if taker.UnfilledQuantity.IsZero() {
+			if err := c.orderUseCase.RemoveOrder(ctx, taker.ID); err != nil {
+				return nil, errors.Wrap(err, "remove taker order failed")
+			}
+		}
+```
+
+最後的`TransferResult`我們將傳送給下游模組進行處理。
 
 ### 運行
 

@@ -140,19 +140,26 @@ type OrderL3Entity struct {
 }
 
 type OrderEntity struct {
-	ID         int
-	SequenceID int
-	UserID     int
+	ID         int // 訂單ID
+	SequenceID int // 訂單由定序模組所定的ID
+	UserID     int // 用戶ID
 
-	Price     decimal.Decimal
-	Direction DirectionEnum
-	Status    OrderStatusEnum
+	Price     decimal.Decimal // 價格
+	Direction DirectionEnum   // 買單還是賣單
 
-	Quantity         decimal.Decimal
-	UnfilledQuantity decimal.Decimal
+	// 狀態:
+	// 完全成交(Fully Filled)、
+	// 部分成交(Partial Filled)、
+	// 等待成交(Pending)、
+	// 完全取消(Fully Canceled)、
+	// 部分取消(Partial Canceled)
+	Status OrderStatusEnum
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Quantity         decimal.Decimal // 數量
+	UnfilledQuantity decimal.Decimal // 未成交數量
+
+	CreatedAt time.Time // 創建時間
+	UpdatedAt time.Time // 更新時間
 }
 
 func (o *OrderEntity) Clone() *OrderEntity {

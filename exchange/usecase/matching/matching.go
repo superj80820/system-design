@@ -100,10 +100,12 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 		makerOrder.UnfilledQuantity = makerOrder.UnfilledQuantity.Sub(matchedQuantity)
 		// 如果maker數量減至0，代表已完全成交(Fully Filled)，更新maker order並從order-book移除
 		if makerOrder.UnfilledQuantity.Equal(decimal.Zero) {
+			// 更新maker order
 			makerOrder.Status = domain.OrderStatusFullyFilled
 			if err := m.matchingOrderBookRepo.MatchOrder(makerOrder.ID, matchedQuantity, domain.OrderStatusFullyFilled, takerOrder.CreatedAt); err != nil {
 				return nil, errors.Wrap(err, "update order failed")
 			}
+			// 從order-book移除
 			if err := m.matchingOrderBookRepo.RemoveOrderBookOrder(makerDirection, makerOrder); err != nil {
 				return nil, errors.Wrap(err, "remove order book order failed")
 			}
