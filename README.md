@@ -551,9 +551,9 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
   * AVL-tree: 查詢較多
 
 order-book會有大量訂單插入與撮合刪除場景，會較適合選擇rbtree，這樣插入速度就變快了，如下:
-    * 查詢: O(logn)
-    * 插入: O(logn)
-    * 刪除: O(logn)
+  * 查詢: O(logn)
+  * 插入: O(logn)
+  * 刪除: O(logn)
     
 但這樣其他操作的速度就變慢了，有沒有方法可以更加優化呢？
 
