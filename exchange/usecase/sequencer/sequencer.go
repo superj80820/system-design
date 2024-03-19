@@ -15,12 +15,15 @@ import (
 type tradingSequencerUseCase struct {
 	sequencerRepo domain.SequencerRepo
 	tradingRepo   domain.TradingRepo
+
+	doneCh chan struct{}
 }
 
 func CreateTradingSequencerUseCase(sequencerRepo domain.SequencerRepo, tradingRepo domain.TradingRepo) domain.SequenceTradingUseCase {
 	return &tradingSequencerUseCase{
 		sequencerRepo: sequencerRepo,
 		tradingRepo:   tradingRepo,
+		doneCh:        make(chan struct{}),
 	}
 }
 
@@ -228,7 +231,7 @@ func (t *tradingSequencerUseCase) ProduceDepositOrderTradingEvent(ctx context.Co
 }
 
 func (t *tradingSequencerUseCase) Done() <-chan struct{} {
-	panic("TODO unimplemented")
+	return t.doneCh
 }
 
 func (t *tradingSequencerUseCase) Err() error {
