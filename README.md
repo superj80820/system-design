@@ -485,58 +485,47 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 
 ![](./matching.jpg)
 
-* 撮合模組是整個搓合系統最核心的部分
-* 事實上就是維護一個買單book一個賣單book
-* ![](./order-book.jpg)
-* 直觀上會把這兩個book當成兩個list來看
+撮合模組是整個交易系統最核心的部分。
+
+主要核心是維護一個買單book一個賣單book
+
+![](./order-book.jpg)
+
+訂單簿必須是「價格優先、序列號次要」，直觀上會把這兩個book當成兩個list來看
   * 賣單簿: 4.45, 4.52, 4.63, 4.64, 4.65
   * 買單簿: 4.15, 4.08, 4.06, 4.05, 4.01
-* 所以直觀上就會把order-book用兩個double-link-list來設計
-* 但這樣效能並不好，以查詢、插入、刪除來看
-* double-link-list
-    * 查詢: O(n)
-    * 插入: O(1)
-    * 刪除: O(1)
-* 如果搭配hash-table儲存order的位置，會變成以下
-* double-link-list+hash-table
-    * 查詢: O(1)
-    * 插入: O(1)
-    * 刪除: O(1)
-* 但這樣的資料結構並不能讓訂單簿是有排序的，訂單簿必須是「價格優先、序列號次要」
-  * 如果採用double-link-list+hash-table，必須在每次插入時都掃描整個訂單簿，插入合適的位置滿足排序，這樣插入速度就會變成
-    * 查詢: O(1)
-    * 插入: O(n)
-    * 刪除: O(1)
-* 我們需要用平衡二元搜尋樹，來達到「價格優先、序列號次要」的排序，可考慮red-black-tree(以下簡稱rbtree)或AVL-tree，rb-tree沒有AVL-tree來的平衡，但插入與刪除時為了平衡的旋轉較少，兩者可簡化判斷要用在哪些場景：
+
+但如果就把order-book用2個double-link-list來設計，這樣效能並不好，以查詢、插入、刪除來看:
+  * 查詢: O(n)
+  * 插入: O(n)，雖然插入是O(1)，但要先找到適合的價格插入，也要耗費O(n)
+  * 刪除: O(n)，雖然刪除是O(1)，但要先查詢到價格再刪除，也要耗費O(n)
+
+如果搭配hash-table，查詢跟刪除是可以達到O(1)，但插入還是O(n)，有沒有更適合的資料結構呢？
+
+我們可用平衡二元搜尋樹，可考慮red-black-tree(以下簡稱rbtree)或AVL-tree，rb-tree沒有AVL-tree來的平衡，但插入與刪除時為了平衡的旋轉較少，兩者可簡化判斷要用在哪些場景:
   * rbtree: 插入與刪除較多
   * AVL-tree: 查詢較多
-* 以order-book會有大量訂單插入與撮合刪除場景，會較適合選擇rbtree
-* 這樣就可達到既有排序、插入速度又快的方案了
+
+order-book會有大量訂單插入與撮合刪除場景，會較適合選擇rbtree，這樣插入速度就變快了，如下:
     * 查詢: O(logn)
     * 插入: O(logn)
     * 刪除: O(logn)
-* 但這樣其他操作的速度就變慢了，有沒有方法可以更加優化呢？
-  * 我們可以rbtree搭配double-link-list+hash-table，rbtree的node儲存的不是一個order而是存有相同價格orders的double-link-list(以下簡稱list)，而hash-table有兩個，一個儲存list在tree上的位置，一個儲存order在list上的位置
-  * 如此一來在第一次插入此價格或從訂單簿移除價格時速度為O(logn)，但在建立node後，後續的插入與刪除實際上是對list的操作，速度為O(1)
-    * 由於整個撮合模組是依照序列號有序輸入order的，所以只需直接對list的尾端insert order即可，速度為O(1)
-    * 刪除可透過hash-table刪除list上的order
-    * 所以統整速度可以得到以下:
-      * 查詢: O(1)
-      * 第一次插入價格: O(logn)
-      * 刪除訂單簿價格: O(logn)
-      * 插入: O(1)
-      * 刪除: O(1)
+    
+但這樣其他操作的速度就變慢了，有沒有方法可以更加優化呢？
 
-* 所以我們的order-book一側定義為`rbtree<priceLevelEntity.price, priceLevelEntity>`的結構體，`price`為compare的key，`priceLevelEntity`為實際的value
-* `priceLevelEntity`存放此price所有的order list，可以再設一個`totalUnfilledQuantity`，在存放order時也紀錄數量
+我們可以rbtree+double-link-list(以下簡稱list)+hash-table，rbtree的node儲存的不是一個order而是存有相同價格的order list，而hash-table有兩個，一個儲存list在tree上的位置，一個儲存order在list上的位置。
+如此一來在第1次插入此價格或從訂單簿移除整個價格時速度為O(logn)，但在建立node後，後續的插入與刪除實際上是對list的操作，由於整個撮合模組是依照序列號有序輸入order的，所以只需直接對list的尾端insert order即可，速度為O(1)。
+
+所以統整速度可以得到以下:
+* 查詢: O(1)
+* 第1次插入價格: O(logn)
+* 移除整個訂單簿價格: O(logn)
+* 插入: O(1)，透過hash-table插入list上的order
+* 刪除: O(1)，透過hash-table刪除list上的order
+
+所以我們的order-book一側定義為`rbtree<priceLevelEntity.price, priceLevelEntity>`的結構體，`price`為compare的key，`priceLevelEntity`為實際的value。
 
 ```go
-type priceLevelEntity struct {
-	price                 decimal.Decimal
-	totalUnfilledQuantity decimal.Decimal
-	orders                *list.List
-}
-
 type bookEntity struct {
 	direction   domain.DirectionEnum
 	orderLevels *rbtree.Tree // <priceLevelEntity.price, priceLevelEntity>
@@ -548,6 +537,16 @@ func createBook(direction domain.DirectionEnum) *bookEntity {
 		direction:   direction,
 		orderLevels: rbtree.NewWith(directionEnum(direction).compare),
 	}
+}
+```
+
+`priceLevelEntity`存放此price所有的order list，可以再設一個`totalUnfilledQuantity`，在存放order時也紀錄數量。
+
+```go
+type priceLevelEntity struct {
+	price                 decimal.Decimal
+	totalUnfilledQuantity decimal.Decimal
+	orders                *list.List
 }
 ```
 
