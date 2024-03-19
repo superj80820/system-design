@@ -14,13 +14,14 @@ type SequencerRepo interface {
 	ProduceSequenceMessages(context.Context, *SequencerEvent) error
 
 	SaveEvents([]*SequencerEvent) error
+	FilterEvents([]*SequencerEvent) ([]*SequencerEvent, error)
 
 	GetHistoryEvents(offsetSequenceID, page, limit int) (sequencerEvents []*SequencerEvent, isEnd bool, err error)
-	GetFilterEventsMap([]*SequencerEvent) (map[int]bool, error)
+	GetReferenceIDFilterMap([]*SequencerEvent) (map[int]bool, error)
 
 	CheckEventSequence(sequenceID, lastSequenceID int) error
 	RecoverEvents(offsetSequenceID int, processFn func([]*SequencerEvent) error) error
-	SaveWithFilterEvents(events []*SequencerEvent, commitFn func() error) ([]*SequencerEvent, error)
+	SequenceAndSave(events []*SequencerEvent, commitFn func() error) ([]*SequencerEvent, error)
 
 	Pause() error
 	Continue() error

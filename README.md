@@ -88,7 +88,7 @@
 
 撮合系統主要由Sequence(定序模組)、Asset(資產模組)、Order(訂單模組)、Matching(撮合模組)、Clearing(清算模組)組成。
 
-以訂單事件來舉例:
+以Create Order Event(創建訂單)來舉例:
 
 1. 大量併發的訂單請求進入服務
 2. 定序模組會將訂單以有序的方式儲存
@@ -106,16 +106,25 @@
 
 ![](./sequencer.jpg)
 
+```go
+type SequenceTradingUseCase interface {
+	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
+	ConsumeSequenceMessages(context.Context)
+
+	SequenceAndSaveWithFilter(events []*TradingEvent, commitFn func() error) ([]*TradingEvent, error)
+
+  // another code...
+}
+```
+
 如何快速儲存event是影響系統寫入速度的關鍵，kafka是可考慮的選項之一。
 
 kafka為append-only logs，不需像RDBMS在需查找與更新索引會增加磁碟I/O操作，並且使用zero-copy快速寫入磁碟來persistent。
 
-* TODO: 講解uniq去重
-
 create order API只需將snowflake的`orderID`、`referenceID`(全局參考ID)等metadata帶入event，並傳送給kafka sequence topic，即完成了創建訂單的事項，可回傳`200 OK`給客戶端。
 
 ```go
-func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) (*domain.TradingEvent, error) {
+func (t *tradingSequencerUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) (*domain.TradingEvent, error) {
 	referenceID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
 	if err != nil {
 		return nil, errors.Wrap(err, "safe int64 to int failed")
@@ -123,6 +132,12 @@ func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, use
 	orderID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
 	if err != nil {
 		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+	if price.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.Wrap(err, "amount is less then or equal zero failed")
+	}
+	if quantity.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.Wrap(err, "quantity is less then or equal zero failed")
 	}
 
 	tradingEvent := &domain.TradingEvent{
@@ -135,9 +150,10 @@ func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, use
 			Price:     price,
 			Quantity:  quantity,
 		},
+		CreatedAt: time.Now(),
 	}
 
-	if err := t.sequencerRepo.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+	if err := t.produceSequenceMessages(ctx, tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "send trade sequence messages failed")
 	}
 
@@ -145,44 +161,72 @@ func (t *tradingUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, use
 }
 ```
 
-#### Explicit Commit
+kafka sequence topic的consume到event後，需為event定序，將一批events的透過`SequenceAndSaveWithFilter()`定序與儲存。
 
-kafka sequence topic的consume到event後，需為event定序，將一批已經定序events的透過`sequencerRepo.SaveEvents()`儲存，儲存過程中有可能會有失敗，如失敗就不對kafka進行commit，下次consume會消費到同批events重試，直到成功在commit。
+`SequenceAndSaveWithFilter()`過程中有可能會有失敗，如果失敗就不對kafka進行commit，下次consume會消費到同批events重試，直到成功再commit，此方式是為explicit commit。
 
-如果是`sequencerRepo.SaveEvents()`儲存成功，但commit失敗，下次consume也會消費到同批events，這時需ignore掉已儲存的events，只儲存新的events，在用最新的event進行commit。
+但如果save成功commit卻失敗呢？這時可能導致消息重複`ErrDuplicate`，需透過`sequencerRepo.FilterEvents()`來filter掉已save的events，只儲存新的events，再用新的event呼叫`SequenceAndSaveWithFilter()`，如果消息完全filter掉了則回傳`ErrNoop`錯誤，代表此批消息完全重複，不處理。
 
-雖然沒辦法保證每次consume都成功處理，但我們可以確保consume失敗後會重試直到成功再commit。
+最後將以定序的events透過`tradingRepo.ProduceTradingEvents`送至`trading event MQ`。
 
 ```go
-t.sequencerRepo.SubscribeGlobalSequenceMessages(func(tradingEvents []*domain.TradingEvent, commitFn func() error) {
-  sequencerEvents := make([]*domain.SequencerEvent, len(tradingEvents))
-  tradingEventsClone := make([]*domain.TradingEvent, len(tradingEvents))
-  for idx := range tradingEvents {
-    sequencerEvent, tradingEvent, err := t.sequenceMessage(tradingEvents[idx])
-    if err != nil {
-      setErrAndDone(errors.Wrap(err, "sequence message failed"))
-      return
-    }
-    sequencerEvents[idx] = sequencerEvent
-    tradingEventsClone[idx] = tradingEvent
-  }
+func (t *tradingSequencerUseCase) ConsumeSequenceMessages(ctx context.Context) {
+	t.sequencerRepo.ConsumeSequenceMessages(func(sequenceEvents []*domain.SequencerEvent, commitFn func() error) {
+		tradingEvents, err := t.sequenceEventsConvertToTradingEvents(sequenceEvents)
+		if err != nil {
+			panic(errors.Wrap(err, "convert sequence event failed"))
+		}
 
-  err := t.sequencerRepo.SaveEvents(sequencerEvents)
-  if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
-    // if duplicate, filter events then retry
-    // another code...
-    return
-  } else if err != nil {
-    panic(errors.Wrap(err, "save event failed"))
-  }
+		events, err := t.SequenceAndSaveWithFilter(tradingEvents, commitFn)
+		if errors.Is(err, domain.ErrDuplicate) {
+			sequenceEvents, err = t.sequencerRepo.FilterEvents(sequenceEvents)
+			if errors.Is(err, domain.ErrNoop) {
+				return
+			} else if err != nil {
+				panic(errors.Wrap(err, "filter events failed"))
+			}
 
-  if err := commitFn(); err != nil {
-    setErrAndDone(errors.Wrap(err, "commit latest message failed"))
-    return
-  }
+			tradingEvents, err := t.sequenceEventsConvertToTradingEvents(sequenceEvents)
+			if err != nil {
+				panic(errors.Wrap(err, "convert sequence event failed"))
+			}
 
-  t.tradingRepo.SendTradeEvent(ctx, tradingEventsClone)
-})
+			_, err = t.SequenceAndSaveWithFilter(tradingEvents, commitFn)
+			if err != nil {
+				panic(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events))))
+			}
+		} else if err != nil {
+			panic(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events))))
+		}
+
+		if err := t.tradingRepo.ProduceTradingEvents(ctx, events); err != nil {
+			panic(errors.Wrap(err, "produce trading event failed"))
+		}
+	})
+}
+```
+
+`sequencerRepo.FilterEvents()`的方式有許多，此處是透過全局唯一`ReferenceID`來達到，如果db已儲存此`ReferenceID`，則忽略此event。
+
+```go
+func (s *sequencerRepo) FilterEvents(sequenceEvents []*domain.SequencerEvent) ([]*domain.SequencerEvent, error) {
+	referenceIDFilter, err := s.GetReferenceIDFilterMap(sequenceEvents)
+	if err != nil {
+		return nil, errors.Wrap(err, "get filter events map failed")
+	}
+	for _, val := range sequenceEvents {
+		if referenceIDFilter[val.ReferenceID] {
+			continue
+		}
+		filterSequenceEvents = append(filterSequenceEvents, val)
+	}
+
+	if len(filterSequenceEvents) == 0 {
+		return nil, errors.Wrap(domain.ErrNoop, "no message need to save")
+	}
+
+	return filterSequenceEvents, nil
+}
 ```
 
 ### Asset 資產模組

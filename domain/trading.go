@@ -89,16 +89,14 @@ type TradingRepo interface {
 type SequenceTradingUseCase interface {
 	GetSequenceID() uint64
 
-	ProduceSequenceMessages(context.Context, *TradingEvent) error
+	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
+	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
+	ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TradingEvent, error)
 	ConsumeSequenceMessages(context.Context)
 
 	CheckEventSequence(sequenceID, lastSequenceID int) error
 	RecoverEvents(offsetSequenceID int, processFn func([]*TradingEvent) error) error
-	SaveWithFilterEvents(events []*TradingEvent, commitFn func() error) ([]*TradingEvent, error)
-
-	ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction DirectionEnum, price, quantity decimal.Decimal) (*TradingEvent, error)
-	ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*TradingEvent, error)
-	ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*TradingEvent, error)
+	SequenceAndSaveWithFilter(events []*TradingEvent, commitFn func() error) ([]*TradingEvent, error)
 
 	Pause() error
 	Continue() error

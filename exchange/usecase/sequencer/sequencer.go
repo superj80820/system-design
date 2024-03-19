@@ -49,7 +49,7 @@ func (t *tradingSequencerUseCase) Pause() error {
 	return nil
 }
 
-func (t *tradingSequencerUseCase) ProduceSequenceMessages(ctx context.Context, tradingEvent *domain.TradingEvent) error {
+func (t *tradingSequencerUseCase) produceSequenceMessages(ctx context.Context, tradingEvent *domain.TradingEvent) error {
 	marshalData, err := json.Marshal(*tradingEvent)
 	if err != nil {
 		return errors.Wrap(err, "marshal failed")
@@ -66,15 +66,9 @@ func (t *tradingSequencerUseCase) ProduceSequenceMessages(ctx context.Context, t
 
 func (t *tradingSequencerUseCase) RecoverEvents(offsetSequenceID int, processFn func([]*domain.TradingEvent) error) error {
 	if err := t.sequencerRepo.RecoverEvents(offsetSequenceID, func(sequencerEvents []*domain.SequencerEvent) error {
-		tradingEvents := make([]*domain.TradingEvent, len(sequencerEvents))
-		for idx, sequencerEvent := range sequencerEvents {
-			var tradingEvent domain.TradingEvent
-			if err := json.Unmarshal([]byte(sequencerEvent.Data), &tradingEvent); err != nil {
-				return errors.Wrap(err, "unmarshal failed")
-			}
-			tradingEvent.ReferenceID = sequencerEvent.ReferenceID
-			tradingEvent.SequenceID = sequencerEvent.SequenceID
-			tradingEvents[idx] = &tradingEvent
+		tradingEvents, err := t.sequenceEventsConvertToTradingEvents(sequencerEvents)
+		if err != nil {
+			panic(errors.Wrap(err, "convert sequence event failed")) // TODO: error handle
 		}
 		if err := processFn(tradingEvents); err != nil {
 			return errors.Wrap(err, "process failed")
@@ -86,7 +80,7 @@ func (t *tradingSequencerUseCase) RecoverEvents(offsetSequenceID int, processFn 
 	return nil
 }
 
-func (t *tradingSequencerUseCase) SaveWithFilterEvents(tradingEvents []*domain.TradingEvent, commitFn func() error) ([]*domain.TradingEvent, error) {
+func (t *tradingSequencerUseCase) SequenceAndSaveWithFilter(tradingEvents []*domain.TradingEvent, commitFn func() error) ([]*domain.TradingEvent, error) {
 	sequenceEvents := make([]*domain.SequencerEvent, len(tradingEvents))
 	for idx, tradingEvent := range tradingEvents {
 		marshalData, err := json.Marshal(tradingEvent)
@@ -100,19 +94,13 @@ func (t *tradingSequencerUseCase) SaveWithFilterEvents(tradingEvents []*domain.T
 			CreatedAt:   tradingEvent.CreatedAt,
 		}
 	}
-	sequenceEvents, err := t.sequencerRepo.SaveWithFilterEvents(sequenceEvents, commitFn)
+	sequenceEvents, err := t.sequencerRepo.SequenceAndSave(sequenceEvents, commitFn)
 	if err != nil {
 		return nil, errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(tradingEvents)))
 	}
-	tradingEvents = make([]*domain.TradingEvent, len(sequenceEvents))
-	for idx, sequenceEvent := range sequenceEvents {
-		var tradingEvent domain.TradingEvent
-		if err := json.Unmarshal([]byte(sequenceEvent.Data), &tradingEvent); err != nil {
-			return nil, errors.Wrap(err, "unmarshal failed")
-		}
-		tradingEvent.ReferenceID = sequenceEvent.ReferenceID
-		tradingEvent.SequenceID = sequenceEvent.SequenceID
-		tradingEvents[idx] = &tradingEvent
+	tradingEvents, err = t.sequenceEventsConvertToTradingEvents(sequenceEvents)
+	if err != nil {
+		return nil, errors.Wrap(err, "convert sequence event failed")
 	}
 	return tradingEvents, nil
 }
@@ -122,21 +110,34 @@ func (t *tradingSequencerUseCase) Shutdown() {
 }
 
 func (t *tradingSequencerUseCase) ConsumeSequenceMessages(ctx context.Context) {
-	t.sequencerRepo.ConsumeSequenceMessages(func(sequencerEvents []*domain.SequencerEvent, commitFn func() error) {
-		tradingEvents := make([]*domain.TradingEvent, len(sequencerEvents))
-		for idx, sequencerEvent := range sequencerEvents {
-			var tradingEvent domain.TradingEvent
-			if err := json.Unmarshal([]byte(sequencerEvent.Data), &tradingEvent); err != nil {
-				panic(errors.Wrap(err, "unmarshal failed")) // TODO
-			}
-			tradingEvent.ReferenceID = sequencerEvent.ReferenceID
-			tradingEvent.SequenceID = sequencerEvent.SequenceID
-			tradingEvents[idx] = &tradingEvent
-		}
-		events, err := t.SaveWithFilterEvents(tradingEvents, commitFn)
+	t.sequencerRepo.ConsumeSequenceMessages(func(sequenceEvents []*domain.SequencerEvent, commitFn func() error) {
+		tradingEvents, err := t.sequenceEventsConvertToTradingEvents(sequenceEvents)
 		if err != nil {
+			panic(errors.Wrap(err, "convert sequence event failed")) // TODO: error handle
+		}
+
+		events, err := t.SequenceAndSaveWithFilter(tradingEvents, commitFn)
+		if errors.Is(err, domain.ErrDuplicate) {
+			sequenceEvents, err = t.sequencerRepo.FilterEvents(sequenceEvents)
+			if errors.Is(err, domain.ErrNoop) {
+				return
+			} else if err != nil {
+				panic(errors.Wrap(err, "filter events failed"))
+			}
+
+			tradingEvents, err := t.sequenceEventsConvertToTradingEvents(sequenceEvents)
+			if err != nil {
+				panic(errors.Wrap(err, "convert sequence event failed")) // TODO: error handle
+			}
+
+			_, err = t.SequenceAndSaveWithFilter(tradingEvents, commitFn)
+			if err != nil {
+				panic(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events)))) // TODO: error handle
+			}
+		} else if err != nil {
 			panic(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events)))) // TODO: error handle
 		}
+
 		if err := t.tradingRepo.ProduceTradingEvents(ctx, events); err != nil {
 			panic(errors.Wrap(err, "produce trading event failed")) // TODO: error handle
 		}
@@ -159,7 +160,7 @@ func (t *tradingSequencerUseCase) ProduceCancelOrderTradingEvent(ctx context.Con
 		CreatedAt: time.Now(),
 	}
 
-	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+	if err := t.produceSequenceMessages(ctx, tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "send trade sequence messages failed")
 	}
 
@@ -195,7 +196,7 @@ func (t *tradingSequencerUseCase) ProduceCreateOrderTradingEvent(ctx context.Con
 		CreatedAt: time.Now(),
 	}
 
-	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+	if err := t.produceSequenceMessages(ctx, tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "send trade sequence messages failed")
 	}
 
@@ -219,7 +220,7 @@ func (t *tradingSequencerUseCase) ProduceDepositOrderTradingEvent(ctx context.Co
 		CreatedAt: time.Now(),
 	}
 
-	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+	if err := t.produceSequenceMessages(ctx, tradingEvent); err != nil {
 		return nil, errors.Wrap(err, "send trade sequence messages failed")
 	}
 
@@ -232,4 +233,18 @@ func (t *tradingSequencerUseCase) Done() <-chan struct{} {
 
 func (t *tradingSequencerUseCase) Err() error {
 	panic("TODO unimplemented")
+}
+
+func (t *tradingSequencerUseCase) sequenceEventsConvertToTradingEvents(sequencerEvents []*domain.SequencerEvent) ([]*domain.TradingEvent, error) {
+	tradingEvents := make([]*domain.TradingEvent, len(sequencerEvents))
+	for idx, sequencerEvent := range sequencerEvents {
+		var tradingEvent domain.TradingEvent
+		if err := json.Unmarshal([]byte(sequencerEvent.Data), &tradingEvent); err != nil {
+			return nil, errors.Wrap(err, "unmarshal failed")
+		}
+		tradingEvent.ReferenceID = sequencerEvent.ReferenceID
+		tradingEvent.SequenceID = sequencerEvent.SequenceID
+		tradingEvents[idx] = &tradingEvent
+	}
+	return tradingEvents, nil
 }

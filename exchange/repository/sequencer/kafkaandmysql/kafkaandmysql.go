@@ -43,6 +43,27 @@ type sequencerRepo struct {
 	sequence *atomic.Uint64
 }
 
+// FilterEvents TODO: test
+func (s *sequencerRepo) FilterEvents(sequenceEvents []*domain.SequencerEvent) ([]*domain.SequencerEvent, error) {
+	referenceIDFilter, err := s.GetReferenceIDFilterMap(sequenceEvents)
+	if err != nil {
+		return nil, errors.Wrap(err, "get filter events map failed")
+	}
+	var filterSequenceEvents []*domain.SequencerEvent
+	for _, val := range sequenceEvents {
+		if referenceIDFilter[val.ReferenceID] {
+			continue
+		}
+		filterSequenceEvents = append(filterSequenceEvents, val)
+	}
+
+	if len(filterSequenceEvents) == 0 {
+		return nil, errors.Wrap(domain.ErrNoop, "no message need to save")
+	}
+
+	return filterSequenceEvents, nil
+}
+
 func CreateSequencerRepo(ctx context.Context, sequenceMQ mqKit.MQTopic, orm *ormKit.DB) (domain.SequencerRepo, error) {
 	var sequence atomic.Uint64
 	t := &sequencerRepo{
@@ -81,7 +102,7 @@ func (s *sequencerRepo) ProduceSequenceMessages(ctx context.Context, message *do
 	return nil
 }
 
-func (s *sequencerRepo) SaveWithFilterEvents(sequenceEvents []*domain.SequencerEvent, commitFn func() error) ([]*domain.SequencerEvent, error) {
+func (s *sequencerRepo) SequenceAndSave(sequenceEvents []*domain.SequencerEvent, commitFn func() error) ([]*domain.SequencerEvent, error) {
 	previousIDInt, err := utilKit.SafeUint64ToInt(s.GetSequenceID())
 	if err != nil {
 		return nil, errors.Wrap(err, "uint64 to int overflow")
@@ -97,23 +118,7 @@ func (s *sequencerRepo) SaveWithFilterEvents(sequenceEvents []*domain.SequencerE
 
 	err = s.SaveEvents(sequenceEvents)
 	if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
-		// TODO: test
-		// if duplicate, filter events then retry
-		filterEventsMap, err := s.GetFilterEventsMap(sequenceEvents)
-		if err != nil {
-			return nil, errors.Wrap(err, "get filter events map failed")
-		}
-		var filterSequenceEvents []*domain.SequencerEvent
-		for _, val := range sequenceEvents {
-			if filterEventsMap[val.ReferenceID] {
-				continue
-			}
-			filterSequenceEvents = append(filterSequenceEvents, val)
-		}
-
-		if len(filterSequenceEvents) != 0 {
-			return s.SaveWithFilterEvents(filterSequenceEvents, commitFn)
-		}
+		return nil, errors.Wrap(domain.ErrDuplicate, "save duplicate event")
 	} else if err != nil {
 		return nil, errors.Wrap(err, "save event failed")
 	}
@@ -229,7 +234,7 @@ func (s *sequencerRepo) GetSequenceID() uint64 {
 	return s.sequence.Load()
 }
 
-func (s *sequencerRepo) GetFilterEventsMap(sequencerEvents []*domain.SequencerEvent) (map[int]bool, error) {
+func (s *sequencerRepo) GetReferenceIDFilterMap(sequencerEvents []*domain.SequencerEvent) (map[int]bool, error) {
 	existsQuery := make([]string, len(sequencerEvents))
 	for idx, sequencerEvent := range sequencerEvents {
 		existsQuery[idx] = fmt.Sprintf("EXISTS(SELECT 1 FROM %s WHERE ReferenceID = %d) AS %d", s.tableName, sequencerEvent.ReferenceID, sequencerEvent.ReferenceID)
