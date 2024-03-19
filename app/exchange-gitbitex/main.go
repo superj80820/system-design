@@ -482,7 +482,7 @@ func main() {
 	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
 	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
 
-	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo)
+	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
 	matchingUseCase := matching.CreateMatchingUseCase(ctx, matchingRepo, matchingOrderBookRepo)
 	userAssetUseCase := asset.CreateUserAssetUseCase(assetRepo)
@@ -491,7 +491,7 @@ func main() {
 	orderUseCase := order.CreateOrderUseCase(userAssetUseCase, orderRepo)
 	clearingUseCase := clearing.CreateClearingUseCase(userAssetUseCase, orderUseCase)
 	syncTradingUseCase := trading.CreateSyncTradingUseCase(ctx, matchingUseCase, userAssetUseCase, orderUseCase, clearingUseCase)
-	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, matchingOrderBookRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, currencyUseCase, logger)
+	tradingUseCase := trading.CreateTradingUseCase(ctx, tradingRepo, matchingRepo, quotationRepo, candleRepo, orderRepo, assetRepo, tradingSequencerUseCase, orderUseCase, userAssetUseCase, syncTradingUseCase, matchingUseCase, logger)
 
 	tradingNotifyUseCase := trading.CreateTradingNotifyUseCase(ctx, matchingOrderBookNotifyRepo, candleNotifyRepo, assetNotifyRepo, quotationNotifyRepo, orderNotifyRepo, matchingNotifyRepo, currencyUseCase, matchingUseCase, 100, logger) // TODO: orderBookDepth use function? 100?
 
@@ -515,7 +515,7 @@ func main() {
 				}
 			}
 		}
-		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, userAssetUseCase, tradingUseCase, matchingUseCase); err != nil {
+		if err := background.AsyncTradingConsume(ctx, quotationUseCase, candleUseCase, orderUseCase, userAssetUseCase, tradingUseCase, matchingUseCase, tradingSequencerUseCase); err != nil {
 			logger.Fatal(fmt.Sprintf("async trading sequencer get error, error: %+v", err)) // TODO: correct?
 		}
 	}()
@@ -539,7 +539,7 @@ func main() {
 	})
 	api.Methods("DELETE").Path("/orders/{orderID}").Handler(
 		httptransport.NewServer(
-			userRateLimitMiddleware(authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingUseCase))),
+			userRateLimitMiddleware(authMiddleware(httpDelivery.MakeCancelOrderEndpoint(tradingSequencerUseCase))),
 			httpDelivery.DecodeCancelOrderRequest,
 			httpDelivery.EncodeCancelOrderResponse,
 			options...,
@@ -547,7 +547,7 @@ func main() {
 	)
 	api.Methods("POST").Path("/orders").Handler(
 		httptransport.NewServer(
-			userRateLimitMiddleware(authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingUseCase))),
+			userRateLimitMiddleware(authMiddleware(httpGitbitexDelivery.MakeCreateOrderEndpoint(tradingSequencerUseCase))),
 			httpGitbitexDelivery.DecodeCreateOrderRequest,
 			httpGitbitexDelivery.EncodeCreateOrderResponse,
 			options...,
@@ -595,7 +595,7 @@ func main() {
 	)
 	api.Methods("POST").Path("/users").Handler(
 		httptransport.NewServer(
-			httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingUseCase, currencyUseCase),
+			httpGitbitexDelivery.MakeAccountRegisterEndpoint(accountUseCase, tradingSequencerUseCase, currencyUseCase),
 			httpGitbitexDelivery.DecodeAccountRegisterRequest,
 			httpGitbitexDelivery.EncodeAccountRegisterResponse,
 			options...,
@@ -668,7 +668,7 @@ func main() {
 				autoPreviewTradingMinQuantity,
 				autoPreviewTradingMaxQuantity,
 				accountUseCase,
-				tradingUseCase,
+				tradingSequencerUseCase,
 				currencyUseCase,
 			); err != nil {
 				logger.Fatal(fmt.Sprintf("auto preview trading get error, error: %+v", err))

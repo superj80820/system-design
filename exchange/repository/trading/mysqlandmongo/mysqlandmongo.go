@@ -137,7 +137,7 @@ func (t *tradingRepo) ProduceTradingEvent(ctx context.Context, tradingEvent *dom
 	return nil
 }
 
-func (t *tradingRepo) ConsumeTradingEvent(ctx context.Context, key string, notify func(events []*domain.TradingEvent, commitFn func() error)) {
+func (t *tradingRepo) ConsumeTradingEvents(ctx context.Context, key string, notify func(events []*domain.TradingEvent, commitFn func() error)) {
 	t.tradingEventMQ.SubscribeBatchWithManualCommit(key, func(messages [][]byte, commitFn func() error) error {
 		tradingEvents := make([]*domain.TradingEvent, len(messages))
 		for idx, message := range messages {

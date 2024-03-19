@@ -4,18 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/pkg/errors"
+	"github.com/shopspring/decimal"
 	"github.com/superj80820/system-design/domain"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type tradingSequencerUseCase struct {
 	sequencerRepo domain.SequencerRepo
+	tradingRepo   domain.TradingRepo
 }
 
-func CreateTradingSequencerUseCase(sequencerRepo domain.SequencerRepo) domain.SequenceTradingUseCase {
+func CreateTradingSequencerUseCase(sequencerRepo domain.SequencerRepo, tradingRepo domain.TradingRepo) domain.SequenceTradingUseCase {
 	return &tradingSequencerUseCase{
 		sequencerRepo: sequencerRepo,
+		tradingRepo:   tradingRepo,
 	}
 }
 
@@ -116,7 +121,7 @@ func (t *tradingSequencerUseCase) Shutdown() {
 	t.sequencerRepo.Shutdown()
 }
 
-func (t *tradingSequencerUseCase) ConsumeSequenceMessages(notify func(events []*domain.TradingEvent, commitFn func() error)) {
+func (t *tradingSequencerUseCase) ConsumeSequenceMessages(ctx context.Context) {
 	t.sequencerRepo.ConsumeSequenceMessages(func(sequencerEvents []*domain.SequencerEvent, commitFn func() error) {
 		tradingEvents := make([]*domain.TradingEvent, len(sequencerEvents))
 		for idx, sequencerEvent := range sequencerEvents {
@@ -128,6 +133,103 @@ func (t *tradingSequencerUseCase) ConsumeSequenceMessages(notify func(events []*
 			tradingEvent.SequenceID = sequencerEvent.SequenceID
 			tradingEvents[idx] = &tradingEvent
 		}
-		notify(tradingEvents, commitFn)
+		events, err := t.SaveWithFilterEvents(tradingEvents, commitFn)
+		if err != nil {
+			panic(errors.Wrap(err, fmt.Sprintf("save with filter events failed, events length: %d", len(events)))) // TODO: error handle
+		}
+		if err := t.tradingRepo.ProduceTradingEvents(ctx, events); err != nil {
+			panic(errors.Wrap(err, "produce trading event failed")) // TODO: error handle
+		}
 	})
+}
+
+func (t *tradingSequencerUseCase) ProduceCancelOrderTradingEvent(ctx context.Context, userID, orderID int) (*domain.TradingEvent, error) {
+	referenceID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+
+	tradingEvent := &domain.TradingEvent{
+		ReferenceID: referenceID,
+		EventType:   domain.TradingEventCancelOrderType,
+		OrderCancelEvent: &domain.OrderCancelEvent{
+			UserID:  userID,
+			OrderId: orderID,
+		},
+		CreatedAt: time.Now(),
+	}
+
+	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+		return nil, errors.Wrap(err, "send trade sequence messages failed")
+	}
+
+	return tradingEvent, nil
+}
+
+func (t *tradingSequencerUseCase) ProduceCreateOrderTradingEvent(ctx context.Context, userID int, direction domain.DirectionEnum, price, quantity decimal.Decimal) (*domain.TradingEvent, error) {
+	referenceID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+	orderID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+	if price.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.Wrap(err, "amount is less then or equal zero failed")
+	}
+	if quantity.LessThanOrEqual(decimal.Zero) {
+		return nil, errors.Wrap(err, "quantity is less then or equal zero failed")
+	}
+
+	tradingEvent := &domain.TradingEvent{
+		ReferenceID: referenceID,
+		EventType:   domain.TradingEventCreateOrderType,
+		OrderRequestEvent: &domain.OrderRequestEvent{
+			UserID:    userID,
+			OrderID:   orderID,
+			Direction: direction,
+			Price:     price,
+			Quantity:  quantity,
+		},
+		CreatedAt: time.Now(),
+	}
+
+	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+		return nil, errors.Wrap(err, "send trade sequence messages failed")
+	}
+
+	return tradingEvent, nil
+}
+
+func (t *tradingSequencerUseCase) ProduceDepositOrderTradingEvent(ctx context.Context, userID, assetID int, amount decimal.Decimal) (*domain.TradingEvent, error) {
+	referenceID, err := utilKit.SafeInt64ToInt(utilKit.GetSnowflakeIDInt64())
+	if err != nil {
+		return nil, errors.Wrap(err, "safe int64 to int failed")
+	}
+
+	tradingEvent := &domain.TradingEvent{
+		ReferenceID: referenceID,
+		EventType:   domain.TradingEventDepositType,
+		DepositEvent: &domain.DepositEvent{
+			ToUserID: userID,
+			AssetID:  assetID,
+			Amount:   amount,
+		},
+		CreatedAt: time.Now(),
+	}
+
+	if err := t.ProduceSequenceMessages(ctx, tradingEvent); err != nil {
+		return nil, errors.Wrap(err, "send trade sequence messages failed")
+	}
+
+	return tradingEvent, nil
+}
+
+func (t *tradingSequencerUseCase) Done() <-chan struct{} {
+	panic("TODO unimplemented")
+}
+
+func (t *tradingSequencerUseCase) Err() error {
+	panic("TODO unimplemented")
 }

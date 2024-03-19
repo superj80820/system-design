@@ -131,7 +131,7 @@ var (
 //	    "executedValue": null,
 //	    "status": null
 //	}
-func MakeCreateOrderEndpoint(svc domain.TradingUseCase) endpoint.Endpoint {
+func MakeCreateOrderEndpoint(svc domain.SequenceTradingUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		userID := httpKit.GetUserID(ctx)
 		if userID == 0 {

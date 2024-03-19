@@ -33,7 +33,7 @@ var (
 	EncodeAccountRegisterResponse = httpTransportKit.EncodeJsonResponse
 )
 
-func MakeAccountRegisterEndpoint(svc domain.AccountUseCase, tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
+func MakeAccountRegisterEndpoint(svc domain.AccountUseCase, sequenceTradingUseCase domain.SequenceTradingUseCase, currencyUseCase domain.CurrencyUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(accountRegisterRequest)
 		account, err := svc.Register(req.Email, req.Password)
@@ -44,10 +44,10 @@ func MakeAccountRegisterEndpoint(svc domain.AccountUseCase, tradingUseCase domai
 		if err != nil {
 			return nil, errors.Wrap(err, "safe int64 to int failed")
 		}
-		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+		if _, err := sequenceTradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
-		if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+		if _, err := sequenceTradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 			return nil, errors.Wrap(err, "produce trading event failed")
 		}
 		return &accountRegisterResponse{

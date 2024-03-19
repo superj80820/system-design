@@ -54,9 +54,10 @@ func AsyncTradingConsume(
 	userAssetUseCase domain.UserAssetUseCase,
 	tradingUseCase domain.TradingUseCase,
 	matchingUseCase domain.MatchingUseCase,
+	sequenceTradingUseCase domain.SequenceTradingUseCase,
 ) error {
-	tradingUseCase.ConsumeGlobalSequencer(ctx)
-	tradingUseCase.ConsumeTradingEvent(ctx, "global-consume-trading-event")
+	sequenceTradingUseCase.ConsumeSequenceMessages(ctx)
+	tradingUseCase.ConsumeTradingEvents(ctx, "global-consume-trading-event")
 	tradingUseCase.ConsumeTradingResult(ctx, "global-consume-trading-result")
 	userAssetUseCase.ConsumeTransferResultToSave(ctx, "global-save-asset") // TODO: error handle
 	orderUseCase.ConsumeOrderResultToSave(ctx, "global-save-order")        // TODO: error handle
@@ -78,11 +79,15 @@ func AsyncTradingConsume(
 		if err := quotationUseCase.Err(); err != nil {
 			return errors.Wrap(err, "quotation use case get error")
 		}
+	case <-sequenceTradingUseCase.Done():
+		if err := quotationUseCase.Err(); err != nil {
+			return errors.Wrap(err, "sequence trading use case get error")
+		}
 	}
 	return nil
 }
 
-func AsyncAutoPreviewTrading(ctx context.Context, email, password string, duration time.Duration, minOrderPrice, maxOrderPrice, minQuantity, maxQuantity float64, accountUseCase domain.AccountUseCase, tradingUseCase domain.TradingUseCase, currencyUseCase domain.CurrencyUseCase) error {
+func AsyncAutoPreviewTrading(ctx context.Context, email, password string, duration time.Duration, minOrderPrice, maxOrderPrice, minQuantity, maxQuantity float64, accountUseCase domain.AccountUseCase, sequenceTradingUseCase domain.SequenceTradingUseCase, currencyUseCase domain.CurrencyUseCase) error {
 	account, err := accountUseCase.Register(email, password)
 	if err != nil {
 		return errors.Wrap(err, "register failed")
@@ -91,10 +96,10 @@ func AsyncAutoPreviewTrading(ctx context.Context, email, password string, durati
 	if err != nil {
 		return errors.Wrap(err, "safe int64 to int failed")
 	}
-	if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+	if _, err := sequenceTradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetBaseCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 		return errors.Wrap(err, "produce trading event failed")
 	}
-	if _, err := tradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
+	if _, err := sequenceTradingUseCase.ProduceDepositOrderTradingEvent(ctx, userID, currencyUseCase.GetQuoteCurrencyID(), decimal.NewFromInt(10000000000)); err != nil {
 		return errors.Wrap(err, "produce trading event failed")
 	}
 
@@ -111,12 +116,12 @@ func AsyncAutoPreviewTrading(ctx context.Context, email, password string, durati
 				randomPrice := decimal.NewFromFloat((rand.Float64() * minOrderPrice) + maxOrderPrice)
 				randomQuantity := decimal.NewFromFloat((rand.Float64() * minQuantity) + maxQuantity)
 
-				if _, err = tradingUseCase.ProduceCreateOrderTradingEvent(ctx, userID, randomDirection[rand.Intn(2)], randomPrice, randomQuantity); err != nil {
+				if _, err = sequenceTradingUseCase.ProduceCreateOrderTradingEvent(ctx, userID, randomDirection[rand.Intn(2)], randomPrice, randomQuantity); err != nil {
 					errCh <- errors.Wrap(err, "produce create order trading event failed")
 					return
 				}
-			case <-tradingUseCase.Done():
-				fmt.Printf("york todo err: %+v \n", tradingUseCase.Err())
+			case <-sequenceTradingUseCase.Done():
+				fmt.Printf("york todo err: %+v \n", sequenceTradingUseCase.Err())
 				close(doneCh)
 			}
 

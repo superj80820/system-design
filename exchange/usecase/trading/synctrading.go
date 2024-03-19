@@ -9,9 +9,9 @@ import (
 )
 
 type syncTradingUseCase struct {
-	matchingUseCase  domain.MatchingUseCase
 	userAssetUseCase domain.UserAssetUseCase
 	orderUseCase     domain.OrderUseCase
+	matchingUseCase  domain.MatchingUseCase
 	clearingUseCase  domain.ClearingUseCase
 }
 
