@@ -770,7 +770,7 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 
 ![](./clearing.jpg)
 
-* 撮合模組撮合後，雙方資產還沒有實際交換，訂單也還沒更新，必須再透過清算模組進行處理，故注入資產模組與訂單模組
+撮合模組撮合後，雙方資產還沒有實際交換，訂單也還沒更新，必須再透過清算模組進行處理，故注入資產模組與訂單模組
 
 ```go
 type clearingUseCase struct {
@@ -781,7 +781,7 @@ type clearingUseCase struct {
 }
 ```
 
-* 清算模組需實作的method不多，只需實作`ClearMatchResult()`，將`MatchResult`帶入，資產的轉換結果生成`TransferResult`提供給下游系統使用
+清算模組需實作的method不多，只需實作`ClearMatchResult()`，將`MatchResult`帶入，資產的轉換結果生成`TransferResult`提供給下游系統使用
 
 ```go
 type ClearingUseCase interface {
