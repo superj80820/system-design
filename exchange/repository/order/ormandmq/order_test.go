@@ -2,6 +2,7 @@ package ormandmq
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -10,20 +11,20 @@ import (
 	"github.com/superj80820/system-design/domain"
 	memoryMQKit "github.com/superj80820/system-design/kit/mq/memory"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	testingPostgresKit "github.com/superj80820/system-design/kit/testing/postgres/container"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
 )
 
 func TestOrderRepo(t *testing.T) {
 	ctx := context.Background()
 
-	postgres, err := testingPostgresKit.CreatePostgres(ctx, "postgres.schema.sql")
+	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(filepath.Join(".", "schema.sql")))
 	assert.Nil(t, err)
-	postgresDB, err := ormKit.CreateDB(ormKit.UsePostgres(postgres.GetURI()))
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
 	assert.Nil(t, err)
 	orderMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100, 100*time.Millisecond)
 
-	orderRepo := CreateOrderRepo(postgresDB, orderMQTopic)
-	assert.Nil(t, orderRepo.SaveHistoryOrdersWithIgnore([]*domain.OrderEntity{
+	orderRepo := CreateOrderRepo(mysqlDB, orderMQTopic)
+	assert.Nil(t, orderRepo.SaveHistoryOrdersWithIgnore(1, []*domain.OrderEntity{
 		{
 			ID:               1,
 			SequenceID:       1,

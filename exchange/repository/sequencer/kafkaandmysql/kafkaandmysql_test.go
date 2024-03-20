@@ -2,7 +2,6 @@ package kafkaandmysql
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,9 +12,8 @@ import (
 	mqKit "github.com/superj80820/system-design/kit/mq"
 	kafkaMQKit "github.com/superj80820/system-design/kit/mq/kafka"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/kafka"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
+	kafkaContainer "github.com/superj80820/system-design/kit/testing/kafka/container"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
 )
 
 type testSetup struct {
@@ -28,19 +26,11 @@ type testSetup struct {
 func testSetupFn(t *testing.T) *testSetup {
 	ctx := context.Background()
 
-	kafkaContainer, err := kafka.RunContainer(
-		ctx,
-		testcontainers.WithImage("confluentinc/confluent-local:7.5.0"),
-		kafka.WithClusterID("test-cluster"),
-	)
-	assert.Nil(t, err)
-	kafkaHost, err := kafkaContainer.Host(ctx)
-	assert.Nil(t, err)
-	kafkaPort, err := kafkaContainer.MappedPort(ctx, "9093") // TODO: is correct?
+	kafkaContainer, err := kafkaContainer.CreateKafka(ctx)
 	assert.Nil(t, err)
 	sequenceMessageTopic, err := kafkaMQKit.CreateMQTopic(
-		context.TODO(),
-		fmt.Sprintf("%s:%s", kafkaHost, kafkaPort.Port()),
+		ctx,
+		kafkaContainer.GetURI(),
 		"SEQUENCE",
 		kafkaMQKit.ConsumeByGroupID("test", true),
 		1000,
@@ -49,31 +39,9 @@ func testSetupFn(t *testing.T) *testSetup {
 	)
 	assert.Nil(t, err)
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(filepath.Join(".", "schema.sql")),
-	)
+	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(filepath.Join(".", "schema.sql")))
 	assert.Nil(t, err)
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
-	assert.Nil(t, err)
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	assert.Nil(t, err)
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
 	assert.Nil(t, err)
 
 	sequencerRepo, err := CreateSequencerRepo(ctx, sequenceMessageTopic, mysqlDB)
@@ -120,7 +88,69 @@ func TestTradingSequencerRepo(t *testing.T) {
 						SequenceID:  3,
 					},
 				}))
-				expectedResults := []int64{1, 2, 3}
+				sequencerEvents, err := testSetup.sequencerRepo.FilterEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
+					{
+						ReferenceID: 4,
+						SequenceID:  4,
+					},
+				})
+				assert.Nil(t, err)
+				assert.Equal(t, []*domain.SequencerEvent{{
+					ReferenceID: 4,
+					SequenceID:  4,
+				}}, sequencerEvents)
+
+				sequencerEvents, err = testSetup.sequencerRepo.FilterEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
+				})
+				assert.ErrorIs(t, err, domain.ErrNoop)
+				assert.Nil(t, sequencerEvents)
+			},
+		},
+		{
+			scenario: "test get history events",
+			fn: func(t *testing.T) {
+				testSetup := testSetupFn(t)
+				defer testSetup.teardown()
+
+				assert.Nil(t, testSetup.sequencerRepo.SaveEvents([]*domain.SequencerEvent{
+					{
+						ReferenceID: 1,
+						SequenceID:  1,
+					},
+					{
+						ReferenceID: 2,
+						SequenceID:  2,
+					},
+					{
+						ReferenceID: 3,
+						SequenceID:  3,
+					},
+				}))
+				expectedResults := []int{1, 2, 3}
 				var count int
 				for page, isEnd := 1, false; !isEnd; page++ {
 					var (
@@ -223,7 +253,7 @@ func TestTradingSequencerRepo(t *testing.T) {
 				defer timer.Stop()
 				select {
 				case sequenceID := <-sequenceIDCh:
-					assert.Equal(t, int64(100), sequenceID)
+					assert.Equal(t, 100, sequenceID)
 				case <-timer.C:
 					assert.Fail(t, "get message timeout")
 				}

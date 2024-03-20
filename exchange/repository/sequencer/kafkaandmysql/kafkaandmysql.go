@@ -3,9 +3,7 @@ package kafkaandmysql
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -235,13 +233,20 @@ func (s *sequencerRepo) GetSequenceID() uint64 {
 }
 
 func (s *sequencerRepo) GetReferenceIDFilterMap(sequencerEvents []*domain.SequencerEvent) (map[int]bool, error) {
-	existsQuery := make([]string, len(sequencerEvents))
+	referenceIDs := make([]int, len(sequencerEvents))
 	for idx, sequencerEvent := range sequencerEvents {
-		existsQuery[idx] = fmt.Sprintf("EXISTS(SELECT 1 FROM %s WHERE ReferenceID = %d) AS %d", s.tableName, sequencerEvent.ReferenceID, sequencerEvent.ReferenceID)
+		referenceIDs[idx] = sequencerEvent.ReferenceID
 	}
-	res := make(map[int]bool)
-	if err := s.orm.Table(s.tableName).Raw("SELECT " + strings.Join(existsQuery, ",")).Scan(&res).Error; err != nil {
+
+	var results []*domain.SequencerEvent
+	if err := s.orm.Table(s.tableName).Where("reference_id IN ?", referenceIDs).Find(&results).Error; err != nil {
 		return nil, errors.Wrap(err, "query failed")
 	}
-	return res, nil
+
+	resultMap := make(map[int]bool, len(results))
+	for _, result := range results {
+		resultMap[result.ReferenceID] = true
+	}
+
+	return resultMap, nil
 }
