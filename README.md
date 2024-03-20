@@ -19,7 +19,7 @@
 ├── line: 同上
 ├── urshortener: 同上
 │
-├── kit: 對mysql、mongodb、kafka、redis等底層進行封裝，抽象出介面後始得替換更容易
+├── kit: 對mysql、mongodb、kafka、redis等底層進行封裝，抽象出介面後使得替換更容易
 │
 └── instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
 ```
