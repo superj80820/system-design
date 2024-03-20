@@ -4,20 +4,18 @@
 
 依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) clean architecture，每個domain依repository、usecase、delivery三層設計
 
-
-
 ```
 .
 ├── app: 實際啟動的server
 │
 ├── domain: domain interface與entity，不具邏輯，所有層都靠此domain interface傳輸entity進行溝通
 │
-├── auth: 依照repository、usecase、delivery實作的domain
-├── chat: 同上
-├── config: 同上
-├── exchange: 同上
-├── line: 同上
-├── urshortener: 同上
+├── auth: 驗證服務    
+├── chat: 聊天服務
+├── config: 配置服務
+├── exchange: 交易服務
+├── line: line API服務
+├── urshortener: 短網址服務
 │
 ├── kit: 對mysql、mongodb、kafka、redis等底層進行封裝，抽象出介面後使得替換更容易
 │
@@ -36,7 +34,7 @@
 
 ## exchange-gitbitex
 
-![](https://i.imgur.com/KKnKXUi.png)
+![](./doc/exchange-arch.png)
 
 ```
 .
@@ -52,7 +50,6 @@
 ├── exchange
 │   ├── delivery
 │   ├── repository
-│   │   ├── sequencer
 │   └── usecase
 │       ├── asset
 │       ├── candle
@@ -61,6 +58,7 @@
 │       ├── matching
 │       ├── order
 │       ├── quotation
+│       ├── sequencer
 │       └── trading
 └── kit
 ```
@@ -110,7 +108,7 @@
 
 ### Sequence 定序模組
 
-![](./sequencer.jpg)
+![](./doc/sequencer.jpg)
 
 ```go
 type SequenceTradingUseCase interface {
@@ -237,7 +235,7 @@ func (s *sequencerRepo) FilterEvents(sequenceEvents []*domain.SequencerEvent) ([
 
 ### Asset 資產模組
 
-![](./asset.jpg)
+![](./doc/asset.jpg)
 
 用戶資產除了基本的UserID、AssetID、Available(可用資產)，還需Frozen(凍結資產)欄位，以實現用戶下單時把下單資金凍結。
 
@@ -381,7 +379,7 @@ func (u *userAsset) TransferAvailableToAvailable(ctx context.Context, fromUserID
 
 ### Order 訂單模組
 
-![](./order.jpg)
+![](./doc/order.jpg)
 
 活動訂單需由訂單模組管理，可以用hash table以`orderID: order`儲存所有活動訂單，在需要以用戶ID取得相關活動訂單時，可用兩層hash table以`userID: orderID: order`取得訂單。
 
@@ -533,13 +531,13 @@ func (o *orderUseCase) GetUserOrders(userId int) (map[int]*domain.OrderEntity, e
 
 ### Matching 撮合模組
 
-![](./matching.jpg)
+![](./doc/matching.jpg)
 
 撮合模組是整個交易系統最核心的部分。
 
 主要核心是維護一個買單book一個賣單book
 
-![](./order-book.jpg)
+![](./doc/order-book.jpg)
 
 訂單簿必須是「價格優先、序列號次要」，直觀上會把這兩個book當成兩個list來看
   * 賣單簿: 4.45, 4.52, 4.63, 4.64, 4.65
@@ -768,7 +766,7 @@ func (m *matchingUseCase) NewOrder(ctx context.Context, takerOrder *domain.Order
 
 ### Clearing 清算模組
 
-![](./clearing.jpg)
+![](./doc/clearing.jpg)
 
 撮合模組撮合後，雙方資產還沒有實際交換，訂單也還沒更新，必須再透過清算模組進行處理，故注入資產模組與訂單模組
 
