@@ -90,13 +90,19 @@
 
 以Create Order Event(創建訂單)來舉例:
 
-1. 大量併發的訂單請求進入服務
-2. 定序模組會將訂單以有序的方式儲存
-3. 資產模組凍結訂單所需資產
-4. 訂單模組產生訂單
-5. 撮合模組獲取訂單進行撮合，更新order book後產生match result
-6. 清算模組依照match result來transfer、unfreeze資產
-7. 各模組產生的result組成trading result，produce給下游服務，下游服務透過這些資料cache與persistent data來達到eventual consistency
+1. [Sequence 定序模組](https://github.com/superj80820/system-design?tab=readme-ov-file#sequence-%E5%AE%9A%E5%BA%8F%E6%A8%A1%E7%B5%84)
+   1. 大量併發的訂單請求進入服務
+   2. 定序模組會將訂單以有序的方式儲存
+2. [Asset 資產模組](https://github.com/superj80820/system-design?tab=readme-ov-file#asset-%E8%B3%87%E7%94%A2%E6%A8%A1%E7%B5%84)
+   1. 資產模組凍結訂單所需資產
+3. [Order 訂單模組](https://github.com/superj80820/system-design?tab=readme-ov-file#order-%E8%A8%82%E5%96%AE%E6%A8%A1%E7%B5%84)
+   1. 訂單模組產生訂單
+4. [Matching 撮合模組](https://github.com/superj80820/system-design?tab=readme-ov-file#matching-%E6%92%AE%E5%90%88%E6%A8%A1%E7%B5%84)
+   1. 撮合模組獲取訂單進行撮合，更新order book後產生match result
+5. [Clearing 清算模組](https://github.com/superj80820/system-design?tab=readme-ov-file#clearing-%E6%B8%85%E7%AE%97%E6%A8%A1%E7%B5%84)
+   1. 清算模組依照match result來transfer、unfreeze資產
+6. [整合交易系統](https://github.com/superj80820/system-design?tab=readme-ov-file#%E6%95%B4%E5%90%88%E4%BA%A4%E6%98%93%E7%B3%BB%E7%B5%B1)
+   1. 各模組產生的result組成trading result，produce給下游服務，下游服務透過這些資料cache與persistent data來達到eventual consistency
 
 由於需要快速計算撮合內容，計算都會直接在memory完成，過程中不會persistent data，但如果撮合系統崩潰，memory資料都會遺失，所以才需定序模組將訂單event都儲存好，再進入撮合系統，如此一來，如果系統崩潰也可以靠已儲存的event來recover撮合系統。
 
@@ -113,7 +119,7 @@ type SequenceTradingUseCase interface {
 
 	SequenceAndSaveWithFilter(events []*TradingEvent, commitFn func() error) ([]*TradingEvent, error)
 
-  // another code...
+	// another code...
 }
 ```
 
@@ -387,7 +393,7 @@ type orderUseCase struct {
 	activeOrders  map[int]*domain.OrderEntity
 	userOrdersMap map[int]map[int]*domain.OrderEntity
 
-  // another code...
+	// another code...
 }
 ```
 
@@ -426,7 +432,7 @@ type OrderUseCase interface {
 	RemoveOrder(ctx context.Context, orderID int) error
 	GetUserOrders(userID int) (map[int]*OrderEntity, error)
 
-  // another code...
+	// another code...
 }
 ```
 
@@ -963,7 +969,7 @@ type TradingUseCase interface {
 
 ```go
 func (t *tradingUseCase) ConsumeTradingEvents(ctx context.Context, key string) {
-  // another code...
+	// another code...
 
 	t.tradingRepo.ConsumeTradingEvents(ctx, key, func(events []*domain.TradingEvent, commitFn func() error) {
 		if err := t.ProcessTradingEvents(ctx, events); err != nil {
@@ -1077,7 +1083,7 @@ func (t *tradingUseCase) ConsumeTradingResult(ctx context.Context, key string) {
 			return nil
 		})
 
-    // another code...
+  	// another code...
 
 		if err := eg.Wait(); err != nil {
 			panic(errors.Wrap(err, "produce failed"))
@@ -1101,7 +1107,7 @@ type syncTradingUseCase struct {
 type SyncTradingUseCase interface {
 	CreateOrder(ctx context.Context, tradingEvent *TradingEvent) (*MatchResult, *TransferResult, error)
 
-  // another code...
+	// another code...
 }
 ```
 
