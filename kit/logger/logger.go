@@ -2,12 +2,14 @@ package logger
 
 import (
 	"context"
+	"io"
 	"os"
 
 	"github.com/pkg/errors"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 type Logger interface {
@@ -28,6 +30,11 @@ type LoggerWrapper struct {
 	Level Level
 
 	noStdout bool
+
+	isUsedRotateLog bool
+	maxSize         int
+	maxBackups      int
+	maxAge          int
 }
 
 type (
@@ -48,6 +55,15 @@ func NoStdout(l *LoggerWrapper) {
 	l.noStdout = true
 }
 
+func WithRotateLog(maxSize, maxBackups, maxAge int) func(l *LoggerWrapper) {
+	return func(l *LoggerWrapper) {
+		l.isUsedRotateLog = true
+		l.maxSize = maxSize
+		l.maxBackups = maxBackups
+		l.maxAge = maxAge
+	}
+}
+
 func NewLogger(path string, level Level, options ...Option) (Logger, error) {
 	logger := LoggerWrapper{Level: level}
 
@@ -55,10 +71,24 @@ func NewLogger(path string, level Level, options ...Option) (Logger, error) {
 		option(&logger)
 	}
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, errors.Wrap(err, "open file failed")
+	var (
+		file io.Writer
+		err  error
+	)
+	if logger.isUsedRotateLog {
+		file = &lumberjack.Logger{
+			Filename:   path,
+			MaxSize:    logger.maxSize,
+			MaxBackups: logger.maxBackups,
+			MaxAge:     logger.maxAge,
+		}
+	} else {
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return nil, errors.Wrap(err, "open file failed")
+		}
 	}
+
 	loggerConfig := zap.NewProductionEncoderConfig()
 
 	consoleConfig := zap.NewDevelopmentEncoderConfig()
