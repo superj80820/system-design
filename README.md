@@ -82,7 +82,7 @@
 
 ### 運行
 
-- require:
+- require:=
 
   - golang v1.20
   - docker
