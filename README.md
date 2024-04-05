@@ -34,6 +34,8 @@
 
 ## exchange
 
+![](./doc/exchange-arch.png)
+
 ```
 .
 ├── app
