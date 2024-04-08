@@ -34,15 +34,20 @@
 將後端[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與開源前端[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
 * 預覽網頁(❗僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
-* 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
-* 以 event sourcing 的方式實現，儲存 event 後，撮合引擎為讀取 event 的有限狀態機，可熱備援用多台 server 同時聽取 event，來達到 high availability
-* 撮合引擎以記憶體計算，可達到 100,000PRS
-* 壓測(k6):
-  ![](https://i.imgur.com/V7KFvvC.png)
-  + exchange 機器: EC2 c5.18xlarge
-  + k6 機器: EC2 m5.8xlarge
-  + RPS (max): 102, 988.52
-  + 情境: 單機啟動 server、mysql、kafka、redis、mongodb，並進行買賣單搓合，如果將 mysql 或 kafka 等服務獨立出來，理論上可用更便宜的機器
+* 可達到 100,000PRS。撮合引擎以記憶體計算
+* 可回放事件。以 event sourcing 的方式實現，撮合引擎為讀取 event 的有限狀態機，可熱備援多台 server 聽取 event，來達到 high availability
+* 可分散式。不同的domain可部署至不同機器
+
+## 壓測:
+
+![](https://raw.githubusercontent.com/superj80820/system-design/master/doc/exchange-stress-test.png)
+
+單機啟動 server、mysql、kafka、redis、mongodb，並進行買賣單搓合，並以k6壓測:
+* exchange 機器: EC2 c5.18xlarge
+* k6 機器: EC2 m5.8xlarge
+* RPS (max): 102,988.52
+
+如果將 mysql 或 kafka 等服務獨立出來，理論上可用更便宜的機器
 
 ### 教學
 
