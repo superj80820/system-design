@@ -2,7 +2,7 @@
 
 ![](https://raw.githubusercontent.com/bxcodec/go-clean-arch/master/clean-arch.png)
 
-依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) clean architecture，每個 domain 依 repository、usecase、delivery 三層設計
+依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) Clean Architecture，每個 domain 依 repository、usecase、delivery 三層設計
 
 ```
 .
@@ -33,9 +33,7 @@
 * monorepo，所有 applications 的底層使用`kit`，更新方便，如果套件需要版本控制也可用`git tag`處理
 * 以 testcontainers 測試，更貼近真實情境進行測試
 
-## 教學
-
-撰寫於[部落格](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#04041b7b152746549eda5de6e1180a5d)
+Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#04041b7b152746549eda5de6e1180a5d)
 
 ## exchange
 
