@@ -23,16 +23,20 @@
 └── instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
 ```
 
+## 教學
+
+撰寫於[部落格](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#04041b7b152746549eda5de6e1180a5d)
+
 ## exchange
 
 ![](./doc/exchange-arch.png)
 
-撮合系統。將[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
+將後端[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與開源前端[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
 
-* 預覽網頁(❗ 僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
+* 預覽網頁(❗僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
 * 單一交易對，要實現多個交易對可以架設多個`app/exchange-gitbitex`
 * 以 event sourcing 的方式實現，儲存 event 後，撮合引擎為讀取 event 的有限狀態機，可熱備援用多台 server 同時聽取 event，來達到 high availability
-* 撮合引擎以記憶體計算，可達到 100, 000PRS
+* 撮合引擎以記憶體計算，可達到 100,000PRS
 * 壓測(k6):
   ![](https://i.imgur.com/V7KFvvC.png)
   + exchange 機器: EC2 c5.18xlarge
@@ -42,25 +46,16 @@
 
 ### 教學
 
-撰寫於[部落格](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88)
+撰寫於[部落格](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#11d29f38617742a197259aa928ce8a0f)
 
 ### 運行
 
 * require:
-  + golang v1.20
-  + docker
+  * golang v1.20
+  * docker
 
 * development:
-
 ```
 $ cd app/exchange-gitbitex
 $ make dev
 ```
-
-## urlshortener
-
-短網址服務
-
-## chat
-
-聊天服務
