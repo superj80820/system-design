@@ -43,7 +43,7 @@ Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.m
 
 * 預覽網頁(❗僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
 * 可達到 100,000PRS。撮合引擎以記憶體計算
-* 可回放事件。以 event sourcing 的方式實現，撮合引擎為讀取 event 的有限狀態機，可熱備援多台 server 聽取 event，來達到 high availability
+* 可回放事件。以 event sourcing 的方式實現，撮合引擎為讀取 event 的有限狀態機，可 warm backup 多台 server 聽取 event，來達到 high availability
 * 可分散式。不同的domain可部署至不同機器
 
 ## 壓測:
