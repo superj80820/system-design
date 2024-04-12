@@ -58,7 +58,7 @@ func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 		return nil, errors.Wrap(err, "get db user failed")
 	}
 
-	if account.Password != utilKit.GetSHA256(password) {
+	if err := utilKit.CompareBcrypt([]byte(account.Password), []byte(password)); err != nil {
 		return nil, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid)
 	}
 

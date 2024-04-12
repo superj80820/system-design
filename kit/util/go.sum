@@ -16,3 +16,5 @@ github.com/redis/go-redis/v9 v9.4.0 h1:Yzoz33UZw9I/mFhx4MNrB6Fk+XHO1VukNcCa1+lwy
 github.com/redis/go-redis/v9 v9.4.0/go.mod h1:hdY0cQFCN4fnSYT6TkisLufl/4W5UIXyv0b/CLO2V2M=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131081435-3a8096cad00b h1:7oSCDNVHVX4KfFPCvyJTYfrV6UoAlHaiZOYgruJokgk=
 github.com/superj80820/system-design/kit/redis v0.0.0-20240131081435-3a8096cad00b/go.mod h1:mE/6H//akFwxeyXVJ7PYWaX8dgDB5woHk1Ovd82sYfQ=
+golang.org/x/crypto v0.22.0 h1:g1v0xeRhjcugydODzvb3mEM9SQ0HGp9s/nh3COQ/C30=
+golang.org/x/crypto v0.22.0/go.mod h1:vr6Su+7cTlO45qkww3VDJlzDn0ctJvRgYbC2NvXHt+M=

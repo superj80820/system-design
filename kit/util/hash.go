@@ -6,6 +6,9 @@ import (
 	"hash"
 	"hash/fnv"
 	"sync"
+
+	"github.com/pkg/errors"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -18,6 +21,29 @@ var (
 
 func GetSHA256(str string) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(str)))
+}
+
+func GetBcryptWithCost(password string, cost int) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), cost)
+	if err != nil {
+		return "", errors.Wrap(err, "generate from password failed")
+	}
+	return string(hash), nil
+}
+
+func GetBcrypt(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", errors.Wrap(err, "generate from password failed")
+	}
+	return string(hash), nil
+}
+
+func CompareBcrypt(hashPassword, password []byte) error {
+	if err := bcrypt.CompareHashAndPassword(hashPassword, password); err != nil {
+		return errors.Wrap(err, "compare hash and password failed")
+	}
+	return nil
 }
 
 func GetConsistentHash(key string, partitionsLen int) int {

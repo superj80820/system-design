@@ -31,11 +31,16 @@ func (a *accountRepo) Create(email string, password string) (*domain.Account, er
 		return nil, errors.Wrap(err, "generate unique id failed")
 	}
 
+	hash, err := utilKit.GetBcrypt(password)
+	if err != nil {
+		return nil, errors.Wrap(err, "get bcrypt failed")
+	}
+
 	account := accountEntity{
 		Account: domain.Account{
 			ID:       uniqueIDGenerate.Generate().GetInt64(),
 			Email:    email,
-			Password: utilKit.GetSHA256(password),
+			Password: hash,
 		},
 	}
 
