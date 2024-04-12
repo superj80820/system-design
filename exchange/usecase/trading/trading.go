@@ -212,8 +212,6 @@ func (t *tradingUseCase) processTradingEvent(ctx context.Context, te *domain.Tra
 		return errors.New("unknown event type")
 	}
 
-	fmt.Println("york sequence:", tradingResult.SequenceID)
-
 	if err := t.tradingRepo.ProduceTradingResult(ctx, &tradingResult); err != nil {
 		panic(errors.Wrap(err, "produce trading result failed"))
 	}
