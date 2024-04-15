@@ -11,27 +11,27 @@ import (
 	"github.com/superj80820/system-design/domain"
 )
 
-type lineRepo struct {
+type lineAPIRepo struct {
 	url   string
 	token string
 }
 
-func CreateLineRepo(url, token string) domain.LineRepo {
-	return &lineRepo{
+func CreateLineRepo(url, token string) domain.LineAPIRepo {
+	return &lineAPIRepo{
 		url:   url,
 		token: token,
 	}
 }
 
-func (l *lineRepo) Notify(message string) error {
+func (l *lineAPIRepo) Notify(message string) error {
 	return l.notifyWithToken(l.token, message)
 }
 
-func (l *lineRepo) NotifyWithToken(token, message string) error {
+func (l *lineAPIRepo) NotifyWithToken(token, message string) error {
 	return l.notifyWithToken(token, message)
 }
 
-func (l *lineRepo) notifyWithToken(token, message string) error {
+func (l *lineAPIRepo) notifyWithToken(token, message string) error {
 	url := l.url + "/api/notify"
 	method := "POST"
 
@@ -74,4 +74,19 @@ func (l *lineRepo) notifyWithToken(token, message string) error {
 	}
 
 	return nil
+}
+
+// Reply implements domain.LineAPIRepo.
+func (l *lineAPIRepo) ReplyText(token, text string) error {
+	panic("unimplemented")
+}
+
+// GetImage implements domain.LineAPIRepo.
+func (l *lineAPIRepo) GetImage(imageID string) ([]byte, error) {
+	panic("unimplemented")
+}
+
+// VerifyLIFF implements domain.LineAPIRepo.
+func (l *lineAPIRepo) VerifyLIFF(liffID, accessToken string) error {
+	panic("unimplemented")
 }
