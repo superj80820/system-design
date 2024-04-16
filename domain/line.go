@@ -4,12 +4,22 @@ var (
 	LineOKStatus = 200
 )
 
-type LineAPIRepo interface {
+type LineNotifyAPIRepo interface {
 	Notify(message string) error
 	NotifyWithToken(token, message string) error
-	ReplyText(token, text string) error
+}
+
+type LineMessageAPIRepo interface {
+	Reply(token string, messages []string) error
 	GetImage(imageID string) ([]byte, error)
+}
+
+type LineLIFFAPIRepo interface {
 	VerifyLIFF(liffID, accessToken string) error
+}
+
+type LineTemplateRepo interface {
+	ApplyTemplate(name string, args ...any) (string, error)
 }
 
 type LineResponseOK struct {
