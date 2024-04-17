@@ -10,7 +10,7 @@ type LineNotifyAPIRepo interface {
 }
 
 type LineMessageAPIRepo interface {
-	Reply(token string, messages []string) error
+	Reply(token string, messages ...string) error
 	GetImage(imageID string) ([]byte, error)
 }
 
@@ -20,6 +20,7 @@ type LineLIFFAPIRepo interface {
 
 type LineTemplateRepo interface {
 	ApplyTemplate(name string, args ...any) (string, error)
+	ApplyText(text string) string
 }
 
 type LineResponseOK struct {

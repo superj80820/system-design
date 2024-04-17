@@ -24,6 +24,7 @@ type (
 	StringSliceCmd = goRedis.StringSliceCmd
 	ZRangeBy       = goRedis.ZRangeBy
 	ZRangeArgs     = goRedis.ZRangeArgs
+	IntCmd         = goRedis.IntCmd
 )
 
 func (cache *Cache) TxPipeline() *CacheTX {
@@ -56,6 +57,10 @@ func (cache *Cache) ZRangeArgs(ctx context.Context, z ZRangeArgs) *StringSliceCm
 
 func (cache *Cache) ZRangeByScore(ctx context.Context, key string, opt *ZRangeBy) *StringSliceCmd {
 	return cache.redisClient.ZRangeByScore(ctx, key, opt)
+}
+
+func (cache *Cache) Exists(ctx context.Context, keys ...string) *IntCmd {
+	return cache.redisClient.Exists(ctx, keys...)
 }
 
 func (cache *Cache) Get(ctx context.Context, key string) (val string, exists bool, err error) {

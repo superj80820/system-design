@@ -24,14 +24,14 @@ func CreateLineMessageRepo(url, dataURL, token string) domain.LineMessageAPIRepo
 	}
 }
 
-func (l *lineMessageAPIRepo) Reply(token string, messages []string) error {
+func (l *lineMessageAPIRepo) Reply(token string, messages ...string) error {
 	url := l.url + "/bot/message/reply"
 	method := "POST"
 
 	payload := strings.NewReader(fmt.Sprintf(`{
 		"replyToken": "%s",
-		"messages": %s
-	}`, token, messages))
+		"messages": [%s]
+	}`, token, strings.Join(messages, ",")))
 
 	client := &http.Client{}
 	req, err := http.NewRequest(method, url, payload)

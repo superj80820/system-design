@@ -28,3 +28,9 @@ func EncodeJsonResponse(ctx context.Context, w http.ResponseWriter, response int
 func EncodeEmptyResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error { // TODO: json ok
 	return nil
 }
+
+func EncodeOKResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error { // TODO: json ok
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("200 OK"))
+	return nil
+}

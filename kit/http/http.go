@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -136,6 +137,8 @@ func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.Respo
 		}
 
 		errorCode := code.CreateHTTPError(code.ParseErrorCode(err))
+
+		fmt.Println("yorkkk", err)
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(errorCode.HTTPCode)
