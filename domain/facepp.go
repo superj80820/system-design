@@ -37,25 +37,25 @@ type FaceSetDetail struct {
 }
 
 type FaceAdd struct {
-	FacesetToken  string `json:"faceset_token"`
-	TimeUsed      int    `json:"time_used"`
-	FaceCount     int    `json:"face_count"`
-	FaceAdded     int    `json:"face_added"`
-	RequestID     string `json:"request_id"`
-	OuterID       string `json:"outer_id"`
-	FailureDetail []any  `json:"failure_detail"`
+	FacesetToken  string           `json:"faceset_token"`
+	TimeUsed      int              `json:"time_used"`
+	FaceCount     int              `json:"face_count"`
+	FaceAdded     int              `json:"face_added"`
+	RequestID     string           `json:"request_id"`
+	OuterID       string           `json:"outer_id"`
+	FailureDetail []map[string]any `json:"failure_detail"`
 }
 
 type FacePlusPlusRepo interface {
 	Search(faceSetID string, image []byte) (*FaceSearch, error)
 	Add(faceSetID string, faceTokens []string) (*FaceAdd, error)
-	Detect(faceSetID string, image []byte) (*FaceDetect, error)
+	Detect(image []byte) (*FaceDetect, error)
 	GetFaceSetDetail(faceSetID string) (*FaceSetDetail, error)
+	IsFaceSetFull(faceSetID string) (bool, error)
 }
 
 type FacePlusPlusUseCase interface {
 	SearchAllFaceSets(image []byte) (*FaceSearch, error)
-	Add(faceSetID string, faceTokens []string) (*FaceAdd, error)
-	Detect(faceSetID string, image []byte) (*FaceDetect, error)
-	GetSetDetail(faceSetID string) (*FaceSetDetail, error)
+	Add(faceTokens []string) (*FaceAdd, error)
+	Detect(image []byte) (*FaceDetect, error)
 }

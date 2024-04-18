@@ -15,6 +15,24 @@ type Actress struct {
 	UpdatedAt    time.Time `json:"updatedat"`
 }
 
+type FaceStatus int
+
+const (
+	FaceStatusUnknown FaceStatus = iota
+	FaceStatusNotInFaceSet
+	FaceStatusAlreadyInFaceSet
+)
+
+type Face struct {
+	ID        int        `json:"id"`
+	Token     string     `json:"token"`
+	Preview   string     `json:"preview"`
+	ActressID string     `json:"infoid"`
+	Status    FaceStatus `json:"status"`
+	CreatedAt time.Time  `json:"createdat"`
+	UpdatedAt time.Time  `json:"updatedat"`
+}
+
 type ActressLineRepository interface {
 	GetUseInformation() (string, error)
 	IsEnableGroupRecognition(ctx context.Context, groupID string) (bool, error)
@@ -23,10 +41,15 @@ type ActressLineRepository interface {
 }
 
 type ActressRepo interface {
-	AddActress(*Actress) (actressID string, err error)
+	AddActress(name, preview string) (actressID string, err error)
 	GetActress(id string) (*Actress, error)
 	AddFace(actressID, faceToken, previewURL string) (faceID string, err error)
 	GetActressByFaceToken(faceToken string) (*Actress, error)
+	GetFacesByStatus(status FaceStatus) ([]*Face, error)
+	GetFacesByActressID(actressID string) ([]*Face, error)
+	RemoveFace(faceID int) error
+	SetFaceStatus(faceID int, status FaceStatus) error
+	GetActressByName(name string) (*Actress, error)
 	GetWish() (*Actress, error)
 	GetFavorites(userID string) ([]*Actress, error)
 	AddFavorite(userID, actressID string) (faceID string, err error)
@@ -46,4 +69,27 @@ type ActressLineUseCase interface {
 	RecognitionByUser(ctx context.Context, imageID, replyToken string) error
 	RecognitionByGroup(ctx context.Context, groupID, imageID, replyToken string) error
 	EnableGroupRecognition(ctx context.Context, groupID, replyToken string) error
+}
+
+type ActressCrawlerData struct {
+	ActressName       string
+	ActressPreviewURL string
+}
+
+type ActressCrawlerProvider interface {
+	Get() *ActressCrawlerData
+	GetPreviewRawData() ([]byte, error)
+}
+
+type ActressCrawlerRepo interface {
+	Process(ctx context.Context)
+	GetActresses() ([]ActressCrawlerProvider, error)
+	Done() <-chan struct{}
+	Err() error
+}
+
+type ActressCrawlerUseCase interface {
+	Process(ctx context.Context)
+	Done() <-chan struct{}
+	Err() error
 }
