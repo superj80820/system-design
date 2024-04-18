@@ -23,17 +23,22 @@
 └── instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
 ```
 
-* 不同層依照 domain interface 進行 DIP
-* 對底層進行抽象，可輕易 LSP
-  + repository 方面: repository 使用 mq 時，可採用`kit/mq/kafka`或`kit/mq/memory`，以應付不同場景或減低測試成本
-  + usecase 方面: usecase 使用 repository 依照 domain interface 操作，如果要`memory`替換成`mysql`，只需實作出符合 interface 的 repository
-  + delivery 方面: delivery 使用 usecase 依照 domain interface 操作，如果要`gin`替換成`go-kit` server，不會修改到業務邏輯
-* 切出每個 domain 的邊界，可先以 monolithic 部署，如果未來有 horizontal scaling 需求，再以 domain 來 deliver 給不同 microservice，避免一開始就使用 microservice 過度設計
-* 高 reuse，application 可以從組合不同 domain，來完成產品需求，例如`app/exchange-gitbitex`是組合`auth`與`exchange`domain
-* monorepo，所有 applications 的底層使用`kit`，更新方便，如果套件需要版本控制也可用`git tag`處理
-* 以 testcontainers 測試，更貼近真實情境進行測試
+切出每個 domain 的邊界，此 monorepo 可先以 monolithic 部署，如果未來有 horizontal scaling 需求，再以 domain 來 deliver 給不同 microservice，避免一開始就使用 microservice 過度設計。
+
+* repository: 可輕鬆替換底層。repository 使用 mq 時，可採用`kit/mq/kafka`或`kit/mq/memory`，以應付不同場景或減低測試成本
+* usecase: 可輕鬆替換repository。usecase 使用 repository 依照 domain interface 操作，如果要`memory`替換成`mysql`，只需實作出符合 interface 的 repository
+* delivery: delivery 使用 usecase 依照 domain interface 操作，如果要`gin`替換成`go-kit` server，不會修改到業務邏輯
+
+reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求。例如: `app/exchange-gitbitex`是組合`auth`與`exchange`domain。
+
+測試方便，以 testcontainers 測試，更貼近真實情境進行測試。
 
 Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#04041b7b152746549eda5de6e1180a5d)
+
+Q&A:
+
+* monorepo 雖然更新方便，但怎麼管理套件版本？
+  * 可用`git tag`處理
 
 ## matching-system
 
@@ -59,7 +64,7 @@ Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.m
 
 ### 教學
 
-撰寫於[部落格](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#11d29f38617742a197259aa928ce8a0f)
+`Sequence 定序模組`、`Asset 資產模組`、`Order 訂單模組`、`Matching 撮合模組`、`Clearing 清算模組`如何設計的教學，撰寫於我的部落格[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#378531212808413583831bc7c0b8cbe1)
 
 ### 運行
 
