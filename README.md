@@ -33,7 +33,7 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 測試方便，以 testcontainers 測試，更貼近真實情境進行測試。
 
-Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#04041b7b152746549eda5de6e1180a5d)
+Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#f3f6d329435d4bceb50ec37bb4c36984)
 
 Q&A:
 
