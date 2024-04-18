@@ -1,5 +1,7 @@
 # system-design
 
+## clean-architecture
+
 ![](https://raw.githubusercontent.com/bxcodec/go-clean-arch/master/clean-arch.png)
 
 依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) Clean Architecture，每個 domain 依 repository、usecase、delivery 三層設計
@@ -33,9 +35,11 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 測試方便，以 testcontainers 測試，更貼近真實情境進行測試。
 
+### 教學
+
 Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#f3f6d329435d4bceb50ec37bb4c36984)
 
-Q&A:
+### Q&A
 
 * monorepo 雖然更新方便，但怎麼管理套件版本？
   * 可用`git tag`處理
@@ -51,7 +55,7 @@ Q&A:
 * 可回放事件。以 event sourcing 的方式實現，撮合引擎為讀取 event 的有限狀態機，可 warm backup 多台 server 聽取 event，來達到 high availability
 * 可分散式。不同的domain可部署至不同機器
 
-## 壓測:
+### 壓測:
 
 ![](https://raw.githubusercontent.com/superj80820/system-design/master/doc/exchange-stress-test.png)
 
