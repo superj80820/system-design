@@ -1,26 +1,29 @@
 package container
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/kit/testing"
+	utilKit "github.com/superj80820/system-design/kit/util"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mysql"
 )
 
 type mysqlContainer struct {
-	uri           string
-	sqlSchemaPath string
-	container     *mysql.MySQLContainer
+	uri            string
+	sqlSchemaPaths []string
+	container      *mysql.MySQLContainer
 }
 
 type Option func(*mysqlContainer)
 
-func UseSQLSchema(sqlSchemaPath string) Option {
+func UseSQLSchema(sqlSchemaPaths ...string) Option {
 	return func(mc *mysqlContainer) {
-		mc.sqlSchemaPath = sqlSchemaPath
+		mc.sqlSchemaPaths = sqlSchemaPaths
 	}
 }
 
@@ -41,8 +44,27 @@ func CreateMySQL(ctx context.Context, options ...Option) (testing.MySQLContainer
 		mysql.WithPassword(mysqlDBPassword),
 	}
 
-	if mysqlContainer.sqlSchemaPath != "" {
-		runContainerOptions = append(runContainerOptions, mysql.WithScripts(mysqlContainer.sqlSchemaPath))
+	if len(mysqlContainer.sqlSchemaPaths) != 0 {
+		tempSQLSchemaFileName := "schema-" + utilKit.GetSnowflakeIDString() + ".sql"
+		tempSQLSchemaFilePath := "./" + tempSQLSchemaFileName
+		defer os.Remove(tempSQLSchemaFilePath)
+
+		var tempSQLSchema bytes.Buffer
+		for _, sqlSchemaPath := range mysqlContainer.sqlSchemaPaths {
+			schemaSQL, err := os.ReadFile(sqlSchemaPath)
+			if err != nil {
+				return nil, errors.Wrap(err, "read file failed")
+			}
+			tempSQLSchema.Write([]byte(schemaSQL))
+		}
+		if err := os.WriteFile(tempSQLSchemaFilePath,
+			tempSQLSchema.Bytes(),
+			0644,
+		); err != nil {
+			return nil, errors.Wrap(err, "writer sql file failed")
+		}
+
+		runContainerOptions = append(runContainerOptions, mysql.WithScripts(tempSQLSchemaFilePath))
 	}
 
 	container, err := mysql.RunContainer(ctx, runContainerOptions...)

@@ -21,7 +21,7 @@ type authVerifyResponse struct {
 	UserID int64 `json:"user_id"`
 }
 
-func CreateAuthClient(url string) domain.AuthServiceRepository {
+func CreateAuthClient(url string) domain.AuthServiceRepo {
 	return &AuthClient{
 		url: url,
 	}

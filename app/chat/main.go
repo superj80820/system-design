@@ -176,7 +176,7 @@ func main() {
 
 func customMiddleware[IN, OUT any](
 	rateLimit *utilKit.CacheRateLimit,
-	authServiceRepo domain.AuthServiceRepository,
+	authServiceRepo domain.AuthServiceRepo,
 ) endpoint.Middleware[IN, OUT] {
 	return endpoint.Chain(
 		wsMiddleware.CreateRateLimit[IN, OUT](rateLimit.Pass),

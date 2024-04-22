@@ -14,12 +14,25 @@ type verifyLIFFRequest struct {
 	LIFFID      string `json:"liff_id"`
 }
 
+type verifyLineCodeRequest struct {
+	Code        string `json:"code"`
+	RedirectURI string `json:"redirect_uri"`
+}
+
+type verifyLineCodeResponse struct {
+	*domain.Account
+	LineUserProfile *domain.LineUserProfile `json:"line_user_profile"`
+}
+
 var (
 	DecodeVerifyLIFFRequest  = httpTransportKit.DecodeJsonRequest[verifyLIFFRequest]
 	EncodeVerifyLIFFResponse = httpTransportKit.EncodeEmptyResponse
+
+	DecodeVerifyLineCodeRequest  = httpTransportKit.DecodeJsonRequest[verifyLineCodeRequest]
+	EncodeVerifyLineCodeResponse = httpTransportKit.EncodeJsonResponse
 )
 
-func MakeVerfiyLIFFEndpoint(lineLIFFUseCase domain.LineLIFFUseCase) endpoint.Endpoint {
+func MakeVerifyLIFFEndpoint(lineLIFFUseCase domain.LineLIFFUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(verifyLIFFRequest)
 
@@ -28,5 +41,21 @@ func MakeVerfiyLIFFEndpoint(lineLIFFUseCase domain.LineLIFFUseCase) endpoint.End
 		}
 
 		return nil, nil
+	}
+}
+
+func MakeVerifyLineCodeEndpoint(authLineUseCase domain.AuthLineUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		req := request.(verifyLineCodeRequest)
+
+		userInformation, lineProfile, err := authLineUseCase.VerifyCode(req.Code, req.RedirectURI)
+		if err != nil {
+			return nil, errors.Wrap(err, "verify code failed")
+		}
+
+		return verifyLineCodeResponse{
+			userInformation,
+			lineProfile,
+		}, nil
 	}
 }

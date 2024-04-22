@@ -3,15 +3,15 @@ package domain
 import "time"
 
 type Account struct {
-	ID       int64
-	Email    string
-	Password string
+	ID       int64  `json:"id"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 
-	AccessToken  string `gorm:"-"`
-	RefreshToken string `gorm:"-"`
+	AccessToken  string `gorm:"-" json:"access_token"`
+	RefreshToken string `gorm:"-" json:"refresh_token"`
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	CreatedAt time.Time `json:"-"`
+	UpdatedAt time.Time `json:"-"`
 }
 
 type AccountRepo interface {

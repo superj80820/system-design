@@ -36,6 +36,8 @@ type AccountToken struct {
 }
 
 type AuthRepo interface {
+	GenerateToken(sub string, iat, exp time.Time) (string, error)
+	VerifyToken(token string, accountTokenEnum AccountTokenEnum) (userID int64, err error)
 	CreateToken(userID int64, token string, expireAt time.Time, tokenType AccountTokenEnum) (*AccountToken, error)
 	UpdateStatusToken(token string, status AccountTokenStatusEnum) error
 	GetLastRefreshTokenByUserID(userID int64) (*AccountToken, error)
@@ -48,6 +50,10 @@ type AuthUseCase interface {
 	Verify(accessToken string) (int64, error)
 }
 
-type AuthServiceRepository interface {
+type AuthLineUseCase interface {
+	VerifyCode(code, redirectURI string) (*Account, *LineUserProfile, error)
+}
+
+type AuthServiceRepo interface {
 	Verify(accessToken string) (int64, error)
 }

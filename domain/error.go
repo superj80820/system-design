@@ -8,4 +8,5 @@ var (
 	ErrAlreadyDone = errors.New("already done")
 	ErrInvalidData = errors.New("invalid data")
 	ErrDuplicate   = errors.New("duplicate")
+	ErrExpired     = errors.New("expired")
 )

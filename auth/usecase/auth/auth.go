@@ -1,16 +1,10 @@
 package auth
 
 import (
-	"crypto/ecdsa"
-	"crypto/x509"
-	"encoding/pem"
-	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/code"
@@ -23,30 +17,16 @@ type AuthService struct {
 	authRepo    domain.AuthRepo
 	accountRepo domain.AccountRepo
 	logger      loggerKit.Logger
-
-	accessTokenKey  *ecdsa.PrivateKey
-	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath string, authRepo domain.AuthRepo, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
+func CreateAuthUseCase(authRepo domain.AuthRepo, accountRepo domain.AccountRepo, logger loggerKit.Logger) (domain.AuthUseCase, error) {
 	if logger == nil {
 		return nil, errors.New("create service failed")
 	}
-	accessTokenKey, err := parsePemKey(accessTokenKeyPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse pem key failed")
-	}
-	refreshTokenKey, err := parsePemKey(refreshTokenKeyPath)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse pem key failed")
-	}
-
 	return &AuthService{
-		logger:          logger,
-		authRepo:        authRepo,
-		accountRepo:     accountRepo,
-		accessTokenKey:  accessTokenKey,
-		refreshTokenKey: refreshTokenKey,
+		logger:      logger,
+		authRepo:    authRepo,
+		accountRepo: accountRepo,
 	}, nil
 }
 
@@ -65,25 +45,23 @@ func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 	now := time.Now()
 
 	refreshTokenExpireAt := now.Add(time.Hour * 12)
-	refreshToken := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{ // TODO: need ecdsa, or hmac?
-		"sub": strconv.FormatInt(account.ID, 10),
-		"iat": now.Unix(),
-		"exp": refreshTokenExpireAt.Unix(),
-	})
-	signedRefreshToken, err := refreshToken.SignedString(a.refreshTokenKey)
+	signedRefreshToken, err := a.authRepo.GenerateToken(
+		strconv.FormatInt(account.ID, 10),
+		now,
+		refreshTokenExpireAt,
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "signed refresh token failed")
 	}
 
-	accessTokenExpireAt := now.Add(time.Hour * 1) // TODO: test 失效
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"sub": strconv.FormatInt(account.ID, 10),
-		"iat": now.Unix(),
-		"exp": accessTokenExpireAt.Unix(),
-	})
-	signedAccessToken, err := accessToken.SignedString(a.accessTokenKey)
+	accessTokenExpireAt := now.Add(time.Hour * 1)
+	signedAccessToken, err := a.authRepo.GenerateToken(
+		strconv.FormatInt(account.ID, 10),
+		now,
+		accessTokenExpireAt,
+	)
 	if err != nil {
-		return nil, errors.Wrap(err, "signed access token failed")
+		return nil, errors.Wrap(err, "signed refresh token failed")
 	}
 
 	_, err = a.authRepo.CreateToken(account.ID, signedRefreshToken, refreshTokenExpireAt, domain.REFRESH_TOKEN)
@@ -99,21 +77,13 @@ func (a *AuthService) Login(email, password string) (*domain.Account, error) {
 }
 
 func (a *AuthService) Logout(accessToken string) error {
-	token, err := a.parseAndValidToken(accessToken, a.accessTokenKey)
-	if err != nil {
-		return err
-	}
-	ok, err := verifyToken(token)
-	if err != nil {
+	userID, err := a.authRepo.VerifyToken(accessToken, domain.ACCESS_TOKEN)
+	if errors.Is(err, domain.ErrInvalidData) {
+		return code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid).AddErrorMetaData(err)
+	} else if errors.Is(err, domain.ErrExpired) {
+		return code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.Expired).AddErrorMetaData(err)
+	} else if err != nil {
 		return errors.Wrap(err, "verify token failed")
-	}
-	if !ok {
-		return code.CreateErrorCode(http.StatusUnauthorized)
-	}
-
-	userID, err := getUserIDToken(token)
-	if err != nil {
-		return errors.Wrap(err, "get user id from token failed")
 	}
 
 	refreshToken, err := a.authRepo.GetLastRefreshTokenByUserID(userID)
@@ -129,21 +99,13 @@ func (a *AuthService) Logout(accessToken string) error {
 }
 
 func (a *AuthService) RefreshAccessToken(refreshTokenString string) (string, error) {
-	token, err := a.parseAndValidToken(refreshTokenString, a.refreshTokenKey)
-	if err != nil {
-		return "", err
-	}
-	ok, err := verifyToken(token)
-	if err != nil {
+	userID, err := a.authRepo.VerifyToken(refreshTokenString, domain.REFRESH_TOKEN)
+	if errors.Is(err, domain.ErrInvalidData) {
+		return "", code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid).AddErrorMetaData(err)
+	} else if errors.Is(err, domain.ErrExpired) {
+		return "", code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.Expired).AddErrorMetaData(err)
+	} else if err != nil {
 		return "", errors.Wrap(err, "verify token failed")
-	}
-	if !ok {
-		return "", code.CreateErrorCode(http.StatusUnauthorized)
-	}
-
-	userID, err := getUserIDToken(token)
-	if err != nil {
-		return "", errors.Wrap(err, "get user id from token failed")
 	}
 
 	refreshToken, err := a.authRepo.GetLastRefreshTokenByUserID(userID)
@@ -162,113 +124,26 @@ func (a *AuthService) RefreshAccessToken(refreshTokenString string) (string, err
 	now := time.Now()
 
 	accessTokenExpireAt := now.Add(time.Hour * 1)
-	accessToken := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.MapClaims{
-		"sub": strconv.FormatInt(userID, 10),
-		"iat": strconv.FormatInt(now.Unix(), 10),
-		"exp": strconv.FormatInt(accessTokenExpireAt.Unix(), 10), // TODO: test len
-	})
-	signedAccessToken, err := accessToken.SignedString(a.accessTokenKey)
+	signedAccessToken, err := a.authRepo.GenerateToken(
+		strconv.FormatInt(userID, 10),
+		now,
+		accessTokenExpireAt,
+	)
 	if err != nil {
-		return "", errors.Wrap(err, "signed access token failed")
+		return "", errors.Wrap(err, "signed refresh token failed")
 	}
 
 	return signedAccessToken, nil
 }
 
 func (a *AuthService) Verify(accessToken string) (int64, error) {
-	token, err := a.parseAndValidToken(accessToken, a.accessTokenKey)
-	if err != nil {
-		return 0, err
-	}
-	ok, err := verifyToken(token)
-	if err != nil {
-		return 0, errors.Wrap(err, "verify token failed")
-	}
-	if !ok {
-		return 0, code.CreateErrorCode(http.StatusUnauthorized)
-	}
-	mapClaims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return 0, errors.Wrap(err, "verify token failed")
-	}
-	userID, ok := mapClaims["sub"]
-	if !ok {
-		return 0, errors.Wrap(err, "verify token failed")
-	}
-	userIDString, ok := userID.(string)
-	if !ok {
-		return 0, errors.Wrap(err, "verify token failed")
-	}
-	userIDInt, err := strconv.ParseInt(userIDString, 10, 64)
-	if err != nil {
-		return 0, errors.Wrap(err, "verify token failed")
-	}
-	return userIDInt, nil
-}
-
-func (a *AuthService) parseAndValidToken(tokenString string, key *ecdsa.PrivateKey) (*jwt.Token, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodECDSA); !ok {
-			return nil, errors.New(fmt.Sprintf("unexpected signing %s", token.Header["alg"]))
-		}
-		return &key.PublicKey, nil
-	})
-	if errors.Is(err, jwt.ErrTokenSignatureInvalid) || errors.Is(err, jwt.ErrTokenMalformed) {
-		return nil, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid).AddErrorMetaData(err)
-	} else if errors.Is(err, jwt.ErrTokenExpired) {
-		return nil, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.Expired).AddErrorMetaData(err)
+	userID, err := a.authRepo.VerifyToken(accessToken, domain.ACCESS_TOKEN)
+	if errors.Is(err, domain.ErrInvalidData) {
+		return 0, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.PasswordInvalid).AddErrorMetaData(err)
+	} else if errors.Is(err, domain.ErrExpired) {
+		return 0, code.CreateErrorCode(http.StatusUnauthorized).AddCode(code.Expired).AddErrorMetaData(err)
 	} else if err != nil {
-		return nil, errors.Wrap(err, "parse token get error")
+		return 0, errors.Wrap(err, "verify token failed")
 	}
-	return token, nil
-}
-
-// TODO: use generic
-func getUserIDToken(token *jwt.Token) (int64, error) {
-	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		if userID, ok := claims["sub"]; ok {
-			switch val := userID.(type) {
-			case float64:
-				return int64(val), nil // TODO: check int64 type correct
-			default:
-				return 0, errors.New("get unexpected sub type")
-			}
-		} else {
-			return 0, errors.New("get sub field failed")
-		}
-	}
-	return 0, errors.New("not found user id")
-}
-
-func verifyToken(token *jwt.Token) (bool, error) {
-	if claims, ok := token.Claims.(jwt.MapClaims); ok {
-		if expire, ok := claims["exp"]; ok {
-			switch val := expire.(type) {
-			case float64:
-				if int64(val) < time.Now().Unix() {
-					return false, nil
-				}
-				return true, nil
-			default:
-				return false, errors.New("get unexpected exp type")
-			}
-		} else {
-			return false, errors.New("get exp field failed")
-		}
-	}
-	return false, errors.New("get claims failed")
-}
-
-func parsePemKey(path string) (*ecdsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, errors.Wrap(err, "read file failed")
-	}
-	blk, _ := pem.Decode(data) // TODO: check rest
-	token, err := x509.ParseECPrivateKey(blk.Bytes)
-	if err != nil {
-		return nil, errors.Wrap(err, "parse private key failed")
-	}
-
-	return token, err
+	return userID, nil
 }

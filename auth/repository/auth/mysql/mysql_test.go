@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,44 +10,23 @@ import (
 	accountMySQLRepo "github.com/superj80820/system-design/auth/repository/account/mysql"
 	"github.com/superj80820/system-design/domain"
 	ormKit "github.com/superj80820/system-design/kit/orm"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/modules/mysql"
+	mysqlContainer "github.com/superj80820/system-design/kit/testing/mysql/container"
 )
 
 func TestAuth(t *testing.T) {
 	ctx := context.Background()
 
-	mysqlDBName := "db"
-	mysqlDBUsername := "root"
-	mysqlDBPassword := "password"
-	mysqlContainer, err := mysql.RunContainer(ctx,
-		testcontainers.WithImage("mysql:8"),
-		mysql.WithDatabase(mysqlDBName),
-		mysql.WithUsername(mysqlDBUsername),
-		mysql.WithPassword(mysqlDBPassword),
-		mysql.WithScripts(
-			filepath.Join(".", "schema.sql"), //TODO: workaround
-		),
-	)
+	mysqlContainer, err := mysqlContainer.CreateMySQL(ctx, mysqlContainer.UseSQLSchema(
+		filepath.Join("../../account/mysql", "schema.sql"),
+		filepath.Join(".", "schema.sql"),
+	))
 	assert.Nil(t, err)
-	mysqlDBHost, err := mysqlContainer.Host(ctx)
-	assert.Nil(t, err)
-	mysqlDBPort, err := mysqlContainer.MappedPort(ctx, "3306")
-	assert.Nil(t, err)
-	mysqlDB, err := ormKit.CreateDB(
-		ormKit.UseMySQL(
-			fmt.Sprintf(
-				"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True&loc=Local",
-				mysqlDBUsername,
-				mysqlDBPassword,
-				mysqlDBHost,
-				mysqlDBPort.Port(),
-				mysqlDBName,
-			)))
+	mysqlDB, err := ormKit.CreateDB(ormKit.UseMySQL(mysqlContainer.GetURI()))
 	assert.Nil(t, err)
 
 	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
-	authRepo := CreateAuthRepo(mysqlDB)
+	authRepo, err := CreateAuthRepo(mysqlDB, "./access-private-key.pem", "./refresh-private-key.pem")
+	assert.Nil(t, err)
 
 	email := "email@gmail.com"
 	password := "password"
