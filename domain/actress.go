@@ -11,8 +11,8 @@ type Actress struct {
 	Preview      string    `json:"preview"`
 	Detail       string    `json:"detail"`
 	Romanization string    `json:"romanization"`
-	CreatedAt    time.Time `json:"createdat"`
-	UpdatedAt    time.Time `json:"updatedat"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type FaceStatus int
@@ -52,14 +52,14 @@ type ActressRepo interface {
 	GetActressByName(name string) (*Actress, error)
 	GetWish() (*Actress, error)
 	GetFavorites(userID string) ([]*Actress, error)
-	AddFavorite(userID, actressID string) (faceID string, err error)
-	RemoveFavorite(userID, favoriteID string) error
+	AddFavorite(userID, actressID string) error
+	RemoveFavorite(userID, actressID string) error
 }
 
 type ActressUseCase interface {
 	GetActress(id string) (*Actress, error)
 	GetFavorites(userID string) ([]*Actress, error)
-	AddFavorite(userID, actressID string) (faceID string, err error)
+	AddFavorite(userID, actressID string) (err error)
 	RemoveFavorite(userID, actressID string) error
 }
 

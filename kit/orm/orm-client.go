@@ -2,8 +2,10 @@ package orm
 
 import (
 	"database/sql"
+	"fmt"
 
 	goMysql "github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/pkg/errors"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -192,10 +194,20 @@ func (db *DB) Save(value interface{}) *TX {
 	return db.gormClient.Save(value)
 }
 
-func ConvertMySQLErr(err error) (error, bool) {
-	var mysqlErr *goMysql.MySQLError
-	if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
-		return ErrDuplicatedKey, true
+func ConvertDBLevelErr(err error) (error, bool) {
+	var (
+		pgErr    *pgconn.PgError
+		mysqlErr *goMysql.MySQLError
+	)
+	if errors.As(err, &pgErr) {
+		if pgErr.Code == "23505" {
+			return ErrDuplicatedKey, true
+		}
+	} else if errors.As(err, &mysqlErr) {
+		fmt.Println("york here2 ")
+		if mysqlErr.Number == 1062 {
+			return ErrDuplicatedKey, true
+		}
 	}
 	return nil, false
 }

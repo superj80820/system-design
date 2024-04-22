@@ -125,6 +125,9 @@ var errorCodes = map[int]map[int]string{
 	httpPKG.StatusForbidden: {
 		Default: "forbidden",
 	},
+	httpPKG.StatusConflict: {
+		Default: "conflict",
+	},
 }
 
 type errorCodeOption func(*errorCode)

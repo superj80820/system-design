@@ -66,9 +66,9 @@ func CustomBeforeCtx(tracer trace.Tracer, options ...Option) func(ctx context.Co
 				accessToken = cookie.Value
 			}
 		}
-		authentication := r.Header.Get("Authentication")
-		if accessToken == "" && strings.Index(authentication, "Bearer") == 0 {
-			accessToken = authentication[len("Bearer "):]
+		authorization := r.Header.Get("Authorization")
+		if accessToken == "" && strings.Index(authorization, "Bearer") == 0 {
+			accessToken = authorization[len("Bearer "):]
 		}
 		ctx = context.WithValue(ctx, _CTX_TOKEN, accessToken)    // TODO: add
 		ctx = context.WithValue(ctx, _CTX_HOST, r.Host)          // TODO: add
@@ -138,7 +138,7 @@ func EncodeHTTPErrorResponse() func(ctx context.Context, err error, w http.Respo
 
 		errorCode := code.CreateHTTPError(code.ParseErrorCode(err))
 
-		fmt.Println("yorkkk", err)
+		fmt.Printf("yorkkkkasdf %+v\n", errorCode.CallStack)
 
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(errorCode.HTTPCode)

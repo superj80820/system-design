@@ -30,7 +30,7 @@ func (a *accountUseCase) Register(email, password string) (*domain.Account, erro
 	// TODO: verify email and password format
 
 	account, err := a.accountRepo.Create(email, password)
-	if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+	if mysqlErr, ok := ormKit.ConvertDBLevelErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
 		return nil, code.CreateErrorCode(http.StatusForbidden)
 	} else if err != nil {
 		return nil, errors.Wrap(err, "create to db user failed")
