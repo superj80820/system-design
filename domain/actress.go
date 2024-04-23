@@ -50,6 +50,7 @@ type ActressRepo interface {
 	RemoveFace(faceID int) error
 	SetFaceStatus(faceID int, status FaceStatus) error
 	GetActressByName(name string) (*Actress, error)
+	SetActressPreview(actressID, previewURL string) error
 	GetWish() (*Actress, error)
 	GetFavorites(userID string) ([]*Actress, error)
 	AddFavorite(userID, actressID string) error
@@ -74,18 +75,23 @@ type ActressLineUseCase interface {
 type ActressCrawlerData struct {
 	ActressName       string
 	ActressPreviewURL string
+	PreviewImageType  ImageType
+}
+
+type ActressCrawlerDataPagination struct {
+	Count       int
+	CurrentPage int
+	TotalPages  int
+	Items       []ActressCrawlerProvider
 }
 
 type ActressCrawlerProvider interface {
-	Get() *ActressCrawlerData
+	GetWithValid() (*ActressCrawlerData, error)
 	GetPreviewRawData() ([]byte, error)
 }
 
 type ActressCrawlerRepo interface {
-	Process(ctx context.Context)
-	GetActresses() ([]ActressCrawlerProvider, error)
-	Done() <-chan struct{}
-	Err() error
+	GetActresses(page, limit int) (*ActressCrawlerDataPagination, error)
 }
 
 type ActressCrawlerUseCase interface {

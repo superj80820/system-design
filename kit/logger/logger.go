@@ -97,12 +97,12 @@ func NewLogger(path string, level Level, options ...Option) (Logger, error) {
 	var teeCore zapcore.Core
 	if logger.noStdout {
 		teeCore = zapcore.NewTee(
-			zapcore.NewCore(zapcore.NewJSONEncoder(loggerConfig), zapcore.Lock(zapcore.AddSync(file)), zap.InfoLevel),
+			zapcore.NewCore(zapcore.NewJSONEncoder(loggerConfig), zapcore.Lock(zapcore.AddSync(file)), level),
 		)
 	} else {
 		teeCore = zapcore.NewTee(
-			zapcore.NewCore(zapcore.NewJSONEncoder(loggerConfig), zapcore.Lock(zapcore.AddSync(file)), zap.InfoLevel),
-			zapcore.NewCore(zapcore.NewConsoleEncoder(consoleConfig), zapcore.Lock(os.Stdout), zap.InfoLevel),
+			zapcore.NewCore(zapcore.NewJSONEncoder(loggerConfig), zapcore.Lock(zapcore.AddSync(file)), level),
+			zapcore.NewCore(zapcore.NewConsoleEncoder(consoleConfig), zapcore.Lock(os.Stdout), level),
 		)
 	}
 	zapLogger := zap.New(teeCore)
