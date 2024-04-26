@@ -6,6 +6,10 @@ import (
 	"go.uber.org/zap"
 )
 
+func Float64(key string, val float64) Field {
+	return zap.Float64(key, val)
+}
+
 func String(key string, val string) Field {
 	return zap.String(key, val)
 }

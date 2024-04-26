@@ -8,3 +8,8 @@ const (
 	ImageTypePNG     ImageType = "png"
 	ImageTypeGIF     ImageType = "gif"
 )
+
+type ImageGetter interface {
+	GetRawData() []byte
+	GetImageArea() (float64, error)
+}

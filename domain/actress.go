@@ -87,7 +87,7 @@ type ActressCrawlerDataPagination struct {
 
 type ActressCrawlerProvider interface {
 	GetWithValid() (*ActressCrawlerData, error)
-	GetPreviewRawData() ([]byte, error)
+	GetImage() (ImageGetter, error)
 }
 
 type ActressCrawlerRepo interface {
