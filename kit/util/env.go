@@ -3,7 +3,26 @@ package util
 import (
 	"os"
 	"strconv"
+	"strings"
+
+	"github.com/joho/godotenv"
+	"github.com/pkg/errors"
 )
+
+func LoadEnvFile(filePath string) {
+	if err := godotenv.Load(filePath); err != nil {
+		panic(errors.Wrap(err, "read .env file failed"))
+	}
+}
+
+func GetRequireEnvStringSlice(env string) []string {
+	envString := os.Getenv(env)
+	if envString == "" {
+		panic("no set env: " + env)
+	}
+	envStringSlice := strings.Split(envString, ",")
+	return envStringSlice
+}
 
 func GetRequireEnvString(env string) string {
 	envString := os.Getenv(env)

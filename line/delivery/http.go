@@ -10,8 +10,7 @@ import (
 )
 
 type verifyLIFFRequest struct {
-	AccessToken string `json:"access_token"`
-	LIFFID      string `json:"liff_id"`
+	LIFFToken string `json:"liff_token"`
 }
 
 type verifyLineCodeRequest struct {
@@ -26,21 +25,25 @@ type verifyLineCodeResponse struct {
 
 var (
 	DecodeVerifyLIFFRequest  = httpTransportKit.DecodeJsonRequest[verifyLIFFRequest]
-	EncodeVerifyLIFFResponse = httpTransportKit.EncodeEmptyResponse
+	EncodeVerifyLIFFResponse = httpTransportKit.EncodeJsonResponse
 
 	DecodeVerifyLineCodeRequest  = httpTransportKit.DecodeJsonRequest[verifyLineCodeRequest]
 	EncodeVerifyLineCodeResponse = httpTransportKit.EncodeJsonResponse
 )
 
-func MakeVerifyLIFFEndpoint(lineLIFFUseCase domain.LineLIFFUseCase) endpoint.Endpoint {
+func MakeVerifyLIFFEndpoint(authLineUseCase domain.AuthLineUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(verifyLIFFRequest)
 
-		if err := lineLIFFUseCase.VerifyLIFF(req.AccessToken, req.LIFFID); err != nil {
-			return nil, errors.Wrap(err, "verify liff failed")
+		userInformation, lineProfile, err := authLineUseCase.VerifyLIFFToken(req.LIFFToken)
+		if err != nil {
+			return nil, errors.Wrap(err, "verify code failed")
 		}
 
-		return nil, nil
+		return verifyLineCodeResponse{
+			userInformation,
+			lineProfile,
+		}, nil
 	}
 }
 

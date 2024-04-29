@@ -25,7 +25,10 @@ func TestAuth(t *testing.T) {
 	assert.Nil(t, err)
 
 	accountRepo := accountMySQLRepo.CreateAccountRepo(mysqlDB)
-	authRepo, err := CreateAuthRepo(mysqlDB, "./access-private-key.pem", "./refresh-private-key.pem")
+	authRepo, err := CreateAuthRepo(mysqlDB,
+		`-----BEGIN PRIVATE KEY-----\nMHcCAQEEIMWqJOv9daWpi0afZJS4s1uNOVpY71xrANwVYJyuQv94oAoGCCqGSM49\nAwEHoUQDQgAEUcdKl8oCd6/YD8EJD35vNUVLn4RvcOf6v5+aMzsH58Y1BJ51YZyw\nbEjwc8g0ygLGcliyIIDXYoWXYumXxRHbbA==\n-----END PRIVATE KEY-----`,
+		`-----BEGIN PRIVATE KEY-----\nMHcCAQEEIBLuZnd1jEf20jkDRmSn7nPsI2Z89SySitRG0qUefJQNoAoGCCqGSM49\nAwEHoUQDQgAEnPYFR9O0EPRHfvgoOVoaw3BzBMGEZLSz+hYDTkrzf4DTrvDDT7JK\nxfeM9buQA+fbKAfR5rFBQmOTNuPNWZFY1w==\n-----END PRIVATE KEY-----`,
+	)
 	assert.Nil(t, err)
 
 	email := "email@gmail.com"

@@ -2,7 +2,6 @@ package orm
 
 import (
 	"database/sql"
-	"fmt"
 
 	goMysql "github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -204,7 +203,6 @@ func ConvertDBLevelErr(err error) (error, bool) {
 			return ErrDuplicatedKey, true
 		}
 	} else if errors.As(err, &mysqlErr) {
-		fmt.Println("york here2 ")
 		if mysqlErr.Number == 1062 {
 			return ErrDuplicatedKey, true
 		}

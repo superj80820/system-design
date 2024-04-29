@@ -2,8 +2,8 @@ package mysql
 
 import (
 	"fmt"
-	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -32,12 +32,12 @@ type authRepo struct {
 	refreshTokenKey *ecdsa.PrivateKey
 }
 
-func CreateAuthRepo(db *ormKit.DB, accessTokenKeyPath, refreshTokenKeyPath string) (domain.AuthRepo, error) {
-	accessTokenKey, err := parsePemKey(accessTokenKeyPath)
+func CreateAuthRepo(db *ormKit.DB, accessTokenKeyRawData, refreshTokenKeyRawData string) (domain.AuthRepo, error) {
+	accessTokenKey, err := parsePemKey(accessTokenKeyRawData)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse pem key failed")
 	}
-	refreshTokenKey, err := parsePemKey(refreshTokenKeyPath)
+	refreshTokenKey, err := parsePemKey(refreshTokenKeyRawData)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse pem key failed")
 	}
@@ -189,16 +189,12 @@ func verifyToken(token *jwt.Token) (bool, error) {
 	return false, errors.New("get claims failed")
 }
 
-func parsePemKey(path string) (*ecdsa.PrivateKey, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, errors.Wrap(err, "read file failed")
-	}
-	blk, _ := pem.Decode(data) // TODO: check rest
+func parsePemKey(rawData string) (*ecdsa.PrivateKey, error) {
+	formatRawData := strings.ReplaceAll(rawData, "\\n", "\n")
+	blk, _ := pem.Decode([]byte(formatRawData)) // TODO: check rest
 	token, err := x509.ParseECPrivateKey(blk.Bytes)
 	if err != nil {
 		return nil, errors.Wrap(err, "parse private key failed")
 	}
-
 	return token, err
 }

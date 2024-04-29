@@ -415,7 +415,7 @@ func main() {
 	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
-	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel)
+	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel, loggerKit.WithRotateLog(10, 10, 10))
 	if err != nil {
 		panic(err)
 	}

@@ -1,11 +1,13 @@
 package domain
 
 type FaceSearch struct {
-	SearchResults []struct {
-		Confidence float64 `json:"confidence"`
-		UserID     string  `json:"user_id"`
-		FaceToken  string  `json:"face_token"`
-	} `json:"results"`
+	SearchResults []*FaceSearchResults `json:"results"`
+}
+
+type FaceSearchResults struct {
+	Confidence float64 `json:"confidence"`
+	UserID     string  `json:"user_id"`
+	FaceToken  string  `json:"face_token"`
 }
 
 type FaceDetect struct {
@@ -56,6 +58,6 @@ type FacePlusPlusRepo interface {
 
 type FacePlusPlusUseCase interface {
 	SearchAllFaceSets(image []byte) (*FaceSearch, error)
-	Add(faceTokens []string) (*FaceAdd, error)
+	Add(faceTokens []string) (faceSetToken string, err error)
 	Detect(image []byte) (*FaceDetect, error)
 }

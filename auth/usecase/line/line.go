@@ -89,3 +89,64 @@ func (a *authLineUseCase) VerifyCode(code, redirectURI string) (*domain.Account,
 		RefreshToken: signedRefreshToken,
 	}, lineUserProfile, nil
 }
+
+func (a *authLineUseCase) VerifyLIFFToken(token string) (*domain.Account, *domain.LineUserProfile, error) {
+	lineVerifyToken, err := a.lineLoginAPIRepo.VerifyToken(token)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "verify liff token failed")
+	}
+	var userID int64
+	lineUserProfile, err := a.lineUserRepo.Get(lineVerifyToken.Sub)
+	if errors.Is(err, domain.ErrNoData) {
+		userInformation, err := a.accountRepo.Create(utilKit.GetSnowflakeIDString(), utilKit.GetSnowflakeIDString()) // TODO: utilKit.GetSnowflakeIDString() workaround
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "create user failed")
+		}
+		userID = userInformation.ID
+		lineUserProfile, err = a.lineUserRepo.Create(strconv.FormatInt(userInformation.ID, 10), lineVerifyToken.Sub, lineVerifyToken.Name, lineVerifyToken.Picture)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "create line user profile failed")
+		}
+	} else if err != nil {
+		return nil, nil, errors.Wrap(err, "verify liff token failed")
+	} else {
+		userID, err = strconv.ParseInt(lineUserProfile.UserID, 10, 64)
+		if err != nil {
+			return nil, nil, errors.Wrap(err, "parse int failed")
+		}
+	}
+
+	now := time.Now()
+
+	refreshTokenExpireAt := now.Add(time.Hour * 12)
+	signedRefreshToken, err := a.authRepo.GenerateToken(
+		strconv.FormatInt(userID, 10),
+		now,
+		refreshTokenExpireAt,
+	)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "signed refresh token failed")
+	}
+
+	accessTokenExpireAt := now.Add(time.Hour * 1)
+	signedAccessToken, err := a.authRepo.GenerateToken(
+		strconv.FormatInt(userID, 10),
+		now,
+		accessTokenExpireAt,
+	)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "signed refresh token failed")
+	}
+
+	_, err = a.authRepo.CreateToken(userID, signedRefreshToken, refreshTokenExpireAt, domain.REFRESH_TOKEN)
+	if err != nil {
+		return nil, nil, errors.Wrap(err, "save refresh token failed")
+	}
+
+	return &domain.Account{
+		ID:           userID,
+		Email:        lineVerifyToken.Email,
+		AccessToken:  signedAccessToken,
+		RefreshToken: signedRefreshToken,
+	}, lineUserProfile, nil
+}

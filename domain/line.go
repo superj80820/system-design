@@ -49,10 +49,6 @@ type LineMessageAPIRepo interface {
 	GetImage(imageID string) ([]byte, error)
 }
 
-type LineLIFFAPIRepo interface {
-	VerifyLIFF(liffID, accessToken string) error
-}
-
 type LineLoginAPIRepo interface {
 	IssueAccessToken(code, redirectURI string) (*LineIssueAccessToken, error)
 	VerifyToken(accessToken string) (*LineVerifyToken, error)
@@ -71,8 +67,4 @@ type LineTemplateRepo interface {
 type LineResponseOK struct {
 	Status  int    `json:"status"`
 	Message string `json:"message"`
-}
-
-type LineLIFFUseCase interface {
-	VerifyLIFF(liffID, accessToken string) error
 }

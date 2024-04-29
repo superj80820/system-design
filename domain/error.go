@@ -11,4 +11,8 @@ var (
 	ErrDuplicate   = errors.New("duplicate")
 	ErrExpired     = errors.New("expired")
 	ErrRateLimit   = errors.New("rate limit")
+
+	ErrNormalContinue  = errors.New("normal continue")
+	ErrWarningContinue = errors.New("warning continue")
+	ErrPanicContinue   = errors.New("panic continue")
 )

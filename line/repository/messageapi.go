@@ -86,8 +86,3 @@ func (l *lineMessageAPIRepo) GetImage(imageID string) ([]byte, error) {
 
 	return body, nil
 }
-
-// VerifyLIFF implements domain.LineAPIRepo.
-func (l *lineNotifyAPIRepo) VerifyLIFF(liffID, accessToken string) error {
-	panic("unimplemented")
-}

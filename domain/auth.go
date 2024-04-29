@@ -52,6 +52,7 @@ type AuthUseCase interface {
 
 type AuthLineUseCase interface {
 	VerifyCode(code, redirectURI string) (*Account, *LineUserProfile, error)
+	VerifyLIFFToken(token string) (*Account, *LineUserProfile, error)
 }
 
 type AuthServiceRepo interface {

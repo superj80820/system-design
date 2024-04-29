@@ -48,7 +48,7 @@ type ActressRepo interface {
 	GetFacesByStatus(status FaceStatus) ([]*Face, error)
 	GetFacesByActressID(actressID string) ([]*Face, error)
 	RemoveFace(faceID int) error
-	SetFaceStatus(faceID int, status FaceStatus) error
+	SetFaceStatus(faceID int, faceSetToken string, status FaceStatus) error
 	GetActressByName(name string) (*Actress, error)
 	SetActressPreview(actressID, previewURL string) error
 	GetWish() (*Actress, error)
