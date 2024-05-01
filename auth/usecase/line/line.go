@@ -42,17 +42,14 @@ func (a *authLineUseCase) VerifyCode(code, redirectURI string) (*domain.Account,
 			return nil, nil, errors.Wrap(err, "create user failed")
 		}
 		userID = userInformation.ID
-		lineUserProfile, err = a.lineUserRepo.Create(strconv.FormatInt(userInformation.ID, 10), lineVerifyToken.Sub, lineVerifyToken.Name, lineVerifyToken.Picture)
+		lineUserProfile, err = a.lineUserRepo.Create(userInformation.ID, lineVerifyToken.Sub, lineVerifyToken.Name, lineVerifyToken.Picture)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "create line user profile failed")
 		}
 	} else if err != nil {
 		return nil, nil, errors.Wrap(err, "verify line code failed")
 	} else {
-		userID, err = strconv.ParseInt(lineUserProfile.UserID, 10, 64)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "parse int failed")
-		}
+		userID = lineUserProfile.UserID
 	}
 
 	now := time.Now()
@@ -103,17 +100,14 @@ func (a *authLineUseCase) VerifyLIFFToken(token string) (*domain.Account, *domai
 			return nil, nil, errors.Wrap(err, "create user failed")
 		}
 		userID = userInformation.ID
-		lineUserProfile, err = a.lineUserRepo.Create(strconv.FormatInt(userInformation.ID, 10), lineVerifyToken.Sub, lineVerifyToken.Name, lineVerifyToken.Picture)
+		lineUserProfile, err = a.lineUserRepo.Create(userInformation.ID, lineVerifyToken.Sub, lineVerifyToken.Name, lineVerifyToken.Picture)
 		if err != nil {
 			return nil, nil, errors.Wrap(err, "create line user profile failed")
 		}
 	} else if err != nil {
 		return nil, nil, errors.Wrap(err, "verify liff token failed")
 	} else {
-		userID, err = strconv.ParseInt(lineUserProfile.UserID, 10, 64)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "parse int failed")
-		}
+		userID = lineUserProfile.UserID
 	}
 
 	now := time.Now()

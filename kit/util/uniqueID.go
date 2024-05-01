@@ -2,6 +2,7 @@ package util
 
 import (
 	"github.com/bwmarrin/snowflake"
+	"github.com/google/uuid"
 	"github.com/jxskiss/base62"
 	"github.com/pkg/errors"
 )
@@ -60,4 +61,9 @@ func GetSnowflakeIDInt64() int64 {
 
 func GetSnowflakeIDString() string {
 	return singletonSnowflakeNode.Generate().String()
+}
+
+func GetUUIDString() string {
+	id := uuid.New()
+	return id.String()
 }

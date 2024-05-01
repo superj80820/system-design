@@ -62,6 +62,7 @@ type ActressUseCase interface {
 	GetFavorites(userID string) ([]*Actress, error)
 	AddFavorite(userID, actressID string) (err error)
 	RemoveFavorite(userID, actressID string) error
+	SearchActressByFace(faceImage []byte) ([]*Actress, error)
 }
 
 type ActressLineUseCase interface {

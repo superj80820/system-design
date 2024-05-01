@@ -33,7 +33,7 @@ type LineUserInformation struct {
 }
 
 type LineUserProfile struct {
-	UserID      string `json:"user_id"`
+	UserID      int64  `json:"user_id"`
 	LineUserID  string `json:"line_user_id"`
 	DisplayName string `json:"display_name"`
 	PictureURL  string `json:"picture_url"`
@@ -56,7 +56,7 @@ type LineLoginAPIRepo interface {
 
 type LineUserRepo interface {
 	Get(lineUserID string) (*LineUserProfile, error)
-	Create(userID, lineUserID, DisplayName, PictureURL string) (*LineUserProfile, error)
+	Create(userID int64, lineUserID, DisplayName, PictureURL string) (*LineUserProfile, error)
 }
 
 type LineTemplateRepo interface {

@@ -21,12 +21,12 @@ func CreateLineUserRepo(orm *ormKit.DB) domain.LineUserRepo {
 	}
 }
 
-func (l *lineUserRepo) Create(userID, lineUserID string, displayName string, pictureURL string) (*domain.LineUserProfile, error) {
+func (l *lineUserRepo) Create(userID int64, lineUserID string, displayName string, pictureURL string) (*domain.LineUserProfile, error) {
 	// INSERT INTO line_profile (id,user_id,line_id,display_name,picture_url,created_at,updated_at) VALUES (id,user_id,line_id,display_name,picture_url,createdat,updatedat);
 	builder := sq.
 		Insert("line_profile").
 		Columns("id", "user_id", "line_id", "display_name", "picture_url", "created_at", "updated_at").
-		Values(utilKit.GetSnowflakeIDInt64(), userID, lineUserID, displayName, pictureURL, time.Now(), time.Now())
+		Values(utilKit.GetUUIDString(), userID, lineUserID, displayName, pictureURL, time.Now(), time.Now()) // TODO: WORKAROUND: change id to snowflake form uuid
 	sql, args, err := builder.ToSql()
 	if err != nil {
 		return nil, errors.Wrap(err, "to sql failed")
