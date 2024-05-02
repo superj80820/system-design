@@ -27,3 +27,5 @@ instrumenting/cache-data
 *.env
 *.log
 *.DS_Store
+*/**/db-data
+*/**/dump

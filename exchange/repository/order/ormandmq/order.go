@@ -29,7 +29,7 @@ func CreateOrderRepo(orm *ormKit.DB, orderMQTopic mq.MQTopic) domain.OrderRepo {
 func (o *orderRepo) GetHistoryOrder(userID int, orderID int) (*domain.OrderEntity, error) {
 	var order domain.OrderEntity
 	err := o.orm.Table(o.tableName).Where("id = ?", orderID).First(&order).Error
-	if mySQLErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mySQLErr, ormKit.ErrRecordNotFound) {
+	if mySQLErr, ok := ormKit.ConvertDBLevelErr(err); ok && errors.Is(mySQLErr, ormKit.ErrRecordNotFound) {
 		return nil, errors.Wrap(domain.ErrNoOrder, fmt.Sprintf("error call stack: %+v", err))
 	} else if err != nil {
 		return nil, errors.Wrap(err, "query order failed")

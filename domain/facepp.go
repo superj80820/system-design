@@ -56,6 +56,14 @@ type FacePlusPlusRepo interface {
 	IsFaceSetFull(faceSetID string) (bool, error)
 }
 
+type FacePlusPlusWorkPoolUseCase interface {
+	Search(faceSetID string, image []byte) (*FaceSearch, error)
+	Add(faceSetID string, faceTokens []string) (*FaceAdd, error)
+	Detect(image []byte) (*FaceDetect, error)
+	GetFaceSetDetail(faceSetID string) (*FaceSetDetail, error)
+	IsFaceSetFull(faceSetID string) (bool, error)
+}
+
 type FacePlusPlusUseCase interface {
 	SearchAllFaceSets(image []byte) (*FaceSearch, error)
 	Add(faceTokens []string) (faceSetToken string, err error)

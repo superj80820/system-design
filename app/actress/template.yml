@@ -1,0 +1,216 @@
+wish: |
+  {
+    "type": "flex",
+    "altText": "天使已出現～",
+    "contents": {
+      "type": "carousel",
+      "contents": "^$"
+    }
+  }
+wish_content: |
+  {
+    "type": "bubble",
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [
+                {
+                  "type": "image",
+                  "url": "^$",
+                  "aspectMode": "cover",
+                  "size": "full"
+                }
+              ],
+              "cornerRadius": "100px",
+              "width": "130px",
+              "height": "130px"
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [
+                {
+                  "type": "text",
+                  "contents": [
+                    {
+                      "type": "span",
+                      "text": "許起來！",
+                      "size": "sm"
+                    }
+                  ],
+                  "size": "sm",
+                  "wrap": true
+                },
+                {
+                  "type": "box",
+                  "layout": "baseline",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "^$",
+                      "size": "xl"
+                    }
+                  ],
+                  "spacing": "sm",
+                  "margin": "md"
+                },
+                {
+                  "type": "text",
+                  "text": "希望有幫你找到",
+                  "color": "#a9a9a9",
+                  "size": "sm"
+                }
+              ]
+            }
+          ],
+          "spacing": "xl",
+          "paddingAll": "20px"
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "button",
+              "action": {
+                "type": "uri",
+                "label": "點我看資料",
+                "uri": "^$"
+              },
+              "color": "#ff334b"
+            }
+          ]
+        }
+      ],
+      "paddingAll": "0px"
+    }
+  }
+recognition: |
+  {
+    "type": "flex",
+    "altText": "辨識完成！請查看～",
+    "contents": {
+      "type": "carousel",
+      "contents": "^$"
+    }
+  }
+recognition_content: |
+  {
+    "type": "bubble",
+    "body": {
+      "type": "box",
+      "layout": "vertical",
+      "contents": [
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [
+                {
+                  "type": "image",
+                  "url": "^$",
+                  "aspectMode": "cover",
+                  "size": "full"
+                }
+              ],
+              "cornerRadius": "100px",
+              "width": "130px",
+              "height": "130px"
+            },
+            {
+              "type": "box",
+              "layout": "vertical",
+              "contents": [
+                {
+                  "type": "text",
+                  "contents": [
+                    {
+                      "type": "span",
+                      "text": "我猜可能是 :",
+                      "size": "sm"
+                    }
+                  ],
+                  "size": "sm",
+                  "wrap": true
+                },
+                {
+                  "type": "box",
+                  "layout": "baseline",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "^$",
+                      "size": "xl"
+                    }
+                  ],
+                  "spacing": "sm",
+                  "margin": "md"
+                },
+                {
+                  "type": "text",
+                  "text": "^$",
+                  "color": "#a9a9a9",
+                  "size": "sm"
+                },
+                {
+                  "type": "text",
+                  "text": "相似度 :",
+                  "offsetTop": "25px"
+                },
+                {
+                  "type": "box",
+                  "layout": "vertical",
+                  "contents": [
+                    {
+                      "type": "text",
+                      "text": "^$",
+                      "color": "#ffffff",
+                      "align": "center",
+                      "size": "md",
+                      "offsetTop": "2px"
+                    }
+                  ],
+                  "position": "absolute",
+                  "cornerRadius": "100px",
+                  "offsetTop": "100px",
+                  "backgroundColor": "#ff334b",
+                  "offsetStart": "60px",
+                  "height": "25px",
+                  "width": "53px"
+                }
+              ]
+            }
+          ],
+          "spacing": "xl",
+          "paddingAll": "20px"
+        },
+        {
+          "type": "box",
+          "layout": "horizontal",
+          "contents": [
+            {
+              "type": "button",
+              "action": {
+                "type": "uri",
+                "label": "點我看資料",
+                "uri": "^$"
+              },
+              "color": "#ff334b"
+            }
+          ]
+        }
+      ],
+      "paddingAll": "0px"
+    }
+  }

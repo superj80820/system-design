@@ -70,6 +70,7 @@ import (
 )
 
 func main() {
+	utilKit.LoadEnvFile(".env")
 	serviceName := utilKit.GetEnvString("SERVICE_NAME", "exchange-service")
 	enableHTTPS := utilKit.GetEnvBool("ENABLE_HTTPS", false)
 	httpsCertFilePath := utilKit.GetEnvString("HTTPS_CERT_FILE_PATH", "./fullchain.pem")
@@ -101,8 +102,8 @@ func main() {
 	autoPreviewTradingMaxQuantity := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MAX_ORDER_QUANTITY", 2)
 	autoPreviewTradingMinQuantity := utilKit.GetEnvFloat64("AUTO_PREVIEW_TRADING_MIN_ORDER_QUANTITY", 1)
 	enablePprofServer := utilKit.GetEnvBool("ENABLE_PPROF_SERVER", false)
-	accessTokenKeyPath := utilKit.GetEnvString("ACCESS_TOKEN_KEY_PATH", "./access-private-key.pem")
-	refreshTokenKeyPath := utilKit.GetEnvString("REFRESH_TOKEN_KEY_PATH", "./refresh-private-key.pem")
+	accessTokenKey := utilKit.GetRequireEnvString("ACCESS_TOKEN_KEY")
+	refreshTokenKey := utilKit.GetRequireEnvString("REFRESH_TOKEN_KEY")
 	baseCurrency := utilKit.GetEnvString("CURRENCY_BASE", "BTC")
 	quoteCurrency := utilKit.GetEnvString("CURRENCY_QUOTE", "USDT")
 	currencyProduct := domain.CurrencyProduct{
@@ -401,12 +402,12 @@ func main() {
 		tradingEventMQTopic = memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
 		l2OrderBookMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
 
-		assetNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		tickNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		matchingNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		candleNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		l2OrderBookNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		orderNotifyMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		assetNotifyMQTopic = assetMQTopic
+		tickNotifyMQTopic = tickMQTopic
+		matchingNotifyMQTopic = matchingMQTopic
+		candleNotifyMQTopic = candleMQTopic
+		l2OrderBookNotifyMQTopic = l2OrderBookMQTopic
+		orderNotifyMQTopic = orderMQTopic
 	}
 
 	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
@@ -480,7 +481,10 @@ func main() {
 	candleNotifyRepo := candleRepoRedis.CreateCandleNotifyRepo(candleNotifyMQTopic)
 
 	accountRepo := accountMySQLRepo.CreateAccountRepo(ormDB)
-	authRepo := authMySQLRepo.CreateAuthRepo(ormDB)
+	authRepo, err := authMySQLRepo.CreateAuthRepo(ormDB, accessTokenKey, refreshTokenKey)
+	if err != nil {
+		panic(err)
+	}
 
 	tradingSequencerUseCase := sequencer.CreateTradingSequencerUseCase(sequencerRepo, tradingRepo)
 	currencyUseCase := currency.CreateCurrencyUseCase(&currencyProduct)
@@ -499,7 +503,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	authUseCase, err := auth.CreateAuthUseCase(accessTokenKeyPath, refreshTokenKeyPath, authRepo, accountRepo, logger)
+	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
 	if err != nil {
 		panic(err)
 	}

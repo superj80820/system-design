@@ -115,7 +115,7 @@ func (s *sequencerRepo) SequenceAndSave(sequenceEvents []*domain.SequencerEvent,
 	}
 
 	err = s.SaveEvents(sequenceEvents)
-	if mysqlErr, ok := ormKit.ConvertMySQLErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
+	if mysqlErr, ok := ormKit.ConvertDBLevelErr(err); ok && errors.Is(mysqlErr, ormKit.ErrDuplicatedKey) {
 		return nil, errors.Wrap(domain.ErrDuplicate, "save duplicate event")
 	} else if err != nil {
 		return nil, errors.Wrap(err, "save event failed")
