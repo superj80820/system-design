@@ -14,10 +14,11 @@ import (
 )
 
 type actressCrawlerUseCase struct {
-	logger              loggerKit.Logger
-	actressCrawlerRepo  domain.ActressCrawlerRepo
-	actressRepo         domain.ActressRepo
-	facePlusPlusUseCase domain.FacePlusPlusUseCase
+	logger                     loggerKit.Logger
+	actressCrawlerRepo         domain.ActressCrawlerRepo
+	actressRepo                domain.ActressRepo
+	facePlusPlusUseCase        domain.FacePlusPlusUseCase
+	actressReverseIndexUseCase domain.ActressReverseIndexUseCase
 
 	enableAddFace   bool
 	enableBindFace  bool
@@ -29,19 +30,20 @@ type actressCrawlerUseCase struct {
 	err             error
 }
 
-func CreateActressCrawlerUseCase(ctx context.Context, logger loggerKit.Logger, actressCrawlerRepo domain.ActressCrawlerRepo, actressRepo domain.ActressRepo, facePlusPlusUseCase domain.FacePlusPlusUseCase, crawlerLimit int, enableAddFace, enableBindFace bool, crawlerStartPage int) domain.ActressCrawlerUseCase {
+func CreateActressCrawlerUseCase(ctx context.Context, logger loggerKit.Logger, actressCrawlerRepo domain.ActressCrawlerRepo, actressRepo domain.ActressRepo, facePlusPlusUseCase domain.FacePlusPlusUseCase, actressReverseIndexUseCase domain.ActressReverseIndexUseCase, crawlerLimit int, enableAddFace, enableBindFace bool, crawlerStartPage int) domain.ActressCrawlerUseCase {
 	a := &actressCrawlerUseCase{
-		logger:              logger,
-		actressCrawlerRepo:  actressCrawlerRepo,
-		actressRepo:         actressRepo,
-		facePlusPlusUseCase: facePlusPlusUseCase,
-		crawlerPage:         crawlerStartPage,
-		crawlerLimit:        crawlerLimit,
-		faceAreaPercent:     0.1,
-		errLock:             new(sync.Mutex),
-		doneCh:              make(chan struct{}),
-		enableAddFace:       enableAddFace,
-		enableBindFace:      enableBindFace,
+		logger:                     logger,
+		actressCrawlerRepo:         actressCrawlerRepo,
+		actressRepo:                actressRepo,
+		facePlusPlusUseCase:        facePlusPlusUseCase,
+		actressReverseIndexUseCase: actressReverseIndexUseCase,
+		crawlerPage:                crawlerStartPage,
+		crawlerLimit:               crawlerLimit,
+		faceAreaPercent:            0.1,
+		errLock:                    new(sync.Mutex),
+		doneCh:                     make(chan struct{}),
+		enableAddFace:              enableAddFace,
+		enableBindFace:             enableBindFace,
 	}
 	return a
 }
@@ -124,6 +126,7 @@ func (a *actressCrawlerUseCase) createActressAndFace() error {
 				if err != nil {
 					return errors.Wrap(err, "add actress failed")
 				}
+				a.actressReverseIndexUseCase.AddData(actressCrawlerData.ActressName, actressID)
 			} else if err != nil {
 				return errors.Wrap(err, "get actress failed")
 			} else {

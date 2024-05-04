@@ -3,56 +3,36 @@ package actress
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
 	"github.com/superj80820/system-design/kit/code"
-	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type actressUseCase struct {
-	reverseIndex        *utilKit.ReverseIndex
-	actressRepository   domain.ActressRepo
-	facePlusPlusUseCase domain.FacePlusPlusUseCase
+	actressReverseIndexUseCase domain.ActressReverseIndexUseCase
+	actressRepository          domain.ActressRepo
+	facePlusPlusUseCase        domain.FacePlusPlusUseCase
 }
 
 func (a *actressUseCase) SearchActressByName(ctx context.Context, name string) ([]*domain.Actress, error) {
-	searchResult := a.reverseIndex.Search(name)
-
-	actressIDs := make([]int32, len(searchResult))
-	for idx, val := range searchResult {
-		id, err := strconv.ParseInt(*val, 10, 32)
-		if err != nil {
-			return nil, errors.Wrap(err, "string covert to int32 failed")
-		}
-		actressIDs[idx] = int32(id)
+	searchResult, err := a.actressReverseIndexUseCase.Search(name)
+	if err != nil {
+		return nil, errors.Wrap(err, "search by reverse index failed")
 	}
-	actresses, err := a.actressRepository.GetActresses(ctx, actressIDs...)
+
+	actresses, err := a.actressRepository.GetActresses(ctx, searchResult...)
 	if err != nil {
 		return nil, errors.Wrap(err, "get actresses failed")
 	}
 	return actresses, nil
 }
 
-func CreateActressUseCase(ctx context.Context, actressRepository domain.ActressRepo, facePlusPlusUseCase domain.FacePlusPlusUseCase) (domain.ActressUseCase, error) {
-	reverseIndex := utilKit.CreateReverseIndex()
-	for page := 1; ; page++ {
-		actresses, _, isEnd, err := actressRepository.GetActressesByPagination(ctx, page, 1000)
-		if err != nil {
-			return nil, errors.Wrap(err, "get actresses by pagination failed")
-		}
-		for _, val := range actresses {
-			reverseIndex.AddData(val.Name, val.ID)
-		}
-		if isEnd {
-			break
-		}
-	}
+func CreateActressUseCase(ctx context.Context, actressRepository domain.ActressRepo, actressReverseIndexUseCase domain.ActressReverseIndexUseCase, facePlusPlusUseCase domain.FacePlusPlusUseCase) (domain.ActressUseCase, error) {
 	return &actressUseCase{
-		reverseIndex:        reverseIndex,
-		actressRepository:   actressRepository,
-		facePlusPlusUseCase: facePlusPlusUseCase,
+		actressRepository:          actressRepository,
+		actressReverseIndexUseCase: actressReverseIndexUseCase,
+		facePlusPlusUseCase:        facePlusPlusUseCase,
 	}, nil
 }
 

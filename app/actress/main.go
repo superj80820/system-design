@@ -157,11 +157,15 @@ func main() {
 	facePlusPlusUseCaseHandler := facePlusPlusUseCase.CreateFacePlusPlusUseCase(facePlusPlusWorkPoolUseCase, facePlusPlusFaceSets)
 
 	actressLineUseCaseHandler := actressLineUseCase.CreateActressUseCase(actressRepoHandler, actressLineRepoHandler, lineMessageRepo, lineTemplateRepo, facePlusPlusUseCaseHandler, liffURI, logger, lineMaxReplyCount)
-	actressUseCaseHandler, err := actressUseCase.CreateActressUseCase(ctx, actressRepoHandler, facePlusPlusUseCaseHandler)
+	actressReverseIndexUseCase, err := actressUseCase.CreateActressReverseIndexUseCase(ctx, actressRepoHandler)
 	if err != nil {
 		panic(err)
 	}
-	actressCrawlerUseCaseHandler := actressCrawlerUseCase.CreateActressCrawlerUseCase(ctx, logger, actressCrawlerMinnanoRepoHandler, actressRepoHandler, facePlusPlusUseCaseHandler, 30, enableAddFace, enableBindFace, crawlerStartPage)
+	actressUseCaseHandler, err := actressUseCase.CreateActressUseCase(ctx, actressRepoHandler, actressReverseIndexUseCase, facePlusPlusUseCaseHandler)
+	if err != nil {
+		panic(err)
+	}
+	actressCrawlerUseCaseHandler := actressCrawlerUseCase.CreateActressCrawlerUseCase(ctx, logger, actressCrawlerMinnanoRepoHandler, actressRepoHandler, facePlusPlusUseCaseHandler, actressReverseIndexUseCase, 30, enableAddFace, enableBindFace, crawlerStartPage)
 	authLineUseCaseHandler := authLineUseCase.CreateAuthLineUseCase(accountRepo, lineLoginAPIRepo, lineUserRepo, authRepo)
 	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
 	if err != nil {

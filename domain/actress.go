@@ -59,6 +59,11 @@ type ActressRepo interface {
 	RemoveFavorite(userID, actressID string) error
 }
 
+type ActressReverseIndexUseCase interface {
+	AddData(actressName string, actressID string)
+	Search(actressName string) ([]int32, error)
+}
+
 type ActressUseCase interface {
 	GetActress(id string) (*Actress, error)
 	GetFavorites(userID string) ([]*Actress, error)
