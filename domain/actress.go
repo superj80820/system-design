@@ -43,6 +43,8 @@ type ActressLineRepository interface {
 type ActressRepo interface {
 	AddActress(name, preview string) (actressID string, err error)
 	GetActress(id string) (*Actress, error)
+	GetActresses(ctx context.Context, ids ...int32) ([]*Actress, error)
+	GetActressesByPagination(ctx context.Context, page, limit int) (actresses []*Actress, size int64, isEnd bool, err error)
 	AddFace(actressID, faceToken, previewURL string) (faceID string, err error)
 	GetActressByFaceToken(faceToken string) (*Actress, error)
 	GetFacesByStatus(status FaceStatus) ([]*Face, error)
@@ -63,6 +65,7 @@ type ActressUseCase interface {
 	AddFavorite(userID, actressID string) (err error)
 	RemoveFavorite(userID, actressID string) error
 	SearchActressByFace(faceImage []byte) ([]*Actress, error)
+	SearchActressByName(ctx context.Context, name string) ([]*Actress, error)
 }
 
 type ActressLineUseCase interface {

@@ -130,7 +130,10 @@ func main() {
 
 	s3Repo := awsRepo.CreateS3Repo(awsAccessKeyID, awsSecretAccessKey, dbBackupBucket, dbBackupRegion)
 	s3UseCase := awsUseCase.CreateS3UseCase(s3Repo)
-	actressRepoHandler := actressPostgresRepo.CreateActressRepo(ormDB)
+	actressRepoHandler, err := actressPostgresRepo.CreateActressRepo(ormDB)
+	if err != nil {
+		panic(err)
+	}
 	actressCrawlerMinnanoRepoHandler := actressCrawlerMinnanoRepo.CreateActressCrawlerRepo("https://www.minnano-av.com")
 	actressLineRepoHandler := actressPostgresRepo.CreateActressLineRepo(redisCache)
 	lineMessageRepo := lineRepo.CreateLineMessageRepo(lineAPIURL, lineDataAPIURL, lineMessageAPIToken)
@@ -154,7 +157,10 @@ func main() {
 	facePlusPlusUseCaseHandler := facePlusPlusUseCase.CreateFacePlusPlusUseCase(facePlusPlusWorkPoolUseCase, facePlusPlusFaceSets)
 
 	actressLineUseCaseHandler := actressLineUseCase.CreateActressUseCase(actressRepoHandler, actressLineRepoHandler, lineMessageRepo, lineTemplateRepo, facePlusPlusUseCaseHandler, liffURI, logger, lineMaxReplyCount)
-	actressUseCaseHandler := actressUseCase.CreateActressUseCase(actressRepoHandler, facePlusPlusUseCaseHandler)
+	actressUseCaseHandler, err := actressUseCase.CreateActressUseCase(ctx, actressRepoHandler, facePlusPlusUseCaseHandler)
+	if err != nil {
+		panic(err)
+	}
 	actressCrawlerUseCaseHandler := actressCrawlerUseCase.CreateActressCrawlerUseCase(ctx, logger, actressCrawlerMinnanoRepoHandler, actressRepoHandler, facePlusPlusUseCaseHandler, 30, enableAddFace, enableBindFace, crawlerStartPage)
 	authLineUseCaseHandler := authLineUseCase.CreateAuthLineUseCase(accountRepo, lineLoginAPIRepo, lineUserRepo, authRepo)
 	authUseCase, err := auth.CreateAuthUseCase(authRepo, accountRepo, logger)
@@ -196,6 +202,14 @@ func main() {
 			userRateLimitMiddleware(authMiddleware(actressDelivery.MakeGetFavoritesEndpoint(actressUseCaseHandler))),
 			actressDelivery.DecodeGetFavoritesRequest,
 			actressDelivery.EncodeGetFavoritesResponse,
+			options...,
+		),
+	)
+	api.Methods("GET").Path("/user/searchActressByName/{actressName}").Handler(
+		httptransport.NewServer(
+			userRateLimitMiddleware(authMiddleware(actressDelivery.MakeSearchActressesByNameEndpoint(actressUseCaseHandler))),
+			actressDelivery.DecodeSearchActressByNameRequests,
+			actressDelivery.EncodeSearchActressByNameResponse,
 			options...,
 		),
 	)

@@ -11,7 +11,8 @@ import (
 func TestActressRepo(t *testing.T) {
 	orm, err := ormKit.CreateDB(ormKit.UsePostgres("postgresql://postgres:postgres@0.0.0.0:5433/messfar"))
 	assert.Nil(t, err)
-	actressRepo := CreateActressRepo(orm)
+	actressRepo, err := CreateActressRepo(orm)
+	assert.Nil(t, err)
 
 	actressID, err := actressRepo.AddActress("name_"+utilKit.GetSnowflakeIDString(), "preview")
 	assert.Nil(t, err)

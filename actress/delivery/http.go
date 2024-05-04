@@ -35,11 +35,17 @@ type addFavoriteRequest struct {
 	ActressID string `json:"actress_id"`
 }
 
+type searchActressByNameRequest struct {
+	ActressName string `json:"actress_name"`
+}
+
 type removeFavoriteRequest struct {
 	ActressID string `json:"actress_id"`
 }
 
 var (
+	EncodeSearchActressByNameResponse = httpTransportKit.EncodeJsonResponse
+
 	EncodeGetActressResponse = httpTransportKit.EncodeJsonResponse
 
 	EncodeUploadSearchImageResponse = httpTransportKit.EncodeJsonResponse
@@ -61,6 +67,17 @@ func MakeGetActressEndpoint(actressUseCase domain.ActressUseCase) endpoint.Endpo
 			return nil, errors.Wrap(err, "get actress failed")
 		}
 		return actress, nil
+	}
+}
+
+func MakeSearchActressesByNameEndpoint(actressUseCase domain.ActressUseCase) endpoint.Endpoint {
+	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
+		req := request.(searchActressByNameRequest)
+		actresses, err := actressUseCase.SearchActressByName(ctx, req.ActressName)
+		if err != nil {
+			return nil, errors.Wrap(err, "get favorites failed")
+		}
+		return actresses, nil
 	}
 }
 
@@ -126,6 +143,15 @@ func DecodeGetActressRequest(ctx context.Context, r *http.Request) (interface{},
 		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get actress id failed"))
 	}
 	return getActressRequest{ActressID: actressID}, nil
+}
+
+func DecodeSearchActressByNameRequests(ctx context.Context, r *http.Request) (interface{}, error) {
+	vars := mux.Vars(r)
+	actressName, ok := vars["actressName"]
+	if !ok {
+		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get actress id failed"))
+	}
+	return searchActressByNameRequest{ActressName: actressName}, nil
 }
 
 func DecodeRemoveFavoriteRequest(ctx context.Context, r *http.Request) (interface{}, error) {

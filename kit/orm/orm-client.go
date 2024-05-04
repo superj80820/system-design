@@ -173,6 +173,14 @@ func (db *DB) Table(name string, args ...interface{}) *TX {
 	return db.gormClient.Table(name, args...)
 }
 
+func (db *DB) DB() (*sql.DB, error) {
+	originDB, err := db.gormClient.DB()
+	if err != nil {
+		return nil, errors.Wrap(err, "get origin db failed")
+	}
+	return originDB, nil
+}
+
 func (db *DB) Create(value interface{}) *TX {
 	return db.gormClient.Create(value)
 }

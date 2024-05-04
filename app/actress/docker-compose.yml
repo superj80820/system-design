@@ -1,18 +1,18 @@
 version: '3.9'
 
 services:
-  actress-service:
-    image: superj80820/actress-service
-    restart: always
-    ports:
-      - 9090:9090
-    environment:
-      TC_HOST: "host.docker.internal"
-    volumes:
-      - ./.env:/app/.env
-      - ./web:/app/web
-      - ./template.yml:/app/template.yml
-      - /var/run/docker.sock:/var/run/docker.sock
+  # actress-service:
+  #   image: superj80820/actress-service
+  #   restart: always
+  #   ports:
+  #     - 9090:9090
+  #   environment:
+  #     TC_HOST: "host.docker.internal"
+  #   volumes:
+  #     - ./.env:/app/.env
+  #     - ./web:/app/web
+  #     - ./template.yml:/app/template.yml
+  #     - /var/run/docker.sock:/var/run/docker.sock
 
   db:
     image: postgres:latest

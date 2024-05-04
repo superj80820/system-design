@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"strconv"
 	"time"
 
@@ -12,13 +13,19 @@ import (
 )
 
 type actressRepository struct {
-	orm *ormKit.DB
+	orm         *ormKit.DB
+	sqlcQueries *Queries
 }
 
-func CreateActressRepo(orm *ormKit.DB) domain.ActressRepo {
-	return &actressRepository{
-		orm: orm,
+func CreateActressRepo(orm *ormKit.DB) (domain.ActressRepo, error) {
+	originDB, err := orm.DB()
+	if err != nil {
+		return nil, errors.Wrap(err, "get origin db failed")
 	}
+	return &actressRepository{
+		orm:         orm,
+		sqlcQueries: &Queries{db: originDB},
+	}, nil
 }
 
 func (a *actressRepository) SetActressPreview(id, previewURL string) error {
@@ -309,4 +316,55 @@ func (a *actressRepository) GetFacesByActressID(actressID string) ([]*domain.Fac
 	}
 
 	return faces, nil
+}
+
+func (a *actressRepository) GetActressesByPagination(ctx context.Context, page int, limit int) ([]*domain.Actress, int64, bool, error) {
+	actressRows, err := a.sqlcQueries.GetActressesByPagination(ctx, GetActressesByPaginationParams{
+		Offset: int32((page - 1) * limit),
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return nil, 0, false, errors.Wrap(err, "get actresses by page failed")
+	}
+	size, err := a.sqlcQueries.GetActressSize(ctx)
+	if err != nil {
+		return nil, 0, false, errors.Wrap(err, "get actresses size failed")
+	}
+	actresses := make([]*domain.Actress, len(actressRows))
+	for idx, val := range actressRows {
+		actresses[idx] = &domain.Actress{
+			ID:           strconv.FormatInt(val.ID, 10),
+			Name:         val.Name.String,
+			Preview:      val.Preview.String,
+			Detail:       val.Detail.String,
+			Romanization: val.Romanization.String,
+			CreatedAt:    val.CreatedAt.Time,
+			UpdatedAt:    val.UpdatedAt.Time,
+		}
+	}
+	var isEnd bool
+	if int64((page-1)*limit+limit) >= size {
+		isEnd = true
+	}
+	return actresses, size, isEnd, nil
+}
+
+func (a *actressRepository) GetActresses(ctx context.Context, ids ...int32) ([]*domain.Actress, error) {
+	actressRows, err := a.sqlcQueries.GetActressesByIDs(ctx, ids)
+	if err != nil {
+		return nil, errors.Wrap(err, "get actresses by ids failed")
+	}
+	actresses := make([]*domain.Actress, len(actressRows))
+	for idx, val := range actressRows {
+		actresses[idx] = &domain.Actress{
+			ID:           strconv.FormatInt(val.ID, 10),
+			Name:         val.Name.String,
+			Preview:      val.Preview.String,
+			Detail:       val.Detail.String,
+			Romanization: val.Romanization.String,
+			CreatedAt:    val.CreatedAt.Time,
+			UpdatedAt:    val.UpdatedAt.Time,
+		}
+	}
+	return actresses, nil
 }
