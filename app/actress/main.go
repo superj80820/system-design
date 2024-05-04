@@ -266,7 +266,9 @@ func main() {
 		),
 	)
 
-	r.PathPrefix("/search").Handler(http.StripPrefix("/search", http.FileServer(http.Dir("./web/"))))
+	r.PathPrefix("/login").Handler(http.StripPrefix("/login", http.FileServer(http.Dir("./web/"))))
+	r.PathPrefix("/imageSearch").Handler(http.StripPrefix("/imageSearch", http.FileServer(http.Dir("./web/"))))
+	r.PathPrefix("/nameSearch").Handler(http.StripPrefix("/nameSearch", http.FileServer(http.Dir("./web/"))))
 	r.PathPrefix("/favorite").Handler(http.StripPrefix("/favorite", http.FileServer(http.Dir("./web/"))))
 	r.PathPrefix("/").Handler(http.StripPrefix("/", http.FileServer(http.Dir("./web/"))))
 
