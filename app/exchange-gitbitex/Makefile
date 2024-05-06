@@ -19,4 +19,4 @@ push-docker:
 run-docker:
 	docker run --always -p 9090:9090 -v /var/run/docker.sock:/var/run/docker.sock superj80820/exchange-gitbitex
 run-preview-docker:
-	while true; do docker-compose restart; sleep 3600; done
+	while true; do docker-compose restart; sleep 600; done
