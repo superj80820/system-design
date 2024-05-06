@@ -3,6 +3,7 @@ package actress
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/pkg/errors"
 	"github.com/superj80820/system-design/domain"
@@ -81,6 +82,7 @@ func (a *actressUseCase) SearchActressByFace(faceImage []byte) ([]*domain.Actres
 			return nil, errors.Wrap(err, "get actress by face token failed")
 		}
 		actresses[idx] = actress
+		actresses[idx].Romanization = strconv.Itoa(int(searchResult.Confidence)) + "%"
 	}
 	return actresses, nil
 }
