@@ -10,8 +10,7 @@ import (
 )
 
 type actressReverseIndexUseCase struct {
-	reverseIndex      *utilKit.ReverseIndex
-	actressRepository domain.ActressRepo
+	reverseIndex *utilKit.ReverseIndex
 }
 
 func (a *actressReverseIndexUseCase) AddData(actressName string, actressID string) {

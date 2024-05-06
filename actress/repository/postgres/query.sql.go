@@ -23,7 +23,7 @@ func (q *Queries) GetActressSize(ctx context.Context) (int64, error) {
 }
 
 const getActressesByIDs = `-- name: GetActressesByIDs :many
-SELECT id, name, romanization, detail, preview, created_at, updated_at FROM actresses WHERE id = ANY($1::int[])
+SELECT id, name, romanization, detail, preview, created_at, updated_at FROM actresses WHERE id = ANY($1::int[]) ORDER BY id DESC
 `
 
 func (q *Queries) GetActressesByIDs(ctx context.Context, dollar_1 []int32) ([]Actress, error) {
@@ -58,7 +58,7 @@ func (q *Queries) GetActressesByIDs(ctx context.Context, dollar_1 []int32) ([]Ac
 }
 
 const getActressesByPagination = `-- name: GetActressesByPagination :many
-SELECT id, name, romanization, detail, preview, created_at, updated_at FROM actresses ORDER BY updated_at DESC OFFSET $1 LIMIT $2
+SELECT id, name, romanization, detail, preview, created_at, updated_at FROM actresses OFFSET $1 LIMIT $2
 `
 
 type GetActressesByPaginationParams struct {
