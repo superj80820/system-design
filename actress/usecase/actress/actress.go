@@ -16,8 +16,8 @@ type actressUseCase struct {
 	facePlusPlusUseCase        domain.FacePlusPlusUseCase
 }
 
-func (a *actressUseCase) SearchActressByName(ctx context.Context, name string) ([]*domain.Actress, error) {
-	searchResult, err := a.actressReverseIndexUseCase.Search(name)
+func (a *actressUseCase) SearchActressByNamePagination(ctx context.Context, name string, page, limit uint) (*domain.ActressWithPagination, error) {
+	searchResult, total, isEnd, err := a.actressReverseIndexUseCase.SearchWithPagination(name, page, limit)
 	if err != nil {
 		return nil, errors.Wrap(err, "search by reverse index failed")
 	}
@@ -26,7 +26,13 @@ func (a *actressUseCase) SearchActressByName(ctx context.Context, name string) (
 	if err != nil {
 		return nil, errors.Wrap(err, "get actresses failed")
 	}
-	return actresses, nil
+	return &domain.ActressWithPagination{
+		IsEnd:     isEnd,
+		Total:     total,
+		Page:      page,
+		Limit:     limit,
+		Actresses: actresses,
+	}, nil
 }
 
 func CreateActressUseCase(ctx context.Context, actressRepository domain.ActressRepo, actressReverseIndexUseCase domain.ActressReverseIndexUseCase, facePlusPlusUseCase domain.FacePlusPlusUseCase) (domain.ActressUseCase, error) {
@@ -55,8 +61,8 @@ func (a *actressUseCase) GetActress(id string) (*domain.Actress, error) {
 	return actress, nil
 }
 
-func (a *actressUseCase) GetFavorites(userID string) ([]*domain.Actress, error) {
-	favorites, err := a.actressRepository.GetFavorites(userID)
+func (a *actressUseCase) GetFavoritesPagination(ctx context.Context, userID string, page, limit uint) (*domain.ActressWithPagination, error) {
+	favorites, err := a.actressRepository.GetFavoritesPagination(ctx, userID, page, limit)
 	if err != nil {
 		return nil, errors.Wrap(err, "add favorite failed")
 	}

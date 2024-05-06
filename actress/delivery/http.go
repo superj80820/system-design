@@ -14,6 +14,7 @@ import (
 	"github.com/superj80820/system-design/kit/code"
 	httpKit "github.com/superj80820/system-design/kit/http"
 	httpTransportKit "github.com/superj80820/system-design/kit/http/transport"
+	utilKit "github.com/superj80820/system-design/kit/util"
 )
 
 type getActressRequest struct {
@@ -36,6 +37,14 @@ type addFavoriteRequest struct {
 }
 
 type searchActressByNameRequest struct {
+	Page        uint   `json:"page"`
+	Limit       uint   `json:"limit"`
+	ActressName string `json:"actress_name"`
+}
+
+type getFavoritesRequest struct {
+	Page        uint   `json:"page"`
+	Limit       uint   `json:"limit"`
 	ActressName string `json:"actress_name"`
 }
 
@@ -50,7 +59,6 @@ var (
 
 	EncodeUploadSearchImageResponse = httpTransportKit.EncodeJsonResponse
 
-	DecodeGetFavoritesRequest  = httpTransportKit.DecodeEmptyRequest
 	EncodeGetFavoritesResponse = httpTransportKit.EncodeJsonResponse
 
 	DecodeAddFavoriteRequest   = httpTransportKit.DecodeJsonRequest[addFavoriteRequest]
@@ -73,7 +81,7 @@ func MakeGetActressEndpoint(actressUseCase domain.ActressUseCase) endpoint.Endpo
 func MakeSearchActressesByNameEndpoint(actressUseCase domain.ActressUseCase) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (response interface{}, err error) {
 		req := request.(searchActressByNameRequest)
-		actresses, err := actressUseCase.SearchActressByName(ctx, req.ActressName)
+		actresses, err := actressUseCase.SearchActressByNamePagination(ctx, req.ActressName, req.Page, req.Limit)
 		if err != nil {
 			return nil, errors.Wrap(err, "get favorites failed")
 		}
@@ -87,7 +95,8 @@ func MakeGetFavoritesEndpoint(actressUseCase domain.ActressUseCase) endpoint.End
 		if userID == 0 {
 			return nil, errors.New("not found user id")
 		}
-		favorites, err := actressUseCase.GetFavorites(strconv.Itoa(userID))
+		req := request.(getFavoritesRequest)
+		favorites, err := actressUseCase.GetFavoritesPagination(ctx, strconv.Itoa(userID), req.Page, req.Limit)
 		if err != nil {
 			return nil, errors.Wrap(err, "get favorites failed")
 		}
@@ -151,7 +160,33 @@ func DecodeSearchActressByNameRequests(ctx context.Context, r *http.Request) (in
 	if !ok {
 		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get actress id failed"))
 	}
-	return searchActressByNameRequest{ActressName: actressName}, nil
+	var page uint = 1
+	pageQueryString := r.URL.Query().Get("page")
+	if pageQueryString != "" {
+		pageQueryUINT64, err := strconv.ParseUint(pageQueryString, 10, 64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("page format error"))
+		}
+		pageQueryUINT, err := utilKit.SafeUint64ToUint(pageQueryUINT64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("page to big error"))
+		}
+		page = pageQueryUINT
+	}
+	var limit uint = 10
+	limitQueryString := r.URL.Query().Get("limit")
+	if limitQueryString != "" {
+		limitQueryUINT64, err := strconv.ParseUint(limitQueryString, 10, 64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("limit format error"))
+		}
+		limitQueryUINT, err := utilKit.SafeUint64ToUint(limitQueryUINT64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("limit to big error"))
+		}
+		limit = limitQueryUINT
+	}
+	return searchActressByNameRequest{ActressName: actressName, Page: page, Limit: limit}, nil
 }
 
 func DecodeRemoveFavoriteRequest(ctx context.Context, r *http.Request) (interface{}, error) {
@@ -161,6 +196,36 @@ func DecodeRemoveFavoriteRequest(ctx context.Context, r *http.Request) (interfac
 		return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("get actress id failed"))
 	}
 	return removeFavoriteRequest{ActressID: actressID}, nil
+}
+
+func DecodeGetFavoritesRequest(ctx context.Context, r *http.Request) (interface{}, error) {
+	var page uint = 1
+	pageQueryString := r.URL.Query().Get("page")
+	if pageQueryString != "" {
+		pageQueryUINT64, err := strconv.ParseUint(pageQueryString, 10, 64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("page format error"))
+		}
+		pageQueryUINT, err := utilKit.SafeUint64ToUint(pageQueryUINT64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("page to big error"))
+		}
+		page = pageQueryUINT
+	}
+	var limit uint = 10
+	limitQueryString := r.URL.Query().Get("limit")
+	if limitQueryString != "" {
+		limitQueryUINT64, err := strconv.ParseUint(limitQueryString, 10, 64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("limit format error"))
+		}
+		limitQueryUINT, err := utilKit.SafeUint64ToUint(limitQueryUINT64)
+		if err != nil {
+			return nil, code.CreateErrorCode(http.StatusBadRequest).AddErrorMetaData(errors.New("limit to big error"))
+		}
+		limit = limitQueryUINT
+	}
+	return getFavoritesRequest{Page: page, Limit: limit}, nil
 }
 
 func DecodeUploadSearchImageRequest(ctx context.Context, r *http.Request) (interface{}, error) {

@@ -20,3 +20,10 @@ func SafeUint64ToInt(value uint64) (int, error) {
 	}
 	return int(value), nil
 }
+
+func SafeUint64ToUint(value uint64) (uint, error) {
+	if value > uint64(math.MaxUint) {
+		return 0, errors.New(fmt.Sprintf("value %d is out of int range", value))
+	}
+	return uint(value), nil
+}

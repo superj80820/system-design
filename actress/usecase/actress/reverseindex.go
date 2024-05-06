@@ -30,6 +30,23 @@ func (a *actressReverseIndexUseCase) Search(actressName string) ([]int32, error)
 	return actressIDs, nil
 }
 
+func (a *actressReverseIndexUseCase) SearchWithPagination(actressName string, page, limit uint) ([]int32, uint, bool, error) {
+	searchResult, total := a.reverseIndex.SearchWithPagination(actressName, page, limit)
+	actressIDs := make([]int32, len(searchResult))
+	for idx, val := range searchResult {
+		id, err := strconv.ParseInt(*val, 10, 32)
+		if err != nil {
+			return nil, 0, false, errors.Wrap(err, "string covert to int32 failed")
+		}
+		actressIDs[idx] = int32(id)
+	}
+	var isEnd bool
+	if limit*(page) >= total {
+		isEnd = true
+	}
+	return actressIDs, total, isEnd, nil
+}
+
 func CreateActressReverseIndexUseCase(ctx context.Context, actressRepository domain.ActressRepo) (domain.ActressReverseIndexUseCase, error) {
 	a := &actressReverseIndexUseCase{
 		reverseIndex: utilKit.CreateReverseIndex(),

@@ -11,7 +11,7 @@ import (
 type AccountFavoriteActress struct {
 	ID        string
 	ActressID sql.NullInt64
-	AccountID int64
+	AccountID sql.NullInt64
 	CreatedAt sql.NullTime
 	UpdatedAt sql.NullTime
 }

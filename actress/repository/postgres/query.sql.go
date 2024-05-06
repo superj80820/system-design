@@ -7,6 +7,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/lib/pq"
 )
@@ -68,6 +69,58 @@ type GetActressesByPaginationParams struct {
 
 func (q *Queries) GetActressesByPagination(ctx context.Context, arg GetActressesByPaginationParams) ([]Actress, error) {
 	rows, err := q.db.QueryContext(ctx, getActressesByPagination, arg.Offset, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Actress
+	for rows.Next() {
+		var i Actress
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Romanization,
+			&i.Detail,
+			&i.Preview,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getFavoriteSize = `-- name: GetFavoriteSize :one
+SELECT COUNT(*) FROM actresses WHERE id IN (SELECT actress_id FROM account_favorite_actresses WHERE account_id = $1)
+`
+
+func (q *Queries) GetFavoriteSize(ctx context.Context, accountID sql.NullInt64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getFavoriteSize, accountID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const getFavoritesByPagination = `-- name: GetFavoritesByPagination :many
+SELECT id, name, romanization, detail, preview, created_at, updated_at FROM actresses WHERE id IN (SELECT actress_id FROM account_favorite_actresses WHERE account_id = $1) OFFSET $2 LIMIT $3
+`
+
+type GetFavoritesByPaginationParams struct {
+	AccountID sql.NullInt64
+	Offset    int32
+	Limit     int32
+}
+
+func (q *Queries) GetFavoritesByPagination(ctx context.Context, arg GetFavoritesByPaginationParams) ([]Actress, error) {
+	rows, err := q.db.QueryContext(ctx, getFavoritesByPagination, arg.AccountID, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

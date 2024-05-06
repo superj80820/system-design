@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"strconv"
 	"time"
 
@@ -112,22 +113,52 @@ func (a *actressRepository) AddFavorite(userID, actressID string) error {
 	return nil
 }
 
-func (a *actressRepository) GetFavorites(userID string) ([]*domain.Actress, error) {
-	// SELECT * FROM actresses WHERE id IN (SELECT actress_id FROM account_favorite_actresses WHERE account_id = account_id);
-	builder := sq.
-		Select("*").
-		From("actresses").
-		Where("id IN (SELECT actress_id FROM account_favorite_actresses WHERE account_id = ?)", userID)
-	sql, args, err := builder.ToSql()
+func (a *actressRepository) GetFavoritesPagination(ctx context.Context, userID string, page, limit uint) (*domain.ActressWithPagination, error) {
+	userIDInt64, err := strconv.ParseInt(userID, 10, 64)
 	if err != nil {
-		return nil, errors.Wrap(err, "to sql failed")
+		return nil, errors.Wrap(err, "parse int failed")
 	}
-	var actresses []*domain.Actress
-	queryResult := a.orm.Table("actresses").Raw(sql, args...).Scan(&actresses)
-	if err := queryResult.Error; err != nil {
-		return nil, errors.Wrap(err, "query failed")
+	actressRows, err := a.sqlcQueries.GetFavoritesByPagination(ctx, GetFavoritesByPaginationParams{
+		AccountID: sql.NullInt64{
+			Int64: userIDInt64,
+			Valid: true,
+		},
+		Offset: int32((page - 1) * limit),
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "get favorite actresses failed")
 	}
-	return actresses, nil
+	total, err := a.sqlcQueries.GetFavoriteSize(ctx, sql.NullInt64{
+		Int64: userIDInt64,
+		Valid: true,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "get favorites size failed")
+	}
+	actresses := make([]*domain.Actress, len(actressRows))
+	for idx, val := range actressRows {
+		actresses[idx] = &domain.Actress{
+			ID:           strconv.FormatInt(val.ID, 10),
+			Name:         val.Name.String,
+			Preview:      val.Preview.String,
+			Detail:       val.Detail.String,
+			Romanization: val.Romanization.String,
+			CreatedAt:    val.CreatedAt.Time,
+			UpdatedAt:    val.UpdatedAt.Time,
+		}
+	}
+	var isEnd bool
+	if int64((page)*limit) >= total {
+		isEnd = true
+	}
+	return &domain.ActressWithPagination{
+		IsEnd:     isEnd,
+		Total:     uint(total),
+		Page:      page,
+		Limit:     limit,
+		Actresses: actresses,
+	}, nil
 }
 
 func (a *actressRepository) RemoveFavorite(userID, actressID string) error {
@@ -343,7 +374,7 @@ func (a *actressRepository) GetActressesByPagination(ctx context.Context, page i
 		}
 	}
 	var isEnd bool
-	if int64((page-1)*limit+limit) >= size {
+	if int64((page)*limit) >= size {
 		isEnd = true
 	}
 	return actresses, size, isEnd, nil

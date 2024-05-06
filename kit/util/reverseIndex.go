@@ -52,6 +52,16 @@ func (r *ReverseIndex) Search(value string) []*string {
 	return r.hashTable[value]
 }
 
+func (r *ReverseIndex) SearchWithPagination(value string, page, limit uint) ([]*string, uint) {
+	allData := r.hashTable[value]
+	end := (page-1)*limit + limit - 1
+	if end > uint(len(allData)-1) {
+		end = uint(len(allData) - 1)
+	}
+	allDataWithPagination := allData[(page-1)*limit : end]
+	return allDataWithPagination, uint(len(allData))
+}
+
 func (r *ReverseIndex) FuzzSearch(value string) []*string {
 	data := []rune(value)
 	res := listMap{

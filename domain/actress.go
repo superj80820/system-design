@@ -15,6 +15,14 @@ type Actress struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type ActressWithPagination struct {
+	IsEnd     bool       `json:"is_end"`
+	Total     uint       `json:"total"`
+	Page      uint       `json:"page"`
+	Limit     uint       `json:"limit"`
+	Actresses []*Actress `json:"actresses"`
+}
+
 type FaceStatus int
 
 const (
@@ -54,7 +62,7 @@ type ActressRepo interface {
 	GetActressByName(name string) (*Actress, error)
 	SetActressPreview(actressID, previewURL string) error
 	GetWish() (*Actress, error)
-	GetFavorites(userID string) ([]*Actress, error)
+	GetFavoritesPagination(ctx context.Context, userID string, page, limit uint) (*ActressWithPagination, error)
 	AddFavorite(userID, actressID string) error
 	RemoveFavorite(userID, actressID string) error
 }
@@ -62,15 +70,16 @@ type ActressRepo interface {
 type ActressReverseIndexUseCase interface {
 	AddData(actressName string, actressID string)
 	Search(actressName string) ([]int32, error)
+	SearchWithPagination(actressName string, page, limit uint) (allData []int32, total uint, isEnd bool, err error)
 }
 
 type ActressUseCase interface {
 	GetActress(id string) (*Actress, error)
-	GetFavorites(userID string) ([]*Actress, error)
+	GetFavoritesPagination(ctx context.Context, userID string, page, limit uint) (*ActressWithPagination, error)
 	AddFavorite(userID, actressID string) (err error)
 	RemoveFavorite(userID, actressID string) error
 	SearchActressByFace(faceImage []byte) ([]*Actress, error)
-	SearchActressByName(ctx context.Context, name string) ([]*Actress, error)
+	SearchActressByNamePagination(ctx context.Context, name string, page, limit uint) (*ActressWithPagination, error)
 }
 
 type ActressLineUseCase interface {
