@@ -38,7 +38,7 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 ### 教學
 
-Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#f3f6d329435d4bceb50ec37bb4c36984)
+請參閱部落格[文章](https://blog.messfar.com/page/system-design/#clean-architecture)
 
 ### Q&A
 
@@ -69,7 +69,7 @@ Clean Architecture的細節介紹可看我寫的此教學[文章](https://blog.m
 
 ### 教學
 
-`Sequence 定序模組`、`Asset 資產模組`、`Order 訂單模組`、`Matching 撮合模組`、`Clearing 清算模組`如何設計的教學，撰寫於我的部落格[文章](https://blog.messfar.com/golang-%E7%B3%BB%E7%B5%B1%E8%A8%AD%E8%A8%88#378531212808413583831bc7c0b8cbe1)
+`Sequence 定序模組`、`Asset 資產模組`、`Order 訂單模組`、`Matching 撮合模組`、`Clearing 清算模組`如何設計的教學，請參閱部落格[文章](https://blog.messfar.com/page/system-design/)
 
 ### 運行
 

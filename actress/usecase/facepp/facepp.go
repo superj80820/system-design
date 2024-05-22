@@ -92,32 +92,41 @@ func ifGreaterZeroThenSleep(duration time.Duration) {
 }
 
 func mergeKSortedByDesc(allFaceSetsSearchInformation []*domain.FaceSearch) *domain.FaceSearch {
-	faceSearchInformation := new(domain.FaceSearch)
-	for _, item := range allFaceSetsSearchInformation {
-		faceSearchInformation = mergeByDesc(faceSearchInformation, item)
+	for len(allFaceSetsSearchInformation) > 1 {
+		var mergeLists []*domain.FaceSearch
+		for i := 0; i < len(allFaceSetsSearchInformation); i += 2 {
+			var list1, list2 []*domain.FaceSearchResults
+			list1 = allFaceSetsSearchInformation[i].SearchResults
+			if i+1 < len(allFaceSetsSearchInformation) {
+				list2 = allFaceSetsSearchInformation[i+1].SearchResults
+			}
+			mergeLists = append(mergeLists, &domain.FaceSearch{
+				SearchResults: mergeByDesc(list1, list2),
+			})
+		}
+		allFaceSetsSearchInformation = mergeLists
 	}
-	return faceSearchInformation
+	return allFaceSetsSearchInformation[0]
 }
 
-func mergeByDesc(left, right *domain.FaceSearch) *domain.FaceSearch {
-	res := new(domain.FaceSearch)
-	res.SearchResults = make([]*domain.FaceSearchResults, 0, len(left.SearchResults)+len(right.SearchResults))
+func mergeByDesc(left, right []*domain.FaceSearchResults) []*domain.FaceSearchResults {
+	res := make([]*domain.FaceSearchResults, 0, len(left)+len(right))
 	var i, j int
 
-	for i < len(left.SearchResults) && j < len(right.SearchResults) {
-		if left.SearchResults[i].Confidence >= right.SearchResults[j].Confidence {
-			res.SearchResults = append(res.SearchResults, left.SearchResults[i])
+	for i < len(left) && j < len(right) {
+		if left[i].Confidence >= right[j].Confidence {
+			res = append(res, left[i])
 			i++
 		} else {
-			res.SearchResults = append(res.SearchResults, right.SearchResults[j])
+			res = append(res, right[j])
 			j++
 		}
 	}
 
-	if i < len(left.SearchResults) {
-		res.SearchResults = append(res.SearchResults, left.SearchResults[i:]...)
-	} else if j < len(right.SearchResults) {
-		res.SearchResults = append(res.SearchResults, right.SearchResults[j:]...)
+	if i < len(left) {
+		res = append(res, left[i:]...)
+	} else if j < len(right) {
+		res = append(res, right[j:]...)
 	}
 
 	return res

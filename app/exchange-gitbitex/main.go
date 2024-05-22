@@ -118,6 +118,11 @@ func main() {
 		BaseScale:      6,
 		QuoteScale:     2,
 	}
+	largeChannelBuffer := utilKit.GetEnvInt("LARGE_CHANNEL_BUFFER", 100000)
+	normalChannelBuffer := utilKit.GetEnvInt("NORMAL_CHANNEL_BUFFER", 10000)
+	quickMessageCollectDuration := utilKit.GetEnvInt("QUICK_MESSAGE_COLLECT_DURATION", 100)
+	normalMessageCollectDurationInt := utilKit.GetEnvInt("NORMAL_MESSAGE_COLLECT_DURATION", 500)
+	normalMessageCollectDuration := time.Duration(normalMessageCollectDurationInt) * time.Millisecond
 
 	ctx := context.Background()
 
@@ -190,8 +195,6 @@ func main() {
 		Options: options.Index().SetUnique(true),
 	})
 
-	messageChannelBuffer := 10000
-	messageCollectDuration := 500 * time.Millisecond
 	var (
 		sequenceMQTopic,
 		assetMQTopic,
@@ -216,8 +219,8 @@ func main() {
 			kafkaURI,
 			sequenceTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+sequenceTopicName, true),
-			100000,
-			messageCollectDuration,
+			largeChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -228,8 +231,8 @@ func main() {
 			kafkaURI,
 			tradingEventTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tradingEventTopicName, true),
-			100000,
-			messageCollectDuration,
+			largeChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -240,8 +243,8 @@ func main() {
 			kafkaURI,
 			assetTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+assetTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -252,8 +255,8 @@ func main() {
 			kafkaURI,
 			tickTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tickTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -264,8 +267,8 @@ func main() {
 			kafkaURI,
 			matchingTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+matchingTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -276,8 +279,8 @@ func main() {
 			kafkaURI,
 			l2OrderBookTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+l2OrderBookTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -288,8 +291,8 @@ func main() {
 			kafkaURI,
 			orderTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+orderTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -300,8 +303,8 @@ func main() {
 			kafkaURI,
 			candleTradingResultTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTradingResultTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -312,8 +315,8 @@ func main() {
 			kafkaURI,
 			candleTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTopicName, true),
-			messageChannelBuffer,
-			messageCollectDuration,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 			kafkaMQKit.CreateTopic(1, 1),
 		)
 		if err != nil {
@@ -325,8 +328,8 @@ func main() {
 			kafkaURI,
 			assetTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+assetTopicName+":NOTIFY", true),
-			100,
-			500*time.Millisecond,
+			quickMessageCollectDuration,
+			normalMessageCollectDuration,
 			kafkaMQKit.UseRingBuffer(),
 		)
 		if err != nil {
@@ -337,8 +340,8 @@ func main() {
 			kafkaURI,
 			tickTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+tickTopicName+":NOTIFY", true),
-			100,
-			500*time.Millisecond,
+			quickMessageCollectDuration,
+			normalMessageCollectDuration,
 			kafkaMQKit.UseRingBuffer(),
 		)
 		if err != nil {
@@ -349,8 +352,8 @@ func main() {
 			kafkaURI,
 			matchingTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+matchingTopicName+":NOTIFY", true),
-			100,
-			500*time.Millisecond,
+			quickMessageCollectDuration,
+			normalMessageCollectDuration,
 			kafkaMQKit.UseRingBuffer(), // TODO: think
 		)
 		if err != nil {
@@ -361,8 +364,8 @@ func main() {
 			kafkaURI,
 			l2OrderBookTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+l2OrderBookTopicName+":NOTIFY", true),
-			100,
-			500*time.Millisecond,
+			quickMessageCollectDuration,
+			normalMessageCollectDuration,
 			kafkaMQKit.UseRingBuffer(),
 		)
 		if err != nil {
@@ -373,8 +376,8 @@ func main() {
 			kafkaURI,
 			orderTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+orderTopicName+":NOTIFY", true),
-			100,
-			500*time.Millisecond,
+			quickMessageCollectDuration,
+			normalMessageCollectDuration,
 			kafkaMQKit.UseRingBuffer(), // TODO: think
 		)
 		if err != nil {
@@ -385,22 +388,22 @@ func main() {
 			kafkaURI,
 			candleTopicName,
 			kafkaMQKit.ConsumeByGroupID(serviceName+":"+candleTopicName+":NOTIFY", true),
-			10000,
-			500*time.Millisecond,
+			normalChannelBuffer,
+			normalMessageCollectDuration,
 		)
 		if err != nil {
 			panic(err)
 		}
 	} else {
-		sequenceMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		assetMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		tickMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		matchingMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		orderMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		candleMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		candleTradingResultMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-		tradingEventMQTopic = memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
-		l2OrderBookMQTopic = memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+		sequenceMQTopic = memoryMQKit.CreateMemoryMQ(ctx, largeChannelBuffer, normalMessageCollectDuration)
+		tradingEventMQTopic = memoryMQKit.CreateMemoryMQ(ctx, largeChannelBuffer, normalMessageCollectDuration)
+		assetMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		tickMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		matchingMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		orderMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		candleMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		candleTradingResultMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+		l2OrderBookMQTopic = memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
 
 		assetNotifyMQTopic = assetMQTopic
 		tickNotifyMQTopic = tickMQTopic
@@ -410,11 +413,10 @@ func main() {
 		orderNotifyMQTopic = orderMQTopic
 	}
 
-	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, 100000, messageCollectDuration)
-
-	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
-	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, messageChannelBuffer, messageCollectDuration)
+	tradingResultMQTopic := memoryMQKit.CreateMemoryMQ(ctx, largeChannelBuffer, normalMessageCollectDuration)
+	orderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+	l1OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
+	l3OrderBookMQTopic := memoryMQKit.CreateMemoryMQ(ctx, normalChannelBuffer, normalMessageCollectDuration)
 
 	logger, err := loggerKit.NewLogger("./go.log", loggerKit.InfoLevel, loggerKit.WithRotateLog(10, 10, 10))
 	if err != nil {
