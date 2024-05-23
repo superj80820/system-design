@@ -26,8 +26,6 @@
 
 依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) Clean Architecture，每個 domain 依 repository、usecase、delivery 三層設計
 
-
-
 切出每個 domain 的邊界，此 monorepo 可先以 monolithic 部署，如果未來有 horizontal scaling 需求，再以 domain 來 deliver 給不同 microservice，避免一開始就使用 microservice 過度設計。
 
 * repository: 可輕鬆替換底層。repository 使用 mq 時，可採用`kit/mq/kafka`或`kit/mq/memory`，以應付不同場景或減低測試成本
@@ -53,7 +51,11 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 ![](./doc/exchange-arch.png)
 
-後端[exchange](https://github.com/superj80820/system-design/tree/master/exchange)與開源前端[gitbitex-web](https://github.com/gitbitex/gitbitex-web)整合
+source code:
+* [backend](https://github.com/superj80820/system-design/tree/master/exchange)
+* [frontend-gitbitex-web(open source)](https://github.com/gitbitex/gitbitex-web)
+
+---
 
 * 預覽網頁(❗僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
 * 可達到 100,000PRS。撮合引擎以記憶體計算
