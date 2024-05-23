@@ -1,11 +1,5 @@
 # system-design
 
-## clean-architecture
-
-![](https://raw.githubusercontent.com/bxcodec/go-clean-arch/master/clean-arch.png)
-
-依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) Clean Architecture，每個 domain 依 repository、usecase、delivery 三層設計
-
 ```
 .
 ├── app: 實際啟動的server
@@ -26,6 +20,14 @@
 └── instrumenting: prometheus、grafana、opentelemetry、logger等基礎建設
 ```
 
+## clean-architecture
+
+![](https://raw.githubusercontent.com/bxcodec/go-clean-arch/master/clean-arch.png)
+
+依照[go-clean-arch-v3](https://github.com/bxcodec/go-clean-arch/tree/v3) Clean Architecture，每個 domain 依 repository、usecase、delivery 三層設計
+
+
+
 切出每個 domain 的邊界，此 monorepo 可先以 monolithic 部署，如果未來有 horizontal scaling 需求，再以 domain 來 deliver 給不同 microservice，避免一開始就使用 microservice 過度設計。
 
 * repository: 可輕鬆替換底層。repository 使用 mq 時，可採用`kit/mq/kafka`或`kit/mq/memory`，以應付不同場景或減低測試成本
@@ -38,7 +40,9 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 ### 教學
 
-請參閱部落格[文章](https://blog.messfar.com/page/system-design/#clean-architecture)
+* [你的 Backend 可以更有彈性一點 - Clean Architecture 概念篇](https://blog.messfar.com/post/k8s-note/k8s-note-clean-architecture-part1)
+* [奔放的 Golang，卻隱藏著有紀律的架構！ - Clean Architecture 實作篇](https://blog.messfar.com/post/k8s-note/k8s-note-clean-architecture-part2)
+* [讓你的 Backend 萬物皆虛，萬事皆可測 - Clean Architecture 測試篇](https://blog.messfar.com/post/k8s-note/k8s-note-clean-architecture-part3)
 
 ### Q&A
 
@@ -49,7 +53,7 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 ![](./doc/exchange-arch.png)
 
-將後端[exchange domain](https://github.com/superj80820/system-design/tree/master/exchange)與開源前端[gitbitex-web](https://github.com/gitbitex/gitbitex-web)串接
+後端[exchange](https://github.com/superj80820/system-design/tree/master/exchange)與開源前端[gitbitex-web](https://github.com/gitbitex/gitbitex-web)整合
 
 * 預覽網頁(❗僅用最低效能運行預覽，不是 production 運作規格): https://preview.exchange.messfar.com
 * 可達到 100,000PRS。撮合引擎以記憶體計算
@@ -69,7 +73,13 @@ reuse 方便，application 可以從 DIP 不同 domain，來完成產品需求�
 
 ### 教學
 
-`Sequence 定序模組`、`Asset 資產模組`、`Order 訂單模組`、`Matching 撮合模組`、`Clearing 清算模組`如何設計的教學，請參閱部落格[文章](https://blog.messfar.com/page/system-design/)
+1. [如何設計一個撮合系統](https://blog.messfar.com/post/system-design/system-design-1-architecture)
+2. [Sequence 定序模組](https://blog.messfar.com/post/system-design/system-design-2-sequence)
+3. [Asset 資產模組](https://blog.messfar.com/post/system-design/system-design-3-asset)
+4. [Order 訂單模組](https://blog.messfar.com/post/system-design/system-design-4-order)
+5. [Matching 撮合模組](https://blog.messfar.com/post/system-design/system-design-5-matching)
+6. [Clearing 清算模組](https://blog.messfar.com/post/system-design/system-design-6-clearing)
+7. [整合撮合系統](https://blog.messfar.com/post/system-design/system-design-7-integration)
 
 ### 運行
 
